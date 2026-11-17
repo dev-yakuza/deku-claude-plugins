@@ -153,7 +153,28 @@ DEP_FAILURE_RES = (
 )
 
 
-def dependency_failure(raw, rc=None):
-    """True when a red run's output carries a dependency-resolution/download signature."""
-    raw = raw or ""
+PROGRESS_RE = re.compile(r"^\d\d:\d\d \+\d+(?: ~\d+)?(?: -\d+)?: (.*?)(?: \[E\])?\s*$")
+
+
+def load_phase_text(raw):
+    """The output of the LOADING/COMPILING phase: text before the first test progress line, plus
+    every `… loading <file> [E]` failure block (flutter). A failing test BODY's block is excluded."""
+    out, cur_load, seen_progress = [], None, False
+    for ln in (raw or "").split("\n"):
+        m = PROGRESS_RE.match(ln)
+        if m:
+            seen_progress = True
+            cur_load = m.group(1).startswith("loading ") and ln.rstrip().endswith("[E]")
+            if cur_load:
+                out.append(ln)
+            continue
+        if not seen_progress or cur_load:
+            out.append(ln)
+    return "\n".join(out)
+
+
+def dependency_failure(raw, rc=None, load_only=False):
+    """True when a red run's output carries a dependency-resolution/download signature — with
+    `load_only`, only in the loading/compiling phase (K2r7-M2)."""
+    raw = load_phase_text(raw) if load_only else (raw or "")
     return any(rx.search(raw) for rx in DEP_FAILURE_RES)

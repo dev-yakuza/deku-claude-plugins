@@ -53,11 +53,11 @@ class Port(object):
         except (IOError, OSError):
             return None
 
-    def warm(self, base, tree):
+    def warm(self, base, tree, inspect=None):
         """ports.warm_in_place: the tree is a PRISTINE checkout of <base>; engine-written test, deps proxy (K2r4-M1)."""
         from workflows.dev.ports import warm_in_place
         t0 = time.time()
-        r, px = warm_in_place(self.root, tree, self.run_dir, self.env, extra_roots=self.extra_roots)
+        r, px = warm_in_place(self.root, tree, self.run_dir, self.env, extra_roots=self.extra_roots, inspect=inspect)
         self.calls.append({"cmd": "warm-up(base)", "rc": r.rc if r else None, "secs": round(time.time() - t0, 1),
                            "proxy": px, "tail": CH.redact_lines(r.raw[-600:]) if r else None})
         return r

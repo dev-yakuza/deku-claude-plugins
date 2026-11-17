@@ -84,6 +84,7 @@ def main(argv=None):
                              extra_roots=[os.path.abspath(a.repo)])
         summ = CH.parse_summary(r.raw, "flutter")
         row.update(secs=round(time.time() - t1, 1), rc=r.rc, passed=r.passed, warm=r.warm,
+                   warm_detail=getattr(r, "warm_detail", None),
                    tree_kb=getattr(r, "tree_kb", None), ignored_copied=r.ignored_copied,
                    build_inputs=getattr(r, "build_inputs", None), build_inputs_changed=getattr(r, "build_inputs_changed", None),
                    summary=summ.as_dict() if summ else None, missing_ignored=r.missing_ignored,

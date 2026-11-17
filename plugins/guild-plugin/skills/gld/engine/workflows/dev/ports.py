@@ -24,6 +24,7 @@ from guildcore.roles import settings as S
 from guildcore.roles.result import RESULT_SCHEMAS
 from guildcore.checks import visual as V
 from workflows.dev import effective as EFF
+from workflows.dev import preflight as PF
 from workflows.dev.stages.base import Ports
 
 WARMUP_DART = ("import 'package:flutter_test/flutter_test.dart';\n\n"
@@ -83,14 +84,17 @@ MISSING_ASSET_RE = re.compile(r"No file or variants found for asset: ([^\s]+?)\.
 WARMUP_DIR = "guild_engine_warmup"           # outside test/: no test/flutter_test_config.dart wraps it
 
 
-def warm_in_place(root, tree, run_dir, env, issue=None, proxy_hosts=None, extra_roots=()):
+def warm_in_place(root, tree, run_dir, env, issue=None, proxy_hosts=None, extra_roots=(), inspect=None):
     """K2r4-M1: the networked warm-up NEVER runs the developer's tree. `tree` holds a PRISTINE
     checkout of `<base>` (reviewed code, no ignored file, no `.git`): `pub get` + an ENGINE-written
     empty test (in a new dir outside `test/`) under the deps proxy, in `tree_sandbox`. The caller
     has classified the build inputs (`effective.build_inputs`): `none` → this is <base> and the
     caller then moves it to HEAD (`TempTree.advance`); `hosted-deps` → this is the HEAD copy (only
     hosted third-party package hooks run; no test config exists at its root). The warm-up dir and any
-    placeholder are removed. Returns (CheckResult|None, proxy summary)."""
+    placeholder are removed. With `inspect` (the HEAD copy, K2r7-M1) the warm-up is split: `pub get`
+    ALONE (resolves, runs no hook and no test) → `inspect(tree)` on the resolved graph → a reason
+    stops here (`r.halt`, nothing else runs) → only then the empty test. Returns (CheckResult|None,
+    proxy summary); the result also carries `proxy` (K2r7-m1)."""
     import shutil
     if not os.path.exists(os.path.join(tree, "pubspec.yaml")):
         return None, {}
@@ -105,8 +109,22 @@ def warm_in_place(root, tree, run_dir, env, issue=None, proxy_hosts=None, extra_
     try:
         sb = tree_sandbox(tree, run_dir, root, issue, extra_roots)
         tmp = os.path.join(run_dir, "tmp")
-        r, px = CH.deps_step(["flutter pub get", "flutter test --no-pub %s" % rel], tree, sb, tmp,
-                             env=env, hosts=proxy_hosts)
+        if inspect is None:
+            r, px = CH.deps_step(["flutter pub get", "flutter test --no-pub %s" % rel], tree, sb, tmp,
+                                 env=env, hosts=proxy_hosts)
+        else:
+            r, px = CH.deps_step(["flutter pub get"], tree, sb, tmp, env=env, hosts=proxy_hosts)
+            r.proxy = px
+            if not r.passed:
+                return r, px
+            why = inspect(tree)
+            if why:
+                r = CH.CheckResult(False, None, False, "resolved graph: %s\n" % why, r.steps, r.ceiling_s)
+                r.halt, r.proxy = why, px
+                return r, px
+            r, px2 = CH.deps_step(["flutter test --no-pub %s" % rel], tree, sb, tmp, env=env, hosts=proxy_hosts)
+            for k, v in px2.items():
+                px[k] = px.get(k, 0) + v if isinstance(v, int) else v
         # a pristine checkout lacks the git-ignored ASSETS pubspec lists (word_app: assets/data.db),
         # and the asset bundle is built before the hooks. The engine writes EMPTY placeholders
         # (never an original: this step has the network) and retries, at most twice.
@@ -128,6 +146,7 @@ def warm_in_place(root, tree, run_dir, env, issue=None, proxy_hosts=None, extra_
                 px[k] = px.get(k, 0) + v if isinstance(v, int) else v
         if placeholders:
             px = dict(px, placeholders=placeholders)
+        r.proxy = px
         return r, px
     finally:
         shutil.rmtree(wdir, True)
@@ -140,6 +159,18 @@ def warm_in_place(root, tree, run_dir, env, issue=None, proxy_hosts=None, extra_
                 os.remove(os.path.join(tree, n))
             except OSError:
                 pass
+
+
+def safety_net(r, info, has_base=True):
+    """K2r7-M2: a red offline suite becomes `halted: env build-inputs-changed` only when the
+    dependency state is in doubt — build inputs changed, OR the warm-up failed/was skipped (no base
+    included), OR the dependency signature shows up while LOADING/COMPILING (before any test body
+    runs). A `SocketException` inside a running test is an ordinary test failure."""
+    if r.passed:
+        return False
+    doubt = (info.get("build_inputs") not in (None, "none")) or \
+        (info.get("warm") or "").startswith(("failed", "skipped")) or not has_base
+    return PF.dependency_failure(r.raw, r.rc, load_only=not doubt)
 
 
 FLUTTER_TEST_RE = re.compile(r"^(\s*(?:fvm\s+)?flutter\s+test)(?=\s|$)")
@@ -166,8 +197,11 @@ def suite_in_tree(worktree, base, cmds, owner, timeout_s, run_dir, env, copy_lis
     import shutil
     from workflows.dev import preflight as PF
 
-    def _warm(b, tree):
-        r, _px = warm_in_place(worktree, tree, run_dir, env, issue, extra_roots=extra_roots)
+    if not base and warm:                           # K2r7-m2: the same derivation as the effective check
+        base = EFF.default_base(worktree)
+
+    def _warm(b, tree, inspect=None):
+        r, _px = warm_in_place(worktree, tree, run_dir, env, issue, extra_roots=extra_roots, inspect=inspect)
         return r
     use_warm = _warm if (warm and base) else None
     cmds = [offline_cmd(c) for c in cmds]
@@ -176,6 +210,7 @@ def suite_in_tree(worktree, base, cmds, owner, timeout_s, run_dir, env, copy_lis
             # K2r6-B1: own hooks / path-git-override deps / a test config changed → nothing runs
             r = CH.CheckResult(False, None, False, "", [], int(timeout_s))
             r.warm, r.build_inputs_changed, r.missing_ignored = info["warm"], info["build_files"], []
+            r.warm_detail, r.build_inputs = info.get("warm_detail"), info["build_inputs"]
             r.skipped_ignored, r.ignored_copied, r.tree_kb = list(tt.skipped_ignored), [], None
             return r
         sb = tree_sandbox(tt.path, run_dir, worktree, issue, extra_roots)
@@ -193,7 +228,7 @@ def suite_in_tree(worktree, base, cmds, owner, timeout_s, run_dir, env, copy_lis
         # Option A safety net (K2r6-B1): a red offline run with a dependency-resolution/download
         # signature is an environment problem, not a test failure
         r.build_inputs_changed = (info["build_files"] or ["(dependency state)"]) \
-            if (not r.passed and PF.dependency_failure(r.raw, r.rc)) else None
+            if safety_net(r, info, bool(base)) else None
         try:                                       # K2r5-m2: the per-run cost, on record
             du = subprocess.run(["du", "-sk", tt.path], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=120)
             r.tree_kb = int(du.stdout.split()[0]) if du.stdout else None
@@ -201,6 +236,7 @@ def suite_in_tree(worktree, base, cmds, owner, timeout_s, run_dir, env, copy_lis
             r.tree_kb = None
         r.raw = r.raw.replace(os.path.realpath(tt.path), worktree).replace(tt.path, worktree)
         r.warm = info["warm"] or ("skipped(no base)" if not base else None)
+        r.warm_detail = info.get("warm_detail")
         r.build_inputs = info["build_inputs"]
         r.skipped_ignored = list(tt.skipped_ignored)
         r.ignored_copied = list(tt.copied)
@@ -252,10 +288,11 @@ def live(issue, worktree, base, branch, config, clock, gh, writer, decisions, ru
         # `cwd` is the effective check's temp tree
         return _tree_run([cmd], cwd, owner, timeout_s)
 
-    def warm(base_rev, tree):
-        """The engine's own warm-up (K2r4-M1): `warm_in_place` on the pristine <base> tree."""
+    def warm(rev, tree, inspect=None):
+        """The engine's own warm-up (K2r4-M1, K2r7-M1): `warm_in_place` on the pristine tree."""
         run_dir = RR.new_run_dir(RR.run_root(worktree, issue, root_env), "check", "warmup")
-        r, _px = warm_in_place(worktree, tree, run_dir, C.child_env(root_env, {}, role_dir=run_dir), issue)
+        r, _px = warm_in_place(worktree, tree, run_dir, C.child_env(root_env, {}, role_dir=run_dir), issue,
+                               inspect=inspect)
         return r
 
     def capture(kind, stage, role, summary, evidence, area, surprise):

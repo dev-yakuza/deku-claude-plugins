@@ -1353,13 +1353,13 @@ class R6BuildInputs(unittest.TestCase):
         _commit(r, {"pubspec.yaml": PUB + "  http: ^1.2.0\n",
                     "pubspec.lock": LOCK + "  http:\n    dependency: direct main\n    source: hosted\n    version: \"1.2.0\"\n",
                     "lib/a.dart": "int f() => 2;\n"})
-        self.assertEqual(EFF.build_inputs(r, base), ("hosted-deps", ["pubspec.lock", "pubspec.yaml"]))
+        self.assertEqual(EFF.build_inputs(r, base), ("deps", ["pubspec.lock", "pubspec.yaml"]))
         h = Harness(self, fixture(), root=r, base=base)
         seen = []
 
-        def warm(rev, tree):
+        def warm(rev, tree, inspect=None):
             seen.append((rev, open(os.path.join(tree, "pubspec.yaml")).read().count("http"),
-                         open(os.path.join(tree, "lib", "a.dart")).read()))
+                         open(os.path.join(tree, "lib", "a.dart")).read(), callable(inspect)))
             return _CR(True, 0, False, "", [], 60)
         h.p.warm = warm
         h.checks = [_CR(True, 0, False, "00:01 +1: t\n00:01 +1: All tests passed!\n", [], 60),
@@ -1367,34 +1367,28 @@ class R6BuildInputs(unittest.TestCase):
                         [], 60)]
         out, meta = EFF.run(h.p, {"commands": {"test": "flutter test"}}, ["C1"],
                             {"C1": [{"test": "test/a_test.dart::t", "ac": "C1", "kind": "new"}]}, base)
-        self.assertEqual(seen, [("HEAD", 1, "int f() => 2;\n")])
+        self.assertEqual(seen, [("HEAD", 1, "int f() => 2;\n", True)])      # r7: inspected after pub get
         self.assertEqual(meta["warm"], "ok")
         self.assertEqual(out["C1"].result, "pass")
 
-    def test_non_hosted_changes_are_other(self):
-        cases = [
-            ({"pubspec.yaml": PUB + "  mine:\n    path: ../mine\n"}, None),
-            ({"pubspec.yaml": PUB + "  g:\n    git: https://x/y.git\n"}, None),
-            ({"pubspec.yaml": PUB + "dependency_overrides:\n  sqlite3: 2.1.0\n"}, None),
-            ({"pubspec.yaml": PUB + "hooks:\n  user_defines:\n    sqlite3:\n      source: system\n"}, None),
-            ({"pubspec_overrides.yaml": "x\n"}, None),
-            ({"hook/build.dart": "void main(){}\n"}, None),
-            ({"test/flutter_test_config.dart": "x\n"}, None),
-            ({"pubspec.yaml": PUB + "  http: ^1.2.0\n"}, {"hook/build.dart": "void main(){}\n"}),   # own hook at HEAD
-            ({"pubspec.yaml": PUB + "  http: ^1.2.0\n"}, {"flutter_test_config.dart": "x\n"}),   # root test config
-        ]
-        for change, base_extra in cases:
-            with self.subTest(change=sorted(change)):
+    def test_text_classification_only_separates_pubspec_from_other_inputs(self):
+        cases = [({"pubspec_overrides.yaml": "x\n"}, None, "other"),
+                 ({"hook/build.dart": "void main(){}\n"}, None, "other"),
+                 ({"test/flutter_test_config.dart": "x\n"}, None, "other"),
+                 ({"pubspec.yaml": PUB + "  http: ^1.2.0\n"}, {"hook/build.dart": "void main(){}\n"}, "other"),
+                 ({"pubspec.yaml": PUB + "  http: ^1.2.0\n"}, {"flutter_test_config.dart": "x\n"}, "other"),
+                 ({"pubspec.yaml": PUB + "  mine:\n    path: ../mine\n"}, None, "deps")]   # decided after pub get
+        for change, base_extra, want in cases:
+            with self.subTest(change=sorted(change), base=sorted(base_extra or {})):
                 r, base = self._repo(base_extra)
                 _commit(r, change)
-                self.assertEqual(EFF.build_inputs(r, base)[0], "other")
+                self.assertEqual(EFF.build_inputs(r, base)[0], want)
         self.assertEqual(EFF.build_inputs(repo(self, {"a": "x"}), None)[0], "other")     # unknown base: fail closed
-        self.assertEqual(EFF.hook_changes(repo(self, {"pubspec.yaml": "x"}), None), ["(no base)"])
 
     def test_other_halts_the_suite_and_nothing_runs(self):
         from workflows.dev import ports as PT
         r, base = self._repo()
-        _commit(r, {"pubspec.yaml": PUB + "  mine:\n    path: ../mine\n"})
+        _commit(r, {"hook/build.dart": "void main(){}\n"})
         ran = []
         orig = PT.CH.run_command
         PT.CH.run_command = lambda *a, **k: ran.append(a) or _CR(True, 0, False, "", [], 60)
@@ -1404,7 +1398,7 @@ class R6BuildInputs(unittest.TestCase):
             PT.CH.run_command = orig
         self.assertEqual(ran, [])
         self.assertFalse(res.passed)
-        self.assertEqual(res.build_inputs_changed, ["pubspec.yaml"])
+        self.assertEqual(res.build_inputs_changed, ["hook/build.dart"])
         self.assertTrue(res.warm.startswith("skipped(build-inputs-changed"))
 
     def test_stage_env_halts_on_build_inputs_and_on_dependency_signatures(self):
@@ -1468,3 +1462,197 @@ class R6BuildInputs(unittest.TestCase):
         res = T.run(h.p)
         self.assertNotEqual(res.fail_class, "prevalidate_env")          # no preflight halt — the suite ran
         self.assertEqual(len(h.calls["suites"]), 1)
+
+
+# ---- review r7 (review-k2-r7.md) -------------------------------------------------------------------
+
+CACHE = os.path.realpath(os.environ.get("PUB_CACHE") or os.path.expanduser("~/.pub-cache"))
+
+
+def _resolved(tree, lock_pkgs, pc_pkgs):
+    """Write what `pub get` would: pubspec.lock + .dart_tool/package_config.json."""
+    lines = ["packages:"]
+    for name, src, desc in lock_pkgs:
+        lines += ["  %s:" % name, "    dependency: direct main"]
+        if isinstance(desc, dict):
+            lines.append("    description:")
+            lines += ["      %s: \"%s\"" % kv for kv in desc.items()]
+        else:
+            lines.append("    description: \"%s\"" % desc)
+        lines += ["    source: %s" % src, "    version: \"1.0.0\""]
+    with open(os.path.join(tree, "pubspec.lock"), "w") as fh:
+        fh.write("\n".join(lines) + "\n")
+    os.makedirs(os.path.join(tree, ".dart_tool"), exist_ok=True)
+    with open(os.path.join(tree, ".dart_tool", "package_config.json"), "w") as fh:
+        json.dump({"configVersion": 2, "packages": [{"name": n, "rootUri": u} for n, u in pc_pkgs]}, fh)
+
+
+HOSTED = ("http", "hosted", {"name": "http", "sha256": "x", "url": "https://pub.dev"})
+
+
+class R7ResolvedGraph(unittest.TestCase):
+    """The reviewer's probes: the pubspec TEXT may say anything; the resolved graph decides."""
+
+    def _repo(self):
+        r = repo(self, {"pubspec.yaml": PUB, "pubspec.lock": LOCK, "lib/a.dart": "int f() => 1;\n",
+                        "packages/local_tool/pubspec.yaml": "name: local_tool\n",
+                        "packages/local_tool/lib/t.dart": "int t() => 1;\n",
+                        "packages/local_tool/hook/build.dart": "void main(){}\n"})
+        return r, git(r, "rev-parse", "HEAD")
+
+    def _check(self, r, base, lock_pkgs, pc_pkgs):
+        tree = tmpdir(self)
+        EFF.materialize(r, "HEAD", tree)
+        _resolved(tree, lock_pkgs, pc_pkgs)
+        return EFF.resolved_check(tree, r, base)
+
+    def test_hosted_only_passes(self):
+        r, base = self._repo()
+        _commit(r, {"pubspec.yaml": PUB + "  http: ^1.2.0\n"})
+        self.assertIsNone(self._check(r, base, [HOSTED, ("flutter", "sdk", "flutter")],
+                                      [("app", "../"), ("http", "file://%s/hosted/pub.dev/http-1.0.0" % CACHE),
+                                       ("flutter", "file:///opt/flutter/packages/flutter")]))
+
+    def test_rename_above_path_keeps_an_identical_path_package_allowed(self):
+        r, base = self._repo()
+        _commit(r, {"pubspec.yaml": PUB + "  renamed_tool:\n    path: packages/local_tool\n"})
+        self.assertIsNone(self._check(r, base, [("renamed_tool", "path", {"path": "packages/local_tool", "relative": "true"})],
+                                      [("app", "../"), ("renamed_tool", "../packages/local_tool")]))
+
+    def test_quoted_path_key_and_changed_package_halts(self):
+        r, base = self._repo()
+        _commit(r, {"pubspec.yaml": PUB + '  evil: {"path": packages/local_tool}\n',
+                    "packages/local_tool/lib/t.dart": "int t() => 2;\n"})
+        why = self._check(r, base, [("evil", "path", {"path": "packages/local_tool", "relative": "true"})],
+                          [("app", "../"), ("evil", "../packages/local_tool")])
+        self.assertIn("path package packages/local_tool changed since base", why)
+
+    def test_git_dependency_new_halts(self):
+        r, base = self._repo()
+        _commit(r, {"pubspec.yaml": PUB + '  e:\n    "git": {"url": https://github.com/attacker/evil}\n'})
+        why = self._check(r, base, [("e", "git", {"url": "https://github.com/attacker/evil", "ref": "HEAD",
+                                                  "resolved-ref": "abc", "path": "."})],
+                          [("app", "../"), ("e", "file://%s/git/evil-abc" % CACHE)])
+        self.assertIn("e: git dependency new or changed since base", why)
+
+    def test_hosted_shorthand_to_another_server_halts(self):
+        r, base = self._repo()
+        _commit(r, {"pubspec.yaml": PUB + "  x:\n    hosted: https://evil.example\n    version: ^1.0.0\n"})
+        why = self._check(r, base, [("x", "hosted", {"name": "x", "sha256": "y", "url": "https://evil.example"})],
+                          [("app", "../"), ("x", "file://%s/hosted/evil.example/x-1.0.0" % CACHE)])
+        self.assertIn("non-pub.dev server", why)
+
+    def test_workspace_member_changed_halts_identical_passes(self):
+        r, base = self._repo()
+        _commit(r, {"pubspec.yaml": PUB + "workspace:\n  - packages/local_tool\n"})
+        pc = [("app", "../"), ("local_tool", "../packages/local_tool")]
+        self.assertIsNone(self._check(r, base, [], pc))
+        _commit(r, {"packages/local_tool/lib/t.dart": "int t() => 3;\n"})
+        self.assertIn("in-repo package packages/local_tool changed since base", self._check(r, base, [], pc))
+
+    def test_path_package_with_hook_lib_edit_plus_hosted_bump_never_reaches_the_empty_test(self):
+        """The reviewer's last row: a base path package with a hook, its lib/ edited + a hosted bump."""
+        from workflows.dev import ports as PT
+        r, base = self._repo()
+        with open(os.path.join(r, "pubspec.yaml"), "w") as fh:
+            fh.write(PUB + "  local_tool:\n    path: packages/local_tool\n")
+        git(r, "commit", "-qam", "base has the path package")
+        base = git(r, "rev-parse", "HEAD")
+        _commit(r, {"pubspec.yaml": PUB.replace("^2.0.0", "^2.1.0") + "  local_tool:\n    path: packages/local_tool\n",
+                    "packages/local_tool/lib/t.dart": "int t() => 9; // developer edit\n"})
+        self.assertEqual(EFF.build_inputs(r, base)[0], "deps")
+        steps = []
+
+        def fake(cmds, tree, sb, tmp, env=None, hosts=None, timeout_s=1800):
+            steps.append(cmds)
+            _resolved(tree, [("local_tool", "path", {"path": "packages/local_tool", "relative": "true"}),
+                             ("sqlite3", "hosted", {"name": "sqlite3", "sha256": "z", "url": "https://pub.dev"})],
+                      [("app", "../"), ("local_tool", "../packages/local_tool"),
+                       ("sqlite3", "file://%s/hosted/pub.dev/sqlite3-2.1.0" % CACHE)])
+            return _CR(True, 0, False, "Got dependencies!\n", [], 60), {"pub.dev:443 allowed": 2}
+        orig = PT.CH.deps_step
+        PT.CH.deps_step = fake
+        try:
+            h = Harness(self, fixture(), root=r, base=base)
+            run_dir = tmpdir(self)
+            os.makedirs(os.path.join(run_dir, "tmp"))
+            h.p.warm = lambda rev, tree, inspect=None: PT.warm_in_place(r, tree, run_dir, dict(os.environ),
+                                                                       inspect=inspect)[0]
+            h.write_file("test/a_test.dart", "void main(){ test('t', (){ expect(f(), 2); }); }\n")
+            git(r, "add", "-A")
+            git(r, "commit", "-qm", "t")
+            out, meta = EFF.run(h.p, {"commands": {"test": "flutter test"}}, ["C1"],
+                                {"C1": [{"test": "test/a_test.dart::t", "ac": "C1", "kind": "new"}]}, base)
+        finally:
+            PT.CH.deps_step = orig
+        self.assertEqual(steps, [["flutter pub get"]])                  # the empty test never ran
+        self.assertEqual(out["C1"].result, "unverified")
+        self.assertIn("path package packages/local_tool changed since base", out["C1"].why)
+        self.assertIn("pub.dev:443 allowed=2", meta["warm_detail"])
+
+    def test_lock_parser(self):
+        lock = parse = EFF.parse_lock('packages:\n  a:\n    dependency: direct main\n    description:\n'
+                                      '      path: "pk/a"\n      relative: true\n    source: path\n    version: "1.0.0"\n'
+                                      '  flutter:\n    dependency: direct main\n    description: flutter\n    source: sdk\n'
+                                      '    version: "0.0.0"\nsdks:\n  dart: ">=3.0.0"\n')
+        self.assertEqual(lock["a"], {"source": "path", "description": {"path": "pk/a", "relative": "true"},
+                                     "version": "1.0.0"})
+        self.assertEqual(parse["flutter"]["description"], "flutter")
+        self.assertNotIn("dart", lock)
+
+
+class R7SafetyNet(unittest.TestCase):
+    TRANSIENT = ("00:00 +0: loading /t/test/controller/sync_data_controller_download_folder_transient_test.dart\n"
+                 "00:01 +3: 다운로드 폴더 일시 실패 재시도는 상한까지 반복한다\n"
+                 "00:01 +3 -1: 다운로드 폴더 일시 실패 재시도는 상한까지 반복한다 [E]\n"
+                 "  Expected: <3>\n    Actual: <1>\n"
+                 "  SocketException: Network is unreachable (OS Error: Network is unreachable, errno = 51)\n"
+                 "  test/controller/sync_data_controller_download_folder_transient_test.dart 148:9  main.<fn>\n"
+                 "00:02 +3 -1: Some tests failed.\n")
+    LOADING = ("00:00 +0: loading /t/test/a_test.dart\n00:05 +0 -1: loading /t/test/a_test.dart [E]\n"
+               "  Failed to load \"/t/test/a_test.dart\": Building native assets failed. See the logs for more details.\n"
+               "00:05 +0 -1: Some tests failed.\n")
+
+    def test_socket_exception_in_a_running_test_is_an_ordinary_failure(self):
+        from workflows.dev.ports import safety_net
+        r = _CR(False, 1, False, self.TRANSIENT, [], 60)
+        self.assertFalse(safety_net(r, {"build_inputs": "none", "warm": "ok"}))
+        self.assertTrue(safety_net(r, {"build_inputs": "deps", "warm": "ok"}))          # doubt: inputs changed
+        self.assertTrue(safety_net(r, {"build_inputs": "none", "warm": "failed(x)"}))   # doubt: warm-up failed
+        self.assertTrue(safety_net(r, {"build_inputs": "none", "warm": "ok"}, has_base=False))
+
+    def test_signature_while_loading_halts_even_with_a_good_warm_up(self):
+        from workflows.dev.ports import safety_net
+        self.assertTrue(safety_net(_CR(False, 1, False, self.LOADING, [], 60), {"build_inputs": "none", "warm": "ok"}))
+        pre = "Resolving dependencies...\nFailed host lookup: 'pub.dev'\n"
+        self.assertTrue(safety_net(_CR(False, 69, False, pre, [], 60), {"build_inputs": "none", "warm": "ok"}))
+
+    def test_stage_loops_back_on_the_transient_test_shape(self):
+        h = Harness(self, fixture(), roles=[role("DONE", covers=[], e2e="E2E 불요: x")],
+                    suites=[suite(self.TRANSIENT, passed=False, rc=1)])
+        res = T.run(h.p)
+        self.assertNotEqual(res.fail_class, "prevalidate_env")
+        self.assertEqual(res.token(), "OK LOOPBACK: execute")
+
+
+class R7Minors(unittest.TestCase):
+    def test_env_halt_carries_the_warm_up_detail(self):
+        red = suite("x\n", passed=False, rc=1)
+        red.build_inputs_changed, red.warm = ["pubspec.lock"], "failed(Failed to update packages.)"
+        red.warm_detail = "proxy: pub.dev:443 allowed=3, x.example:443 DENIED=1 | tail: Failed to update packages."
+        h = Harness(self, fixture(), roles=[], suites=[red])
+        res = T.run(h.p)
+        self.assertIn("x.example:443 DENIED=1", res.line)
+        self.assertIn("failed(Failed to update packages.)", res.notes[0])
+
+    def test_warm_detail_redacts(self):
+        r = _CR(False, 1, False, "token ghp_abcdefghijklmnopqrstuvwxyz0123456789\nFailed to update packages.\n", [], 60)
+        r.proxy = {"pub.dev:443 allowed": 3}
+        d = EFF.warm_detail(r)
+        self.assertIn("pub.dev:443 allowed=3", d)
+        self.assertNotIn("ghp_abcdefghijklmnopqrstuvwxyz0123456789", d)
+
+    def test_suite_derives_base_like_the_effective_check(self):
+        src = open(os.path.join(_util.ENGINE, "workflows", "dev", "ports.py"), encoding="utf-8").read()
+        body = src[src.index("def suite_in_tree("):src.index("def role_spec(")]
+        self.assertIn("EFF.default_base(worktree)", body)

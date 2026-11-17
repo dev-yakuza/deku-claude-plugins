@@ -184,12 +184,13 @@ def run(p, only=None, config_present=True):
     # T1 — the engine runs the suite (§2.8)
     r = p.suite(cmds, "tester", CEILING_S)
     p.suite_warm = getattr(r, "warm", None)          # K2r5-m3: recorded with the TEST decision
+    p.suite_warm_detail = getattr(r, "warm_detail", None)     # K2r7-m1: proxy summary + output tail
     miss = getattr(r, "missing_ignored", None)
     if not r.passed and miss:                        # the same halt, found by the run itself
         return B.ignored_missing(miss, "suite")
     bic = getattr(r, "build_inputs_changed", None)
     if not r.passed and bic:                         # K2r6-B1: env, never a loop-back
-        return B.build_inputs_changed(bic, "suite")
+        return B.build_inputs_changed(bic, "suite", p.suite_warm, p.suite_warm_detail)
     summ = CH.parse_summary(r.raw, runner, (cfg.get("commands") or {}).get("test_summary"))
     if summ is None and not r.timed_out:
         d = p.judge(JG.spec(p, "RUNNER", [("raw", r.raw[-4000:])], STAGE, "T2.3"))
@@ -466,6 +467,8 @@ def _record_test(p, d, acs, verdicts, outcomes, meta, ac_source, attempt, tool_m
                              ("n/a(test-only)" if meta.get("test_only") else None),
                              "ignored_copied": ",".join(meta.get("ignored_copied") or []) or None,
                              "warm": meta.get("warm"), "suite_warm": getattr(p, "suite_warm", None),
+                             "warm_detail": meta.get("warm_detail"),
+                             "suite_warm_detail": getattr(p, "suite_warm_detail", None),
                              "impl_given_mismatch": _mismatch_field(meta.get("impl_given_mismatch")),
                              "ignored_refused": ",".join(meta.get("ignored_refused") or []) or None,
                              "grade": "trigger" if unver or ac_source != "test-cases" else None})
@@ -547,7 +550,8 @@ def _recheck(p, cfg):
     if not r.passed and getattr(r, "missing_ignored", None):
         return B.ignored_missing(r.missing_ignored, "suite")
     if not r.passed and getattr(r, "build_inputs_changed", None):
-        return B.build_inputs_changed(r.build_inputs_changed, "suite")
+        return B.build_inputs_changed(r.build_inputs_changed, "suite", getattr(r, "warm", None),
+                                      getattr(r, "warm_detail", None))
     summ = CH.parse_summary(r.raw, EFF.runner_of(cfg))
     green = bool(r.passed and (summ is None or summ.green))
     p.writer.create_comment(p.issue, OUT.render_recheck_note(p.now(), green, r.red_line() or summary_line(r.raw, summ)))

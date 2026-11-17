@@ -105,6 +105,7 @@ class Ports(object):
         self.inject = {}
         self.warm = None                  # (base, tree) → CheckResult|None: the engine warm-up, in place on pristine <base>
         self.suite_warm = None            # the last suite run's warm-up status (K2r5-m3)
+        self.suite_warm_detail = None     # its proxy summary + redacted output tail (K2r7-m1)
 
     # -- config ---------------------------------------------------------------------------
     def cfg(self, dotted, default=None):
@@ -184,10 +185,12 @@ def ignored_missing(paths, where):
                     "(%s) — %s" % (where, lst, hint), "%s; %s" % (lst, hint))
 
 
-def build_inputs_changed(files, where):
+def build_inputs_changed(files, where, warm=None, warm_detail=None):
     lst = ", ".join(files[:6]) + (" …" if len(files) > 6 else "")
+    extra = "".join(" [%s]" % x for x in (warm, warm_detail) if x)          # K2r7-m1: why, on record
     return env_halt("build-inputs-changed", "%s: the change's build inputs cannot be prepared offline by the "
-                    "engine (%s) — run the suite by hand (dependency step + tests) and continue" % (where, lst), lst)
+                    "engine (%s) — run the suite by hand (dependency step + tests) and continue%s"
+                    % (where, lst, extra), lst + extra)
 
 
 def enter(p, stage, config_present=True, only=None):

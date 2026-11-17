@@ -473,11 +473,6 @@ def safe_rel(root, f, revs):
 # subtree, the warm-up's included). `analysis_options*` and `build*.yaml` are NOT build inputs of the
 # warm-up (r6: neither changes the hook or dependency state).
 HOOK_RE = re.compile(r"(^|/)hook/|(^|/)pubspec(_overrides)?\.(yaml|lock)$|(^|/)flutter_test_config\.dart$")
-# a pubspec/lock change that is NOT "third-party hosted dependencies only"
-NON_HOSTED_RE = re.compile(r"^[+-](?![+-]).*(\b(path|git|url|ref)\s*:|\bdependency_overrides\b|\bhooks\s*:|"
-                           r"\buser_defines\b|\bsource\s*:\s*\"?(path|git|sdk)\b)", re.M)
-
-
 def hook_changes(root, base, extra=()):
     """Files the change touched that are build inputs of the warm-up (HOOK_RE) — `base...HEAD`
     plus `extra` (the suite's uncommitted overlay). An unknown base counts as changed."""
@@ -489,27 +484,126 @@ def hook_changes(root, base, extra=()):
 
 
 def build_inputs(root, base, extra=()):
-    """(kind, files) of the change's build inputs (K2r6-B1):
-    `none`        — nothing changed → warm a pristine <base>, then advance to HEAD;
-    `hosted-deps` — ONLY the root `pubspec.yaml`/`pubspec.lock` changed, by hosted third-party
-                    entries (no `path:`/`git:`/`url:`/`ref:`, no `dependency_overrides`, no
-                    `hooks:`/`user_defines`, no lock `source: path|git|sdk`), the root package has
-                    no `hook/` and no `flutter_test_config.dart` at HEAD → warm the HEAD copy
-                    (only third-party package hooks run with the network, as in the deps step);
-    `other`       — anything else (own hooks, path/git/override deps, a test config, no base) →
-                    `halted: env build-inputs-changed`."""
+    """(kind, files) of the change's build inputs (K2r6-B1, K2r7-M1):
+    `none` — nothing changed → warm a pristine <base>, then advance to HEAD;
+    `deps` — ONLY the root `pubspec.yaml`/`pubspec.lock` changed and the HEAD root has no `hook/`
+             and no `flutter_test_config.dart` → candidate for a HEAD warm-up. The pubspec TEXT is
+             not trusted (a renamed key above `path:`, quoted keys, `hosted:` shorthand,
+             `workspace:` all read as "hosted" to a line regex — r7): the warm-up first runs
+             `pub get` alone, then `resolved_check` decides from the RESOLVED lock and package
+             config before any hook or test runs;
+    `other` — anything else (own hooks, a test config, overrides file, no base) →
+              `halted: env build-inputs-changed`."""
     files = hook_changes(root, base, extra)
     if not files:
         return "none", []
     if not base or any(f not in ("pubspec.yaml", "pubspec.lock") for f in files):
         return "other", files
-    diff = G.run(root, "diff", "%s...HEAD" % base, "--", "pubspec.yaml", "pubspec.lock", check=False).decode("utf-8", "replace")
-    if NON_HOSTED_RE.search(diff):
-        return "other", files
     for own in ("hook", "flutter_test_config.dart"):
         if G.ok(root, "cat-file", "-e", "HEAD:%s" % own):
             return "other", files
-    return "hosted-deps", files
+    return "deps", files
+
+
+PUB_HOSTS = ("https://pub.dev", "https://pub.dartlang.org")
+
+
+def parse_lock(text):
+    """`pubspec.lock` → {name: {"source": str, "description": dict|str, "version": str}} (the
+    fixed layout pub writes: 2-space package names, 4-space keys, 6-space description keys)."""
+    out, cur, in_pk, in_desc = {}, None, False, False
+    for ln in (text or "").split("\n"):
+        if not ln.strip() or ln.lstrip().startswith("#"):
+            continue
+        ind = len(ln) - len(ln.lstrip())
+        key, _, val = ln.strip().partition(":")
+        key, val = key.strip().strip('"'), val.strip().strip('"')
+        if ind == 0:
+            in_pk = key == "packages"
+            cur = None
+            continue
+        if not in_pk:
+            continue
+        if ind == 2:
+            cur = out.setdefault(key, {"source": None, "description": {}, "version": None})
+            in_desc = False
+        elif ind == 4 and cur is not None:
+            in_desc = key == "description" and not val
+            if key == "description" and val:
+                cur["description"] = val
+            elif key in ("source", "version"):
+                cur[key] = val
+        elif ind >= 6 and cur is not None and in_desc and isinstance(cur["description"], dict):
+            cur["description"][key] = val
+    return out
+
+
+def _pub_cache_roots():
+    roots = [os.environ.get("PUB_CACHE") or os.path.expanduser("~/.pub-cache")]
+    return [os.path.realpath(r) for r in roots if r]
+
+
+def resolved_check(tree, root, base, sdk_roots=()):
+    """K2r7-M1: after `pub get` on the HEAD copy and BEFORE any hook or test runs — None when only
+    hosted pub.dev packages, SDK packages and path/git/workspace packages IDENTICAL to <base> are
+    in the resolved graph; else the reason (→ `halted: env build-inputs-changed`). Reads the
+    resolved `pubspec.lock` (`source:`) and `.dart_tool/package_config.json` (`rootUri`)."""
+    import json as _json
+    try:
+        with open(os.path.join(tree, "pubspec.lock"), encoding="utf-8") as fh:
+            lock = parse_lock(fh.read())
+        with open(os.path.join(tree, ".dart_tool", "package_config.json"), encoding="utf-8") as fh:
+            pc = _json.load(fh)
+    except (IOError, OSError, ValueError) as e:
+        return "resolved graph unreadable (%s)" % e
+    base_lock = parse_lock(G.run(root, "show", "%s:pubspec.lock" % base, check=False).decode("utf-8", "replace"))
+    real_tree = os.path.realpath(tree)
+
+    def changed(rel):
+        return bool(G.run(root, "diff", "--name-only", "%s...HEAD" % base, "--", rel or ".", check=False).strip())
+    for name, e in sorted(lock.items()):
+        src, desc = e.get("source"), e.get("description")
+        if src == "hosted":
+            url = (desc.get("url") if isinstance(desc, dict) else None) or ""
+            if url.rstrip("/") not in PUB_HOSTS:
+                return "%s: hosted on a non-pub.dev server (%s)" % (name, url or "?")
+        elif src == "sdk":
+            continue
+        elif src == "git":
+            if base_lock.get(name) != e:
+                return "%s: git dependency new or changed since base" % name
+        elif src == "path":
+            pth = desc.get("path") if isinstance(desc, dict) else desc
+            rel = os.path.normpath(pth or "")
+            if os.path.isabs(rel) or rel.startswith(".."):
+                return "%s: path dependency outside the repository (%s)" % (name, pth)
+            if changed(rel):
+                return "%s: path package %s changed since base" % (name, rel)
+        else:
+            return "%s: dependency source %r" % (name, src)
+    allowed = _pub_cache_roots() + [os.path.realpath(x) for x in sdk_roots]
+    dt = os.path.join(tree, ".dart_tool")
+    for pk in pc.get("packages") or []:
+        uri = pk.get("rootUri") or ""
+        if uri.startswith("file://"):
+            loc = os.path.realpath(uri[len("file://"):])
+        elif ":" in uri.split("/")[0]:
+            return "%s: package root %s" % (pk.get("name"), uri)
+        else:
+            loc = os.path.realpath(os.path.join(dt, uri))
+        if loc == real_tree:
+            continue
+        if loc.startswith(real_tree + os.sep):                     # path / workspace member in the repo
+            rel = os.path.relpath(loc, real_tree)
+            if changed(rel):
+                return "%s: in-repo package %s changed since base" % (pk.get("name"), rel)
+            continue
+        if (lock.get(pk.get("name")) or {}).get("source") == "sdk":     # flutter, flutter_test, …
+            continue
+        if any(loc == a or loc.startswith(a + os.sep) for a in allowed):
+            continue
+        return "%s: package outside the pub cache and the repository (%s)" % (pk.get("name"), loc)
+    return None
 
 
 def default_base(root):
@@ -789,6 +883,16 @@ class TempTree(object):
         return False
 
 
+def warm_detail(r):
+    """The warm-up's proxy summary and redacted output tail, for the decision log (K2r7-m1)."""
+    if r is None or not hasattr(r, "raw"):
+        return None
+    px = getattr(r, "proxy", None) or {}
+    hosts = ", ".join("%s=%s" % (k, v) for k, v in sorted(px.items()) if k != "placeholders")
+    tail = [x for x in (r.raw or "").split("\n") if x.strip()][-4:]
+    return "proxy: %s | tail: %s" % (hosts or "none", CH.redact_lines(" / ".join(" ".join(t.split()) for t in tail))[:400])
+
+
 def warm_status(r):
     """`ok | failed(<line>) | skipped(<why>)` of a warm-up result (K2r5-m3)."""
     if r is None:
@@ -807,12 +911,13 @@ def prepared_tree(root, base, files, warm=None, copy_list=(), overlay=False):
     """The ONE preparation of every temp tree that runs role-written code (K2r5-B1, K2r6-B1).
     By the change's build inputs (`build_inputs`):
       none        — a pristine <base> warmed IN PLACE under the network, then `advance(HEAD)`;
-      hosted-deps — the pristine HEAD copy warmed in place (no developer test code: the warm-up
-                    is the engine's empty test and the tree has no test config);
+      deps        — the pristine HEAD copy: `pub get` alone, then `resolved_check` (non-hosted or
+                    changed path/git/workspace packages → halt), only then the engine's empty test;
       other       — no warm-up and `info["halt"] = "build-inputs-changed"` (the caller stops).
     Then the worktree overlay (suite trees), the ignored entries, the opt-in `copy_ignored` —
     offline from there on. Yields (tree, info{warm, build_inputs, build_files, halt})."""
-    info = {"warm": None, "build_inputs": None, "build_files": [], "halt": None, "build_hook_changed": []}
+    info = {"warm": None, "warm_detail": None, "build_inputs": None, "build_files": [], "halt": None,
+            "build_hook_changed": []}
     kind = None
     if warm is not None:
         extra = []
@@ -823,10 +928,15 @@ def prepared_tree(root, base, files, warm=None, copy_list=(), overlay=False):
         if kind == "other":
             info["halt"] = "build-inputs-changed"
             info["warm"] = "skipped(build-inputs-changed: %s)" % ", ".join(bfiles[:3])
-    warm_rev = {"none": base, "hosted-deps": "HEAD"}.get(kind) if warm is not None else None
+    warm_rev = {"none": base, "deps": "HEAD"}.get(kind) if warm is not None else None
     with TempTree(root, base, files, overlay=overlay, rev=warm_rev or "HEAD", defer_ignored=bool(warm_rev)) as tt:
         if warm_rev:
-            info["warm"] = warm_status(warm(warm_rev, tt.path))
+            res = warm(warm_rev, tt.path) if warm_rev != "HEAD" else \
+                warm(warm_rev, tt.path, lambda t: resolved_check(t, root, base))
+            info["warm"], info["warm_detail"] = warm_status(res), warm_detail(res)
+            if getattr(res, "halt", None):          # the resolved graph has non-hosted changes
+                info["halt"] = "build-inputs-changed"
+                info["build_files"] = list(info["build_files"]) + [res.halt]
             if warm_rev != "HEAD":
                 tt.advance("HEAD")
             tt.finish_ignored()
@@ -939,7 +1049,7 @@ def run(p, cfg, effective_acs, covers_by_ac, base, given_impl=None, timeout_s=90
         # opt-in copy_ignored files — offline from there on (`prepared_tree`)
         copy_list = ((cfg.get("engine") or {}).get("effective") or {}).get("copy_ignored")
         with prepared_tree(p.root, base, impl, warm, copy_list) as (tt, info):
-            meta["warm"] = info["warm"]
+            meta["warm"], meta["warm_detail"] = info["warm"], info.get("warm_detail")
             if info["halt"]:
                 # K2r6-B1: own hooks / path-git-override deps / a test config changed — no warm-up
                 # may run them with the network and the offline run cannot build → unverified (the
