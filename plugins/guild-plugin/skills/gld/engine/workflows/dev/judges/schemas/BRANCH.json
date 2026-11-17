@@ -1,0 +1,16 @@
+{
+ "type": "object",
+ "required": [
+  "verdict"
+ ],
+ "properties": {
+  "verdict": {
+   "type": "string",
+   "enum": [
+    "related",
+    "unrelated",
+    "unsure"
+   ]
+  }
+ }
+}

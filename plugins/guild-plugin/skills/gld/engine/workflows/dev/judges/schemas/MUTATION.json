@@ -1,0 +1,17 @@
+{
+ "type": "object",
+ "required": [
+  "verdict"
+ ],
+ "properties": {
+  "verdict": {
+   "type": "string",
+   "enum": [
+    "formatter",
+    "artifact",
+    "mutation",
+    "unsure"
+   ]
+  }
+ }
+}

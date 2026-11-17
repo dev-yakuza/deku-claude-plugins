@@ -1,0 +1,28 @@
+{
+ "type": "object",
+ "required": [
+  "verdict",
+  "roles"
+ ],
+ "properties": {
+  "verdict": {
+   "type": "string",
+   "enum": [
+    "cast",
+    "unsure"
+   ]
+  },
+  "roles": {
+   "type": "array",
+   "items": {
+    "type": "string"
+   }
+  },
+  "skipped": {
+   "type": "array",
+   "items": {
+    "type": "string"
+   }
+  }
+ }
+}

@@ -22,14 +22,21 @@ from guildcore.judges.runner import JudgeSpec
 
 HERE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "judges")
 TIERS = {"TEST": "sonnet", "QA": "sonnet", "VIS-ENV": "sonnet", "DIRECTIVE": "sonnet",
-         "RUNNER": "haiku", "PRMATCH": "haiku", "FOLLOWUP": "haiku", "DWC": "haiku"}
-LAYER = {"RUNNER": "MJ", "PRMATCH": "MJ", "FOLLOWUP": "MJ", "DWC": "MJ"}
-CHOICE = {"TEST": "overall"}
+         "RUNNER": "haiku", "PRMATCH": "haiku", "FOLLOWUP": "haiku", "DWC": "haiku",
+         # K3 execute (§3.3 EX-ARB — opus when a BLOCKER/MAJOR is in the brief, chosen by the caller;
+         # §3.4 IDENT/SAMECAUSE/BRANCH haiku, GATECAST/MUTATION sonnet "MJ+")
+         "EX-ARB": "sonnet", "IDENT": "haiku", "SAMECAUSE": "haiku", "BRANCH": "haiku",
+         "GATECAST": "sonnet", "MUTATION": "sonnet"}
+LAYER = {"RUNNER": "MJ", "PRMATCH": "MJ", "FOLLOWUP": "MJ", "DWC": "MJ", "IDENT": "MJ", "SAMECAUSE": "MJ",
+         "BRANCH": "MJ", "GATECAST": "MJ+", "MUTATION": "MJ+"}
+CHOICE = {"TEST": "overall", "EX-ARB": "summary"}
 UNSURE = {"TEST": "gap", "QA": "block", "VIS-ENV": "env_suspect", "DIRECTIVE": "out_of_scope",
-          "RUNNER": None, "PRMATCH": "none", "FOLLOWUP": "needs_filing", "DWC": "partial_read"}
-BUDGET = {"SJ": 0.5, "MJ": 0.05}
-CAPS = {"SJ": 25000, "MJ": 6000}
-NO_ELIDE = {"TEST": ("excerpts",), "DIRECTIVE": ("comments",)}
+          "RUNNER": None, "PRMATCH": "none", "FOLLOWUP": "needs_filing", "DWC": "partial_read",
+          "EX-ARB": "accept", "IDENT": "different", "SAMECAUSE": "different", "BRANCH": "unrelated",
+          "GATECAST": "convene", "MUTATION": "mutation"}
+BUDGET = {"SJ": 0.5, "MJ": 0.05, "MJ+": 0.3}
+CAPS = {"SJ": 25000, "MJ": 6000, "MJ+": 12000}
+NO_ELIDE = {"TEST": ("excerpts",), "DIRECTIVE": ("comments",), "EX-ARB": ("findings", "hunks")}
 HEDGES = ("권장", "가능하면", "여유되면", "미검증(참고)")
 # K2-m1: removal only where the hedge is a FRAME — parenthesised, or leading the item — never a
 # substring of a meaningful word ("권장 설정이 표시되는지" stays; the lint re-ask handles wording)
@@ -87,7 +94,7 @@ def strip_hedges(item):
 
 def system_parts(p, group):
     parts = [_read("leader-core.md")]
-    if LAYER.get(group) != "MJ" and p is not None and p.config is not None and hasattr(p.config, "persona"):
+    if LAYER.get(group) not in ("MJ", "MJ+") and p is not None and p.config is not None and hasattr(p.config, "persona"):
         try:
             per = p.config.persona("leader")
             habits = per.habits(group) if per else []
@@ -101,7 +108,7 @@ def system_parts(p, group):
 
 def spec(p, group, brief_parts, stage, step, point=None, model=None, cwd=None, needs_more_fn=None):
     layer = LAYER.get(group, "SJ")
-    tools = "Read,Grep" if group == "TEST" else ""
+    tools = "Read,Grep" if group in ("TEST", "EX-ARB") else ""
     m = model
     if m is None and p is not None:
         m = ((p.engine_cfg("judges", {}) or {}).get(group) or {}).get("model")
