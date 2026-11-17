@@ -501,6 +501,19 @@ def coverage_section(tout):
     return "\n".join(out)
 
 
+def expand_ranges(text, ids):
+    """`text` plus the ids its ranges denote (`C1–C12`, `A~H` for letter-prefixed ids)."""
+    exp = text
+    for m in RANGE_RE.finditer(text):
+        a, b = int(m.group(2)), int(m.group(3))
+        if 0 < b - a < 80:
+            exp += "\n" + " ".join("%s%d" % (m.group(1), k) for k in range(a, b + 1))
+    for m in LETTER_RANGE.finditer(text):
+        exp += "\n" + " ".join(i for i in ids if i[:1].isalpha() and m.group(1) <= i[:1] <= m.group(2)
+                               and not i.startswith("AC"))
+    return exp
+
+
 def prose_verdicts(ids, tout):
     """K2-M7 (d): per case id, the legacy LEADER'S coverage statement (not the label outcome):
     a mention on a gap line → not_covering; a mention, or a section-wide "all covered" → effective;
@@ -600,6 +613,13 @@ def build(ep, leg, cfg, work, real_tc=None):
         roles.append(RoleResult(st, ln, {"covers": covers, "e2e": e2e_of(tout)}))
         verdicts = prose_verdicts(ids, tout)
         inj["verdicts"] = {k: sum(1 for x in verdicts.values() if x == k) for k in ("effective", "not_covering", "unsure")}
+        unsure_ids = [i for i, v in verdicts.items() if v == "unsure"]
+        # an unsure id the legacy output never names ANYWHERE is suspect for the parser (r2-M2);
+        # one it names outside the coverage section is a prose-extraction miss
+        whole = expand_ranges(tout, ids)
+        inj["verdicts"]["parser_suspect"] = sum(
+            1 for i in unsure_ids if not re.search(r"(?<![A-Za-z0-9])%s(?![0-9])" % re.escape(i.lstrip("#")), whole))
+        inj["green"] = green
         f = {"ac": [{"id": a, "covered_by": ["test/replay_test.dart::t"], "verdict": v, "why": "legacy prose"}
                     for a, v in verdicts.items()], "visual_rows": [],
              "overall": "all_effective" if all(v == "effective" for v in verdicts.values()) else "gap"}
@@ -729,7 +749,8 @@ def run_engine(ep, leg, cfg, work, repo=None):
     eng = {"labels": [(list(c[2]), list(c[3])) for c in w.calls if c[0] == "edit_labels"],
            "token": r.token() if r else "CRASH",
            "comments": {}, "pauses": [], "pr_body": None, "pr_comment": {}, "error": err, "calls": calls,
-           "derived": inj.get("derived", False), "kind": r.kind if r else None, "verdicts": inj.get("verdicts")}
+           "derived": inj.get("derived", False), "kind": r.kind if r else None, "verdicts": inj.get("verdicts"),
+           "green": inj.get("green")}
     touched = set(c[1] for c in w.calls if c[0] == "patch_comment")
     for c in gh.fx["issues"][str(ep.issue)].get("comments", []):
         m = MARK_RE.match(c.get("body") or "")
@@ -981,7 +1002,7 @@ def main(argv=None):
             d2 = run_engine(ep, leg, cfg, work, a.repo)
             if d2["derived"]:
                 row["derived_run"] = {"kind": d2["kind"], "token": d2["token"], "error": d2["error"],
-                                      "verdicts": d2["verdicts"]}
+                                      "verdicts": d2["verdicts"], "green": d2["green"]}
         rows.append(row)
     shutil.rmtree(work, True)
     rep = report(rows, skipped)
@@ -994,15 +1015,19 @@ def main(argv=None):
 
 
 def _agreement(rs):
-    """Stage-outcome agreement (ADVANCE/DONE vs LOOPBACK/PAUSE) with the legacy session:
-    `by_construction` — the judgments were inverted from the legacy outcome, so agreement is true
-    by construction (it checks the render/transition layer only); `derived` — real test-cases.md
-    (repository), the legacy LEADER's coverage sentences, the real runner summary line; the engine
-    computes the outcome (K2-M7). Derived misses are split by cause: ids the prose never mentions
-    (`unsure` → repair → uncovered — an extraction limit) vs ids the prose calls not covered."""
-    out = {"by_construction": {"n": 0, "agree": 0}, "derived": {"n": 0, "agree": 0, "miss_extraction": 0,
-                                                                  "miss_not_covering": 0, "miss_other": 0,
-                                                                  "disagree": []}}
+    """Stage-outcome agreement with the legacy session.
+    `by_construction` — judgments inverted from the legacy outcome: true by construction (render
+    layer only). `derived` — real test-cases.md, the legacy LEADER's coverage sentences, the real
+    runner summary line; the engine computes the outcome. NOT used as judgment-path evidence
+    (K2r2-M2): `agree` counts outcomes; `agree_for_reason` drops agreements that rest only on
+    `unsure` verdicts (an ADVANCE needs every id effective; a LOOPBACK needs a red suite or an id
+    the prose calls not covered). Misses split: `miss_parser_suspect` (an unsure id the legacy
+    output never names — suspect for case_ids), `miss_prose` (named, but the extractor missed
+    the sentence), `miss_not_covering`, `miss_other` (legacy loop-back for a reason outside
+    coverage)."""
+    out = {"by_construction": {"n": 0, "agree": 0},
+           "derived": {"n": 0, "agree": 0, "agree_for_reason": 0, "miss_parser_suspect": 0, "miss_prose": 0,
+                       "miss_not_covering": 0, "miss_other": 0, "disagree": []}}
     for r in rs:
         b = out["by_construction"]
         b["n"] += 1
@@ -1012,18 +1037,28 @@ def _agreement(rs):
             continue
         o = out["derived"]
         o["n"] += 1
+        v = d.get("verdicts") or {}
         if _kind_of(r["legacy_outcome"]) == (d.get("kind") or ""):
             o["agree"] += 1
+            if d.get("kind") == "ADVANCE":
+                o["agree_for_reason"] += not v.get("unsure") and not v.get("not_covering")
+            else:
+                o["agree_for_reason"] += (d.get("green") is False) or bool(v.get("not_covering"))
             continue
-        v = d.get("verdicts") or {}
-        cause = ("miss_extraction" if v.get("unsure") and not v.get("not_covering") else
-                 "miss_not_covering" if v.get("not_covering") else "miss_other")
+        if v.get("unsure") and not v.get("not_covering"):
+            cause = "miss_parser_suspect" if v.get("parser_suspect") else "miss_prose"
+        elif v.get("not_covering"):
+            cause = "miss_not_covering"
+        else:
+            cause = "miss_other"
         o[cause] += 1
-        if len(o["disagree"]) < 40:
+        if len(o["disagree"]) < 60:
             o["disagree"].append({"episode": r["episode"], "legacy": r["legacy_outcome"], "engine": d.get("token", "")[:60],
                                   "verdicts": v, "cause": cause})
     for k in out.values():
         k["pct"] = round(100.0 * k["agree"] / k["n"], 1) if k["n"] else None
+    d = out["derived"]
+    d["pct_for_reason"] = round(100.0 * d["agree_for_reason"] / d["n"], 1) if d["n"] else None
     return out
 
 

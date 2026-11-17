@@ -577,7 +577,7 @@ def static_check(p, cfg, ac, covers):
     return None, items
 
 
-def _verdict_head(kind, tree):
+def _verdict_head(kind, tree, raw=""):
     """The HEAD run must execute exactly the cited test and pass (r2-B1)."""
     if kind == "passed":
         return None
@@ -586,8 +586,9 @@ def _verdict_head(kind, tree):
     if kind == "ambiguous":
         return ("unverified", "filter ran more than one test")
     if tree.skipped_ignored and kind in ("load_error", "runtime", "unknown"):
+        named = [x for x in tree.skipped_ignored if x.rstrip("/") and x.rstrip("/") in (raw or "")]
         return ("unverified", "secret-required: the test needs git-ignored files the engine does not copy (%s)"
-                % ", ".join(tree.skipped_ignored[:3]))
+                % ", ".join((named or tree.skipped_ignored)[:3]))
     return ("unverified", "the cited test does not pass at HEAD in the temp tree (%s)" % kind)
 
 
@@ -647,7 +648,7 @@ def _phases(p, runner, pending, tt, base, impl, out, timeout_s):
         for cv, path, name, line, cmd in rows:
             r = p.check(cmd, tt.path, "tester", timeout_s, [tt.path])
             kind = "timeout" if r.timed_out else rerun_kind(r.raw, runner, name, r.passed)
-            v = _verdict_head(kind, tt)
+            v = _verdict_head(kind, tt, r.raw)
             if v:
                 out[ac] = CheckOutcome(ac, cv.get("test"), v[0], v[1], "head:" + kind, line, cmd)
                 break

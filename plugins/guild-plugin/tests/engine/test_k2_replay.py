@@ -112,15 +112,19 @@ class Replay(unittest.TestCase):
         real = "| ID | AC |\n|---|---|\n| T1 | AC1 |\n| T2 | AC1 |\n"
         p, gh, w, calls, inj = P.build(ep, leg, CFG, self.d, real_tc=real)
         self.assertTrue(inj["derived"])
-        self.assertEqual(inj["verdicts"], {"effective": 0, "not_covering": 0, "unsure": 2})   # prose never names T1/T2
+        self.assertEqual(inj["verdicts"], {"effective": 0, "not_covering": 0, "unsure": 2,
+                                           "parser_suspect": 2})          # prose never names T1/T2
         self.assertEqual(P.prose_verdicts(["C1", "C2", "C3"], "### AC 커버리지\n- C1–C2 PASS\n- C3 미커버\n### 검증 범위\n"),
                          {"C1": "effective", "C2": "effective", "C3": "not_covering"})
 
     def test_agreement_split(self):
         rows = [{"legacy_outcome": "ADVANCE", "engine_kind": "ADVANCE", "episode": "a",
-                 "derived_run": {"kind": "LOOPBACK", "token": "OK LOOPBACK: execute", "verdicts": {"unsure": 2}}}]
+                 "derived_run": {"kind": "LOOPBACK", "token": "OK LOOPBACK: execute", "verdicts": {"unsure": 2, "parser_suspect": 0}}},
+                {"legacy_outcome": "LOOPBACK", "engine_kind": "LOOPBACK", "episode": "b",
+                 "derived_run": {"kind": "LOOPBACK", "token": "x", "green": True, "verdicts": {"unsure": 3}}}]
         a = P._agreement(rows)
-        self.assertEqual((a["by_construction"]["pct"], a["derived"]["pct"], a["derived"]["miss_extraction"]), (100.0, 0.0, 1))
+        self.assertEqual((a["by_construction"]["pct"], a["derived"]["agree"], a["derived"]["agree_for_reason"],
+                          a["derived"]["miss_prose"]), (100.0, 1, 0, 1))   # b agrees only by accident (unsure)
 
     def test_manual_qa_absent_is_a_replay_gap(self):
         self.assertEqual(P.classify("manual-qa", "(absent)", "manual-qa x", P.episodes([self.log])[1])[0], "replay-gap")
