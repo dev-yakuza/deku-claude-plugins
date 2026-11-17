@@ -89,7 +89,7 @@ class B1AssertionScope(unittest.TestCase):
         self.assertEqual(EFF.rerun_kind(two, "flutter", "a", False), "ambiguous")      # the filter ran 2 tests
 
     def test_exact_filters(self):
-        self.assertIn("--name '(^| )totals$'", EFF.single_command(CFG, "flutter", "test/a_test.dart", "totals"))
+        self.assertIn("--no-pub --name '(^| )totals$'", EFF.single_command(CFG, "flutter", "test/a_test.dart", "totals"))
         self.assertIn("-t '(^| )totals$'", EFF.single_command({}, "jest", "a.test.ts", "totals"))
         self.assertEqual(EFF.single_command({}, "pytest", "t/test_a.py", "T.test_x"), "python3 -m pytest t/test_a.py::T::test_x")
         self.assertIsNone(EFF.single_command({}, "flutter", "a_test.dart", None))
@@ -217,13 +217,18 @@ class B4TempTreeContainment(unittest.TestCase):
         self.assertTrue(os.path.exists(os.path.join(r, "gen", "api.dart")))
         self.assertEqual(git(r, "worktree", "list").count("\n"), 0)      # m6: cleaned on failure
 
-    def test_dart_tool_is_a_copy_not_a_link(self):
-        r = repo(self, {"calc.py": "x=1\n", ".gitignore": ".dart_tool/\n"})
-        os.makedirs(os.path.join(r, ".dart_tool"))
+    def test_dart_tool_copied_build_fresh_others_linked(self):
+        r = repo(self, {"calc.py": "x=1\n", ".gitignore": ".dart_tool/\nbuild/\nnode_modules/\n"})
+        for d in (".dart_tool/hooks_runner", ".dart_tool/build", "build/native_assets", "node_modules/x"):
+            os.makedirs(os.path.join(r, d))
         open(os.path.join(r, ".dart_tool", "package_config.json"), "w").write("{}")
         with EFF.TempTree(r, git(r, "rev-parse", "HEAD"), []) as t:
             self.assertFalse(os.path.islink(os.path.join(t, ".dart_tool")))
             self.assertTrue(os.path.exists(os.path.join(t, ".dart_tool", "package_config.json")))
+            self.assertTrue(os.path.isdir(os.path.join(t, ".dart_tool", "hooks_runner")))
+            self.assertFalse(os.path.exists(os.path.join(t, ".dart_tool", "build")))        # compile cache left out
+            self.assertEqual(os.listdir(os.path.join(t, "build")), [])                      # fresh tool output
+            self.assertTrue(os.path.islink(os.path.join(t, "node_modules")))
 
     def test_test_paths_m8(self):
         self.assertIsNone(EFF.TEST_PATH_RE.search("lib/test_utils.dart"))

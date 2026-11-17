@@ -483,7 +483,52 @@ def _items(block):
     return [markers.clean(l)[6:] for l in (block or "").split("\n") if markers.clean(l).startswith("- [ ] ")]
 
 
-def build(ep, leg, cfg, work):
+RANGE_RE = re.compile(r"\b([A-Z]{1,3}-?)(\d+)\s*[–~-]\s*(?:\1)?(\d+)\b")
+GAP_WORDS = re.compile(r"미커버|uncovered|커버 ?안 ?됨|커버되지 않|\bAC gap\b|누락된|미충족|not covered|공허 테스트로|vacuous", re.I)
+ALL_WORDS = re.compile(r"모두|전부|전수|전 ID|전 항목|전 케이스|\ball\b|\bPASS\b|직접 커버|커버됨|covered|green", re.I)
+LETTER_RANGE = re.compile(r"\b([A-Z])\s*[~–-]\s*([A-Z])\b")
+
+
+def coverage_section(tout):
+    lines = (tout or "").split("\n")
+    out, on = [], False
+    for ln in lines:
+        if re.match(r"^#{2,4} ", ln):
+            on = bool(re.search(r"커버|[Cc]overage|AC", ln)) and "검증 범위" not in ln
+            continue
+        if on:
+            out.append(ln)
+    return "\n".join(out)
+
+
+def prose_verdicts(ids, tout):
+    """K2-M7 (d): per case id, the legacy LEADER'S coverage statement (not the label outcome):
+    a mention on a gap line → not_covering; a mention, or a section-wide "all covered" → effective;
+    neither → unsure. Ranges `C1–C12` expand."""
+    sec = coverage_section(tout)
+    exp = sec
+    for m in RANGE_RE.finditer(sec):
+        a, b = int(m.group(2)), int(m.group(3))
+        if 0 < b - a < 80:
+            exp += "\n" + " ".join("%s%d" % (m.group(1), k) for k in range(a, b + 1)) + \
+                (" gap" if GAP_WORDS.search(sec[max(0, m.start() - 80):m.end() + 80].split("\n")[0]) else "")
+    for m in LETTER_RANGE.finditer(sec):                 # `A~H 전 ID` → every id with those prefixes
+        if not GAP_WORDS.search(sec[max(0, m.start() - 80):m.end() + 80]):
+            exp += "\n" + " ".join(i for i in ids if i[:1].isalpha() and m.group(1) <= i[:1] <= m.group(2)
+                                   and not i.startswith("AC"))
+    blanket = bool(ALL_WORDS.search(sec)) and not GAP_WORDS.search(sec)
+    out = {}
+    for i in ids:
+        rx = re.compile(r"(?<![A-Za-z0-9])%s(?![0-9])" % re.escape(i.lstrip("#")))
+        hits = [ln for ln in exp.split("\n") if rx.search(ln)]
+        if hits:
+            out[i] = "not_covering" if any(GAP_WORDS.search(h) for h in hits) else "effective"
+        else:
+            out[i] = "effective" if blanket else "unsure"
+    return out
+
+
+def build(ep, leg, cfg, work, real_tc=None):
     """Fake GitHub + ports for one episode. Returns (ports, gh, writer_calls, injected)."""
     n = ep.issue
     labels = list(ep.start_labels or getattr(ep, "prior_labels", None) or ["guild:%s" % ep.stage])
@@ -539,7 +584,31 @@ def build(ep, leg, cfg, work):
         inj["loopback"] = {"reason": reason, "signature": sig, "at": lb_blk.get("at"), "branch": lb_blk.get("branch")}
 
     roles, judges, suites = [], {}, []
-    if ep.stage == "test":
+    derived = ep.stage == "test" and bool(real_tc) and bool(SUMMARY_RE.search(tout))
+    inj["derived"] = derived
+    if derived:
+        from workflows.dev import cases as CSM
+        _write(root, "docs/specs/%d/test-cases.md" % n, real_tc)
+        ids = CSM.case_ids(real_tc)
+        m = SUMMARY_RE.findall(tout)
+        green = any("All tests passed" in x for x in m)
+        line = [x for x in m if ("All tests passed" in x) == green][-1]
+        suites.append(CheckResult(green, 0 if green else 1, False, line + "\n", [{"cmd": "replay", "rc": 0 if green else 1,
+                                                                                  "timed_out": False}], 3600))
+        st, ln = leg.roles.get("tester", ("DONE", ""))
+        covers = [{"test": "test/replay_test.dart::t", "ac": a, "kind": "guard"} for a in ids]
+        roles.append(RoleResult(st, ln, {"covers": covers, "e2e": e2e_of(tout)}))
+        verdicts = prose_verdicts(ids, tout)
+        inj["verdicts"] = {k: sum(1 for x in verdicts.values() if x == k) for k in ("effective", "not_covering", "unsure")}
+        f = {"ac": [{"id": a, "covered_by": ["test/replay_test.dart::t"], "verdict": v, "why": "legacy prose"}
+                    for a, v in verdicts.items()], "visual_rows": [],
+             "overall": "all_effective" if all(v == "effective" for v in verdicts.values()) else "gap"}
+        judges["TEST"] = [_dec(f["overall"], f), _dec(f["overall"], json.loads(json.dumps(f)))]
+        roles.append(RoleResult("DONE", "", {"covers": covers}))
+        judges["DWC"] = [_dec("other", {"verdict": "other"})]
+        judges["VIS-ENV"] = [_dec("regression", {"verdict": "regression"})]
+        judges["RUNNER"] = [_dec("green" if green else "red", {"verdict": "green" if green else "red"})]
+    elif ep.stage == "test":
         m = SUMMARY_RE.findall(tout)
         green = out in ("ADVANCE",) or (out == "LOOPBACK" and m and "All tests passed" in m[-1])
         if green:
@@ -632,10 +701,23 @@ def _write(root, rel, text):
         fh.write(text)
 
 
-def run_engine(ep, leg, cfg, work):
+def real_test_cases(repo, n):
+    """`docs/specs/<n>/test-cases.md` as the repository has it — the Issue's squash commit when
+    one says `(#n)`, else the default branch tip (read-only `git show`)."""
+    if not repo:
+        return None
+    import subprocess
+    sha = subprocess.run(["git", "-C", repo, "log", "--format=%H", "-1", "--grep", "(#%d)" % n, "HEAD"],
+                         stdout=subprocess.PIPE, stderr=subprocess.DEVNULL).stdout.decode().strip()
+    r = subprocess.run(["git", "-C", repo, "show", "%s:docs/specs/%d/test-cases.md" % (sha or "HEAD", n)],
+                       stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+    return r.stdout.decode("utf-8", "replace") if r.returncode == 0 else None
+
+
+def run_engine(ep, leg, cfg, work, repo=None):
     from workflows.dev.stages import qa as Q
     from workflows.dev.stages import test as T
-    p, gh, w, calls, inj = build(ep, leg, cfg, work)
+    p, gh, w, calls, inj = build(ep, leg, cfg, work, real_test_cases(repo, ep.issue) if ep.stage == "test" else None)
     try:
         if ep.stage == "test":
             r = T.run(p)
@@ -646,7 +728,8 @@ def run_engine(ep, leg, cfg, work):
         r, err = None, "%s: %s" % (type(e).__name__, e)
     eng = {"labels": [(list(c[2]), list(c[3])) for c in w.calls if c[0] == "edit_labels"],
            "token": r.token() if r else "CRASH",
-           "comments": {}, "pauses": [], "pr_body": None, "pr_comment": {}, "error": err, "calls": calls}
+           "comments": {}, "pauses": [], "pr_body": None, "pr_comment": {}, "error": err, "calls": calls,
+           "derived": inj.get("derived", False), "kind": r.kind if r else None, "verdicts": inj.get("verdicts")}
     touched = set(c[1] for c in w.calls if c[0] == "patch_comment")
     for c in gh.fx["issues"][str(ep.issue)].get("comments", []):
         m = MARK_RE.match(c.get("body") or "")
@@ -798,6 +881,8 @@ def classify(elem, leg_text, eng_text, ep):
         return "replay-gap", "the execute evidence was edited by a script the replay cannot follow"
     if elem in ("test:output/loopback-lines", "qa:output/loopback-lines") and "True" in leg_text:
         return "intentional:§7 B-F-18", "loopback-* lines only on the attended path (prose); legacy wrote them unattended"
+    if elem == "manual-qa" and leg_text == "(absent)":
+        return "replay-gap", "the legacy PR body write is not readable from the log"
     if elem == "manual-qa" and leg_text != eng_text:
         if "|<!-- /guild:manual-qa -->" not in leg_text or "사람 QA 체크리스트" not in leg_text:
             return "intentional:§7 B-F-18", "legacy block heading/intro drifted from the prose format"
@@ -873,6 +958,7 @@ def main(argv=None):
     ap.add_argument("--config", required=True)
     ap.add_argument("--out", required=True)
     ap.add_argument("--limit", type=int, default=0)
+    ap.add_argument("--repo", help="the logs' repository (read-only `git show` of real test-cases.md)")
     a = ap.parse_args(argv)
     with open(a.config, encoding="utf-8") as fh:
         cfg = json.load(fh)
@@ -887,10 +973,16 @@ def main(argv=None):
             continue
         if a.limit and len(rows) >= a.limit:
             break
-        eng = run_engine(ep, leg, cfg, work)
+        eng = run_engine(ep, leg, cfg, work)                  # by construction: the render layer
         cmp_ = compare(ep, leg, eng)
-        rows.append({"episode": ep.key, "stage": ep.stage, "version": ep.version, "legacy_outcome": leg.outcome(),
-                     "engine_token": eng["token"], "error": eng["error"], **cmp_})
+        row = {"episode": ep.key, "stage": ep.stage, "version": ep.version, "legacy_outcome": leg.outcome(),
+               "engine_token": eng["token"], "error": eng["error"], "engine_kind": eng["kind"], **cmp_}
+        if a.repo and ep.stage == "test":                    # independently derived: the judgment path
+            d2 = run_engine(ep, leg, cfg, work, a.repo)
+            if d2["derived"]:
+                row["derived_run"] = {"kind": d2["kind"], "token": d2["token"], "error": d2["error"],
+                                      "verdicts": d2["verdicts"]}
+        rows.append(row)
     shutil.rmtree(work, True)
     rep = report(rows, skipped)
     with open(os.path.join(a.out, "rows.json"), "w", encoding="utf-8") as fh:
@@ -899,6 +991,45 @@ def main(argv=None):
         json.dump(rep, fh, ensure_ascii=False, indent=1)
     print(json.dumps(rep, ensure_ascii=False, indent=1))
     return 0
+
+
+def _agreement(rs):
+    """Stage-outcome agreement (ADVANCE/DONE vs LOOPBACK/PAUSE) with the legacy session:
+    `by_construction` — the judgments were inverted from the legacy outcome, so agreement is true
+    by construction (it checks the render/transition layer only); `derived` — real test-cases.md
+    (repository), the legacy LEADER's coverage sentences, the real runner summary line; the engine
+    computes the outcome (K2-M7). Derived misses are split by cause: ids the prose never mentions
+    (`unsure` → repair → uncovered — an extraction limit) vs ids the prose calls not covered."""
+    out = {"by_construction": {"n": 0, "agree": 0}, "derived": {"n": 0, "agree": 0, "miss_extraction": 0,
+                                                                  "miss_not_covering": 0, "miss_other": 0,
+                                                                  "disagree": []}}
+    for r in rs:
+        b = out["by_construction"]
+        b["n"] += 1
+        b["agree"] += _kind_of(r["legacy_outcome"]) == (r.get("engine_kind") or "")
+        d = r.get("derived_run")
+        if not d:
+            continue
+        o = out["derived"]
+        o["n"] += 1
+        if _kind_of(r["legacy_outcome"]) == (d.get("kind") or ""):
+            o["agree"] += 1
+            continue
+        v = d.get("verdicts") or {}
+        cause = ("miss_extraction" if v.get("unsure") and not v.get("not_covering") else
+                 "miss_not_covering" if v.get("not_covering") else "miss_other")
+        o[cause] += 1
+        if len(o["disagree"]) < 40:
+            o["disagree"].append({"episode": r["episode"], "legacy": r["legacy_outcome"], "engine": d.get("token", "")[:60],
+                                  "verdicts": v, "cause": cause})
+    for k in out.values():
+        k["pct"] = round(100.0 * k["agree"] / k["n"], 1) if k["n"] else None
+    return out
+
+
+def _kind_of(outcome):
+    return {"ADVANCE": "ADVANCE", "DONE": "DONE", "LOOPBACK": "LOOPBACK", "PAUSE": "PAUSE",
+            "PAUSE:pending": "PAUSE"}.get(outcome, outcome)
 
 
 def report(rows, skipped):
@@ -910,8 +1041,9 @@ def report(rows, skipped):
         lb = sum(r["legacy_bytes"] for r in rs)
         tot = sum(r["total"] for r in rs)
         m = sum(r["matched"] for r in rs)
-        # bytes of differing elements that are classified intentional are excluded from the
-        # denominator AND the numerator (§10.2-2: the gate is on unexplained differences)
+        # after_intentional = 1 − defect bytes / (legacy bytes − bytes of intentional, replay-gap and
+        # drift elements): those elements leave the numerator AND the denominator (§10.2-2 gates
+        # on unexplained differences) — K2-M7 fixed the formula to match this comment
         f_all = [f for r in rs for f in r["fields"].values()]
         f_def = [f for f in f_all if not f[0] and f[3] == "defect"]
         f_gap = [f for f in f_all if not f[0] and f[3] == "replay-gap"]
@@ -927,20 +1059,21 @@ def report(rows, skipped):
                 size = len("\n".join(d["legacy"] or d["engine"] or []))
                 if d["class"] == "defect":
                     bad += size
-                elif d["class"] in ("replay-gap", "drift"):
+                else:
                     gap += size
         clean = sum(1 for r in rs if not any(d["class"] in ("defect", "replay-gap", "drift") for d in r["diffs"]))
         out["episodes"][stage] = {
             "n": len(rs), "exact_structural": sum(1 for r in rs if r["exact"]),
             "structural_byte_match_raw": round(100.0 * m / tot, 2) if tot else None,
             "structural_byte_match_after_intentional": round(100.0 * (1 - float(bad) / (lb - gap)), 2) if lb else None,
-            "structural_excluded_bytes(replay-gap+drift)": gap, "structural_defect_bytes": bad,
+            "structural_excluded_bytes(intentional+replay-gap+drift)": gap, "structural_defect_bytes": bad,
             "episodes_without_unexplained_diff": clean,
             "prose_fields": len(f_all), "prose_field_match_raw": round(100.0 * sum(1 for f in f_all if f[0]) / len(f_all), 2) if f_all else None,
             "prose_field_match_after_intentional": round(100.0 * (len(f_all) - len(f_def) - len(f_gap)) / (len(f_all) - len(f_gap)), 2) if f_all else None,
             "prose_diff_classes": f_cls, "prose_replay_gaps": len(f_gap),
             "diff_classes": cls, "crashes": sum(1 for r in rs if r["error"]),
             "legacy_bytes": lb,
+            "outcome_agreement": _agreement(rs),
             "prose_version_gated": {w: sum(1 for r in rs if w in r.get("gated", [])) for w in
                                     sorted(set(x for r in rs for x in r.get("gated", [])))}}
     return out

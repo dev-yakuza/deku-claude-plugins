@@ -93,7 +93,7 @@ class Replay(unittest.TestCase):
         rows = []
         for ep in P.episodes([self.log]):
             leg = P.Legacy(ep)
-            rows.append(dict(P.compare(ep, leg, P.run_engine(ep, leg, CFG, self.d)), stage=ep.stage, error=None))
+            rows.append(dict(P.compare(ep, leg, P.run_engine(ep, leg, CFG, self.d)), stage=ep.stage, error=None, legacy_outcome=leg.outcome(), engine_kind=leg.outcome() if ep.stage == "test" else "DONE", episode=ep.key))
         rep = P.report(rows, {})
         self.assertEqual(rep["episodes"]["test"]["structural_byte_match_after_intentional"], 100.0)
         self.assertEqual(rep["episodes"]["qa"]["structural_defect_bytes"], 0)
@@ -105,6 +105,25 @@ class Replay(unittest.TestCase):
         f.step({"name": "Edit", "input": {"file_path": "/w/.claude/x.md", "old_string": "yes", "new_string": "YES"}})
         po = P.post_of({"name": "Bash", "input": {"command": "gh issue comment 7 --body-file .claude/x.md"}}, f, 7)
         self.assertEqual(po, ("issue", 7, "<!-- guild:note -->\nverified: YES\n"))
+
+    def test_derived_mode_uses_real_cases_and_leader_prose(self):
+        ep = P.episodes([self.log])[0]
+        leg = P.Legacy(ep)
+        real = "| ID | AC |\n|---|---|\n| T1 | AC1 |\n| T2 | AC1 |\n"
+        p, gh, w, calls, inj = P.build(ep, leg, CFG, self.d, real_tc=real)
+        self.assertTrue(inj["derived"])
+        self.assertEqual(inj["verdicts"], {"effective": 0, "not_covering": 0, "unsure": 2})   # prose never names T1/T2
+        self.assertEqual(P.prose_verdicts(["C1", "C2", "C3"], "### AC 커버리지\n- C1–C2 PASS\n- C3 미커버\n### 검증 범위\n"),
+                         {"C1": "effective", "C2": "effective", "C3": "not_covering"})
+
+    def test_agreement_split(self):
+        rows = [{"legacy_outcome": "ADVANCE", "engine_kind": "ADVANCE", "episode": "a",
+                 "derived_run": {"kind": "LOOPBACK", "token": "OK LOOPBACK: execute", "verdicts": {"unsure": 2}}}]
+        a = P._agreement(rows)
+        self.assertEqual((a["by_construction"]["pct"], a["derived"]["pct"], a["derived"]["miss_extraction"]), (100.0, 0.0, 1))
+
+    def test_manual_qa_absent_is_a_replay_gap(self):
+        self.assertEqual(P.classify("manual-qa", "(absent)", "manual-qa x", P.episodes([self.log])[1])[0], "replay-gap")
 
     def test_e2e_normalisation(self):
         self.assertEqual(P.e2e_of("**E2E 불요** — 위젯 한정"), "E2E 불요: 위젯 한정")

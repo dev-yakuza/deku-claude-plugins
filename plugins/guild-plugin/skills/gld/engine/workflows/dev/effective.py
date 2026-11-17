@@ -55,6 +55,7 @@ TEST_FILE_RE = re.compile(r"[\w./-]*?(?:_test\.dart|_test\.go|\.test\.[jt]sx?|\.
 TEST_PATH_RE = re.compile(r"(^|/)(test|tests|__tests__|spec|integration_test|testdata)/|_test\.(dart|go|py)$|"
                           r"\.(test|spec)\.[jt]sx?$|(^|/)test_[^/]*\.py$")
 EXCERPT_CAP = 200
+FRESH_DIRS = ("build", "coverage", ".gradle", "target", ".pytest_cache", "__pycache__")
 LITERAL_WORDS = {"true", "false", "null", "none", "nil", "and", "or", "not", "is", "in", "istrue",
                  "isfalse", "isnull", "isnotnull", "equals", "undefined", "tobe", "toequal", "tobetruthy",
                  "tobedefined", "tobefalsy"}
@@ -288,7 +289,9 @@ def single_command(cfg, runner, path, name):
         return None
     exact = "(^| )%s$" % re.escape(name.split(" › ")[-1] if " › " in name else name)
     if runner in ("flutter", "dart"):
-        return "%s test %s --name %s" % ("flutter" if runner == "flutter" else "dart", q(path), q(exact))
+        # --no-pub: checks have no network; dependencies are the engine deps step (K1r4-M2)
+        return "%s test %s%s --name %s" % ("flutter" if runner == "flutter" else "dart", q(path),
+                                          " --no-pub" if runner == "flutter" else "", q(exact))
     if runner == "jest":
         return "npx jest %s -t %s" % (q(path), q(exact))
     if runner == "vitest":
@@ -456,10 +459,12 @@ class TempTree(object):
             os.makedirs(os.path.dirname(dst), exist_ok=True)
             if os.path.isdir(src):
                 if os.path.basename(rel) == ".dart_tool":
-                    os.makedirs(dst)                   # its own build state; package config copied
-                    for fn in os.listdir(src):
-                        if os.path.isfile(os.path.join(src, fn)):
-                            shutil.copy2(os.path.join(src, fn), os.path.join(dst, fn))
+                    # its own copy (writes stay in the temp tree): package config + built native
+                    # assets (hooks); compile caches are left out (large, rebuilt as needed)
+                    shutil.copytree(src, dst, symlinks=True,
+                                    ignore=shutil.ignore_patterns("build", "flutter_build", "build_resolvers"))
+                elif os.path.basename(rel) in FRESH_DIRS:
+                    os.makedirs(dst)                   # tool output: the re-run writes its own
                 else:
                     os.symlink(src, dst)               # read-only use: writes denied by the check sandbox
             else:

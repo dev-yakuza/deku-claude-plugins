@@ -73,7 +73,16 @@ def live(issue, worktree, base, branch, config, clock, gh, writer, decisions, ru
         return _sandboxed(cmds, worktree, owner, timeout_s)
 
     def check(cmd, cwd, owner, timeout_s, write_dirs):
-        return _sandboxed([cmd], cwd, owner, timeout_s, write_dirs)
+        # the TEST `effective` re-run in the temp tree re-runs dependency build hooks (word_app:
+        # sqlite3 native assets from GitHub releases — measured): the deps step's host allowlist
+        from guildcore.checks.netproxy import AllowlistProxy
+        with AllowlistProxy(CH.deps_hosts(worktree)) as px:
+            root_env.update(px.env())
+            try:
+                return _sandboxed([cmd], cwd, owner, timeout_s, write_dirs)
+            finally:
+                for k in px.env():
+                    root_env.pop(k, None)
 
     def capture(kind, stage, role, summary, evidence, area, surprise):
         return CAP.capture(worktree, kind, issue, stage, role, summary, evidence, area, surprise, clock=clock)

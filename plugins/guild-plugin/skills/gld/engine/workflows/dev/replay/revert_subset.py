@@ -1,0 +1,143 @@
+#!/usr/bin/env python3
+"""replay.revert_subset — the TEST `effective` check ② on REAL code (K2 review M7): a scratch clone of
+the repository, the Issue's squash commit `(#N)` as HEAD, its parent as `<base>`, the tests the
+commit ADDED as `kind: new` covers, the impl revert in a temp worktree, the single test re-run
+with the exact filter — every command under the tester-verify sandbox (checks.run_command +
+settings.role_sandbox, K1r3-B1), dependencies fetched once per commit by the engine's deps step
+(host-allowlist proxy). Gitignored generated sources the repo needs are copied (read-only) from
+the source checkout. Nothing is written to the source repository.
+
+    revert_subset.py --repo <src> --work <scratch dir> --issues 1873,1890,… [--flutter-bin DIR] --out FILE.json
+"""
+
+import argparse
+import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+import time
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+ENGINE = os.path.abspath(os.path.join(HERE, "..", "..", ".."))
+if ENGINE not in sys.path:
+    sys.path.insert(0, ENGINE)
+
+from guildcore import checks as CH                        # noqa: E402
+from guildcore.roles import settings as S                 # noqa: E402
+from workflows.dev import effective as EFF                # noqa: E402
+
+GENERATED = ("lib/env/env.dart", "lib/firebase_options.dart", "lib/controller/tts_controller/wrong_words.dart",
+             "assets/data.db")
+TEST_NAME_RE = re.compile(r"\b(?:test|testWidgets)\s*\(\s*'([^'$]+)'")
+
+
+def sh(cwd, *a):
+    return subprocess.run(a, cwd=cwd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE).stdout.decode()
+
+
+class Port(object):
+    def __init__(self, root, env, run_dir):
+        self.root, self.env, self.run_dir = root, env, run_dir
+        self.calls = []
+
+    def read_file(self, rel):
+        try:
+            with open(os.path.join(self.root, rel), encoding="utf-8", errors="replace") as fh:
+                return fh.read()
+        except (IOError, OSError):
+            return None
+
+    def check(self, cmd, cwd, owner, timeout_s, write_dirs):
+        sb = S.role_sandbox("tester-verify", self.root, self.run_dir, toolchain=True,
+                            tool_writes=S.toolchain_writes(self.root))
+        fs = dict(sb["filesystem"])
+        fs["allowWrite"] = list(fs.get("allowWrite") or []) + [d.rstrip("/") + "/**" for d in write_dirs]
+        fs["denyWrite"] = list(fs.get("denyWrite") or []) + [self.root + "/**"]
+        t0 = time.time()
+        from guildcore.checks.netproxy import AllowlistProxy
+        # build hooks of dependencies (sqlite3 native assets) re-run in the temp tree: the same
+        # host allowlist as the deps step, nothing else (ports.check does the same)
+        with AllowlistProxy(CH.deps_hosts(self.root)) as px:
+            e = dict(self.env)
+            e.update(px.env())
+            r = CH.run_command([cmd], timeout_s, cwd=cwd, env=e, sandbox=dict(sb, filesystem=fs),
+                               tmp=os.path.join(self.run_dir, "tmp"))
+        self.calls.append({"cmd": cmd, "rc": r.rc, "secs": round(time.time() - t0, 1), "tail": r.raw[-1500:]})
+        return r
+
+
+def main(argv=None):
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--repo", required=True)
+    ap.add_argument("--work", required=True)
+    ap.add_argument("--issues", required=True)
+    ap.add_argument("--flutter-bin", default=os.path.expanduser("~/fvm/default/bin"))
+    ap.add_argument("--out", required=True)
+    a = ap.parse_args(argv)
+    os.makedirs(a.work, exist_ok=True)
+    clone = os.path.join(a.work, "clone")
+    if not os.path.isdir(clone):
+        sh(a.work, "git", "clone", "-q", "--no-hardlinks", os.path.abspath(a.repo), clone)
+    env = dict(os.environ)
+    env["PATH"] = a.flutter_bin + os.pathsep + env.get("PATH", "")
+    env.pop("GH_TOKEN", None)
+    env.pop("GITHUB_TOKEN", None)
+    results = []
+    for n in [int(x) for x in a.issues.split(",") if x]:
+        row = {"issue": n}
+        sha = sh(a.repo, "git", "log", "--format=%H", "-1", "--grep", "(#%d)" % n, "HEAD").strip()
+        if not sha:
+            results.append(dict(row, skipped="no squash commit"))
+            continue
+        sh(clone, "git", "checkout", "-q", "--detach", sha)
+        sh(clone, "git", "clean", "-qfdx", "-e", ".dart_tool")
+        for g in GENERATED:
+            src = os.path.join(a.repo, g)
+            if os.path.exists(src):
+                os.makedirs(os.path.dirname(os.path.join(clone, g)), exist_ok=True)
+                shutil.copy2(src, os.path.join(clone, g))
+        base = sh(clone, "git", "rev-parse", sha + "^").strip()
+        touched = [f for f in sh(clone, "git", "diff", "--name-only", "--diff-filter=AM", base, sha).split("\n")
+                   if f.endswith("_test.dart")]
+        covers = []
+        for f in touched:
+            head = TEST_NAME_RE.findall(open(os.path.join(clone, f), encoding="utf-8").read())
+            try:
+                old = set(TEST_NAME_RE.findall(sh(clone, "git", "show", "%s:%s" % (base, f))))
+            except subprocess.CalledProcessError:
+                old = set()
+            new = [x for x in head if x not in old and head.count(x) == 1]       # tests this commit ADDED
+            if new and len(covers) < 2:
+                covers.append({"test": "%s::%s" % (f, new[0]), "ac": "C%d" % (len(covers) + 1), "kind": "new"})
+        if not covers:
+            results.append(dict(row, sha=sha, skipped="the commit adds no new named dart test"))
+            continue
+        run_dir = os.path.join(a.work, "runs", str(n))
+        for d in ("in", "out", "tmp"):
+            os.makedirs(os.path.join(run_dir, d), exist_ok=True)
+        env.update(S.render_gitconfig(clone, os.path.join(run_dir, "in", "gitconfig")))   # ~/.gitconfig is denyRead
+        env["GIT_CONFIG_NOSYSTEM"] = "1"
+        dev_sb = S.role_sandbox("developer", clone, run_dir, toolchain=True, tool_writes=S.toolchain_writes(clone))
+        t0 = time.time()
+        warm = "flutter test --no-pub %s" % covers[0]["test"].split("::")[0]      # native assets (K1r4-M2)
+        dr, px = CH.deps_step(["flutter pub get", warm], clone, dev_sb, os.path.join(run_dir, "tmp"), env=env)
+        row["deps"] = {"rc": dr.rc, "secs": round(time.time() - t0, 1)}
+        p = Port(clone, env, run_dir)
+        cfg = {"commands": {"test": "flutter test"}}
+        out, meta = EFF.run(p, cfg, [c["ac"] for c in covers], {c["ac"]: [c] for c in covers}, base, None, timeout_s=900)
+        row.update(sha=sha, base=base, covers=covers, meta={k: v for k, v in meta.items() if k != "rejected"},
+                   rejected=meta.get("rejected"), outcomes=[o.detail() for o in out.values()], calls=p.calls)
+        results.append(row)
+        print(json.dumps({"issue": n, "results": [(o.ac, o.result, o.why) for o in out.values()]}, ensure_ascii=False),
+              flush=True)
+        with open(a.out, "w", encoding="utf-8") as fh:              # incremental: a long run keeps its rows
+            json.dump(results, fh, ensure_ascii=False, indent=1)
+    with open(a.out, "w", encoding="utf-8") as fh:
+        json.dump(results, fh, ensure_ascii=False, indent=1)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

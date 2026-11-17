@@ -90,7 +90,7 @@ class Effective(unittest.TestCase):
         self.assertEqual(EFF.parse_test_ref("test/a_test.dart::shows title"), ("test/a_test.dart", "shows title"))
         self.assertEqual(EFF.parse_test_ref("«shows» (test/a_test.dart)"), ("test/a_test.dart", "shows"))
         self.assertEqual(EFF.single_command(CFG, "flutter", "test/a_test.dart", "x y"),
-                         "flutter test test/a_test.dart --name '(^| )x\\ y$'")
+                         "flutter test test/a_test.dart --no-pub --name '(^| )x\\ y$'")
         self.assertTrue(EFF.has_assertion("expect(find.text('a'), findsOneWidget);", "flutter")[0])
         self.assertFalse(EFF.has_assertion("expect(true, isTrue);", "flutter")[0])
 
