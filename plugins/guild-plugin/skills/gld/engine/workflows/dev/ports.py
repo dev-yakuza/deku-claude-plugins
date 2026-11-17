@@ -87,8 +87,9 @@ def warm_in_place(root, tree, run_dir, env, issue=None, proxy_hosts=None, extra_
     """K2r4-M1: the networked warm-up NEVER runs the developer's tree. `tree` holds a PRISTINE
     checkout of `<base>` (reviewed code, no ignored file, no `.git`): `pub get` + an ENGINE-written
     empty test (in a new dir outside `test/`) under the deps proxy, in `tree_sandbox`. The caller
-    has ruled out changed build inputs (`effective.hook_changes`), so base's hook artifacts are
-    HEAD's; the caller then moves the tree to HEAD (`TempTree.advance`). The warm-up dir and any
+    has classified the build inputs (`effective.build_inputs`): `none` → this is <base> and the
+    caller then moves it to HEAD (`TempTree.advance`); `hosted-deps` → this is the HEAD copy (only
+    hosted third-party package hooks run; no test config exists at its root). The warm-up dir and any
     placeholder are removed. Returns (CheckResult|None, proxy summary)."""
     import shutil
     if not os.path.exists(os.path.join(tree, "pubspec.yaml")):
@@ -130,11 +131,10 @@ def warm_in_place(root, tree, run_dir, env, issue=None, proxy_hosts=None, extra_
         return r, px
     finally:
         shutil.rmtree(wdir, True)
-        if placeholders:
-            # the test asset bundle built during the warm-up holds the EMPTY placeholders — drop it
-            # so the offline run rebuilds it from the real files (measured, word_app: a stale bundle
-            # with an empty assets/data.db → `no such table: words` in db_helper_test)
-            shutil.rmtree(os.path.join(tree, "build", "unit_test_assets"), True)
+        # the test asset bundle built by the warm-up is ALWAYS dropped (K2r6-m1): it may hold the
+        # EMPTY placeholders (measured, word_app: `no such table: words`) or <base>'s assets that
+        # HEAD deleted or changed — the offline run rebuilds it from the tree it actually tests
+        shutil.rmtree(os.path.join(tree, "build", "unit_test_assets"), True)
         for n in placeholders:
             try:
                 os.remove(os.path.join(tree, n))
@@ -172,6 +172,12 @@ def suite_in_tree(worktree, base, cmds, owner, timeout_s, run_dir, env, copy_lis
     use_warm = _warm if (warm and base) else None
     cmds = [offline_cmd(c) for c in cmds]
     with EFF.prepared_tree(worktree, base, [], use_warm, copy_list, overlay=True) as (tt, info):
+        if info["halt"]:
+            # K2r6-B1: own hooks / path-git-override deps / a test config changed → nothing runs
+            r = CH.CheckResult(False, None, False, "", [], int(timeout_s))
+            r.warm, r.build_inputs_changed, r.missing_ignored = info["warm"], info["build_files"], []
+            r.skipped_ignored, r.ignored_copied, r.tree_kb = list(tt.skipped_ignored), [], None
+            return r
         sb = tree_sandbox(tt.path, run_dir, worktree, issue, extra_roots)
         r = CH.run_command(cmds, timeout_s, cwd=tt.path, env=env, journal=journal, who="check-%s" % owner,
                            sandbox=sb, tmp=os.path.join(run_dir, "tmp"))
@@ -184,6 +190,10 @@ def suite_in_tree(worktree, base, cmds, owner, timeout_s, run_dir, env, copy_lis
                     os.makedirs(os.path.dirname(dst), exist_ok=True)
                     shutil.copyfile(src, dst)
         r.missing_ignored = [] if r.passed else PF.missing_ignored(r.raw, worktree, tt.skipped_ignored, tt.path)
+        # Option A safety net (K2r6-B1): a red offline run with a dependency-resolution/download
+        # signature is an environment problem, not a test failure
+        r.build_inputs_changed = (info["build_files"] or ["(dependency state)"]) \
+            if (not r.passed and PF.dependency_failure(r.raw, r.rc)) else None
         try:                                       # K2r5-m2: the per-run cost, on record
             du = subprocess.run(["du", "-sk", tt.path], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=120)
             r.tree_kb = int(du.stdout.split()[0]) if du.stdout else None
@@ -191,6 +201,7 @@ def suite_in_tree(worktree, base, cmds, owner, timeout_s, run_dir, env, copy_lis
             r.tree_kb = None
         r.raw = r.raw.replace(os.path.realpath(tt.path), worktree).replace(tt.path, worktree)
         r.warm = info["warm"] or ("skipped(no base)" if not base else None)
+        r.build_inputs = info["build_inputs"]
         r.skipped_ignored = list(tt.skipped_ignored)
         r.ignored_copied = list(tt.copied)
         return r

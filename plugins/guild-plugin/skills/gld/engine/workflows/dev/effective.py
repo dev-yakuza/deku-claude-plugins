@@ -467,23 +467,49 @@ def safe_rel(root, f, revs):
     return n
 
 
-# K2r3-M1 / K2r4-M1: changes to the BUILD inputs of the warm-up. The warm-up builds from a pristine
-# checkout of `<base>`; its hook artifacts equal HEAD's only when none of these changed: build
-# hooks (`hook/`), the pub manifests (`pubspec.yaml|lock`, `pubspec_overrides.yaml`), build_runner
-# config (`build.yaml`), analyzer options (`analysis_options*.yaml`, which can enable
-# experiments) and any `flutter_test_config.dart` (it wraps EVERY test `main` of its directory
-# subtree, the warm-up's included).
-HOOK_RE = re.compile(r"(^|/)hook/|(^|/)pubspec(_overrides)?\.(yaml|lock)$|(^|/)build(\.[\w-]+)?\.yaml$|"
-                     r"(^|/)analysis_options[\w.-]*\.yaml$|(^|/)flutter_test_config\.dart$")
+# K2r3-M1 / K2r4-M1 / K2r6-B1: changes to the BUILD inputs of the warm-up — what decides the
+# dependency and hook state: build hooks (`hook/`), the pub manifests (`pubspec.yaml|lock`,
+# `pubspec_overrides.yaml`) and any `flutter_test_config.dart` (it wraps EVERY test `main` of its
+# subtree, the warm-up's included). `analysis_options*` and `build*.yaml` are NOT build inputs of the
+# warm-up (r6: neither changes the hook or dependency state).
+HOOK_RE = re.compile(r"(^|/)hook/|(^|/)pubspec(_overrides)?\.(yaml|lock)$|(^|/)flutter_test_config\.dart$")
+# a pubspec/lock change that is NOT "third-party hosted dependencies only"
+NON_HOSTED_RE = re.compile(r"^[+-](?![+-]).*(\b(path|git|url|ref)\s*:|\bdependency_overrides\b|\bhooks\s*:|"
+                           r"\buser_defines\b|\bsource\s*:\s*\"?(path|git|sdk)\b)", re.M)
 
 
-def hook_changes(root, base):
-    """Files the change touched that are build inputs of the warm-up (HOOK_RE). An unknown base
-    counts as changed (fail closed)."""
+def hook_changes(root, base, extra=()):
+    """Files the change touched that are build inputs of the warm-up (HOOK_RE) — `base...HEAD`
+    plus `extra` (the suite's uncommitted overlay). An unknown base counts as changed."""
     if not base:
         return ["(no base)"]
     out = G.run(root, "diff", "--name-only", "%s...HEAD" % base, check=False).decode()
-    return [f for f in out.split("\n") if f and HOOK_RE.search(f)]
+    names = [f for f in out.split("\n") if f] + list(extra or [])
+    return sorted(set(f for f in names if HOOK_RE.search(f)))
+
+
+def build_inputs(root, base, extra=()):
+    """(kind, files) of the change's build inputs (K2r6-B1):
+    `none`        — nothing changed → warm a pristine <base>, then advance to HEAD;
+    `hosted-deps` — ONLY the root `pubspec.yaml`/`pubspec.lock` changed, by hosted third-party
+                    entries (no `path:`/`git:`/`url:`/`ref:`, no `dependency_overrides`, no
+                    `hooks:`/`user_defines`, no lock `source: path|git|sdk`), the root package has
+                    no `hook/` and no `flutter_test_config.dart` at HEAD → warm the HEAD copy
+                    (only third-party package hooks run with the network, as in the deps step);
+    `other`       — anything else (own hooks, path/git/override deps, a test config, no base) →
+                    `halted: env build-inputs-changed`."""
+    files = hook_changes(root, base, extra)
+    if not files:
+        return "none", []
+    if not base or any(f not in ("pubspec.yaml", "pubspec.lock") for f in files):
+        return "other", files
+    diff = G.run(root, "diff", "%s...HEAD" % base, "--", "pubspec.yaml", "pubspec.lock", check=False).decode("utf-8", "replace")
+    if NON_HOSTED_RE.search(diff):
+        return "other", files
+    for own in ("hook", "flutter_test_config.dart"):
+        if G.ok(root, "cat-file", "-e", "HEAD:%s" % own):
+            return "other", files
+    return "hosted-deps", files
 
 
 def default_base(root):
@@ -778,21 +804,31 @@ def warm_status(r):
 
 @contextlib.contextmanager
 def prepared_tree(root, base, files, warm=None, copy_list=(), overlay=False):
-    """The ONE preparation of every temp tree that runs role-written code (K2r5-B1): with a
-    warm-up and unchanged build inputs, a pristine <base> warmed IN PLACE under the network, then
-    `advance(HEAD)` (+ the worktree overlay for the suite) and the ignored entries, then the
-    opt-in `copy_ignored` — offline from there on. Yields (tree, info{warm, build_hook_changed})."""
-    info = {"warm": None, "build_hook_changed": []}
+    """The ONE preparation of every temp tree that runs role-written code (K2r5-B1, K2r6-B1).
+    By the change's build inputs (`build_inputs`):
+      none        — a pristine <base> warmed IN PLACE under the network, then `advance(HEAD)`;
+      hosted-deps — the pristine HEAD copy warmed in place (no developer test code: the warm-up
+                    is the engine's empty test and the tree has no test config);
+      other       — no warm-up and `info["halt"] = "build-inputs-changed"` (the caller stops).
+    Then the worktree overlay (suite trees), the ignored entries, the opt-in `copy_ignored` —
+    offline from there on. Yields (tree, info{warm, build_inputs, build_files, halt})."""
+    info = {"warm": None, "build_inputs": None, "build_files": [], "halt": None, "build_hook_changed": []}
+    kind = None
     if warm is not None:
-        info["build_hook_changed"] = hook_changes(root, base)
-    do_warm = warm is not None and not info["build_hook_changed"]
-    if warm is not None and not do_warm:
-        info["warm"] = "skipped(build-hook-changed: %s)" % ", ".join(info["build_hook_changed"][:3])
-    with TempTree(root, base, files, overlay=overlay, rev=base if do_warm else "HEAD",
-                  defer_ignored=do_warm) as tt:
-        if do_warm:
-            info["warm"] = warm_status(warm(base, tt.path))
-            tt.advance("HEAD")
+        extra = []
+        if overlay:
+            extra = [x for x in G.run(root, "ls-files", "-m", check=False).decode("utf-8", "replace").split("\n") if x]
+        kind, bfiles = build_inputs(root, base, extra)
+        info.update(build_inputs=kind, build_files=bfiles, build_hook_changed=bfiles)
+        if kind == "other":
+            info["halt"] = "build-inputs-changed"
+            info["warm"] = "skipped(build-inputs-changed: %s)" % ", ".join(bfiles[:3])
+    warm_rev = {"none": base, "hosted-deps": "HEAD"}.get(kind) if warm is not None else None
+    with TempTree(root, base, files, overlay=overlay, rev=warm_rev or "HEAD", defer_ignored=bool(warm_rev)) as tt:
+        if warm_rev:
+            info["warm"] = warm_status(warm(warm_rev, tt.path))
+            if warm_rev != "HEAD":
+                tt.advance("HEAD")
             tt.finish_ignored()
         tt.copy_listed(copy_list or [])
         yield tt, info
@@ -896,17 +932,6 @@ def run(p, cfg, effective_acs, covers_by_ac, base, given_impl=None, timeout_s=90
     meta.update(impl_source=src, rejected=bad, test_only=bool(base) and not impl,
                 impl_given_mismatch=det["mismatch"])
     warm = getattr(p, "warm", None)
-    if warm is not None:
-        # K2r3-M1: the networked warm-up runs dependency build hooks — the ROOT package's and path
-        # dependencies' too. If this change touches any of them, no hook it wrote may run with the
-        # network: no warm-up, and the offline re-run cannot be trusted to build → unverified.
-        changed = hook_changes(p.root, base)
-        if changed:
-            for ac, rows in pending.items():
-                out[ac] = CheckOutcome(ac, rows[0][0].get("test"), "unverified",
-                                       "build-hook-changed: %s" % ", ".join(changed[:3]), line=rows[0][3])
-            meta["build_hook_changed"] = changed
-            return out, meta
     try:
         # K2r4-M1: with a warm-up, the tree starts as a PRISTINE checkout of <base> (reviewed code,
         # no ignored file); the networked warm-up runs there, in place (hook caches keep their
@@ -915,6 +940,16 @@ def run(p, cfg, effective_acs, covers_by_ac, base, given_impl=None, timeout_s=90
         copy_list = ((cfg.get("engine") or {}).get("effective") or {}).get("copy_ignored")
         with prepared_tree(p.root, base, impl, warm, copy_list) as (tt, info):
             meta["warm"] = info["warm"]
+            if info["halt"]:
+                # K2r6-B1: own hooks / path-git-override deps / a test config changed — no warm-up
+                # may run them with the network and the offline run cannot build → unverified (the
+                # suite of the same Issue has already halted the stage: env build-inputs-changed)
+                meta["build_hook_changed"] = info["build_files"]
+                for ac, rows in pending.items():
+                    out[ac] = CheckOutcome(ac, rows[0][0].get("test"), "unverified",
+                                           "build-inputs-changed: %s" % ", ".join(info["build_files"][:3]),
+                                           line=rows[0][3])
+                return out, meta
             tt.warm = info["warm"]
             meta["skipped_ignored"] = tt.skipped_ignored
             meta.update(ignored_copied=tt.copied, ignored_refused=tt.refused)

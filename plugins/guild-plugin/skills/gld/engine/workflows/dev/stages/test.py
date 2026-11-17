@@ -175,7 +175,9 @@ def run(p, only=None, config_present=True):
 
     # K2r5-B1 preflight: tracked tests needing git-ignored files copy_ignored does not list → an
     # environment halt before anything runs (never a red suite, a loop-back or stagnation)
-    need = PF.ignored_needed(p.root, copy_list) if p.root and os.path.isdir(p.root) else []
+    # K2r6-m3: a test command that GENERATES ignored files (build_runner) — the output classifier only
+    gen = any("build_runner" in c for c in cmds)
+    need = PF.ignored_needed(p.root, copy_list) if (p.root and os.path.isdir(p.root) and not gen) else []
     if need:
         return B.ignored_missing(need, "preflight")
 
@@ -185,6 +187,9 @@ def run(p, only=None, config_present=True):
     miss = getattr(r, "missing_ignored", None)
     if not r.passed and miss:                        # the same halt, found by the run itself
         return B.ignored_missing(miss, "suite")
+    bic = getattr(r, "build_inputs_changed", None)
+    if not r.passed and bic:                         # K2r6-B1: env, never a loop-back
+        return B.build_inputs_changed(bic, "suite")
     summ = CH.parse_summary(r.raw, runner, (cfg.get("commands") or {}).get("test_summary"))
     if summ is None and not r.timed_out:
         d = p.judge(JG.spec(p, "RUNNER", [("raw", r.raw[-4000:])], STAGE, "T2.3"))
@@ -541,6 +546,8 @@ def _recheck(p, cfg):
     r = p.suite(cmds, "tester", CEILING_S)
     if not r.passed and getattr(r, "missing_ignored", None):
         return B.ignored_missing(r.missing_ignored, "suite")
+    if not r.passed and getattr(r, "build_inputs_changed", None):
+        return B.build_inputs_changed(r.build_inputs_changed, "suite")
     summ = CH.parse_summary(r.raw, EFF.runner_of(cfg))
     green = bool(r.passed and (summ is None or summ.green))
     p.writer.create_comment(p.issue, OUT.render_recheck_note(p.now(), green, r.red_line() or summary_line(r.raw, summ)))

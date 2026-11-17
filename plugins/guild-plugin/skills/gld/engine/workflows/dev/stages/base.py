@@ -163,7 +163,11 @@ class Entry(object):
 # §2.2 environment-level halts (exit 6, `halted: env <reason>` → supervisor `halted:engine-env-<reason>`):
 # the closed set. `ignored-missing` (K2r5-B1): tracked tests need git-ignored files the engine's temp
 # tree does not have and `engine.effective.copy_ignored` does not list — no code change can fix it.
-ENV_HALT_REASONS = ("endpoint", "python", "uninitialized", "plugin-not-listed", "ignored-missing")
+# `build-inputs-changed` (K2r6-B1): the change touched build inputs the engine cannot prepare
+# offline (own `hook/`, path/git/override deps, a test config), or the offline suite failed on
+# dependency resolution/download — a person runs it; never a loop-back or stagnation.
+ENV_HALT_REASONS = ("endpoint", "python", "uninitialized", "plugin-not-listed", "ignored-missing",
+                    "build-inputs-changed")
 
 
 def env_halt(reason, line, detail=""):
@@ -178,6 +182,12 @@ def ignored_missing(paths, where):
     hint = "list them in .claude/guild/config.json `engine.effective.copy_ignored` (explicit relative paths)"
     return env_halt("ignored-missing", "%s: the tests need git-ignored files the engine's temp tree does not have "
                     "(%s) — %s" % (where, lst, hint), "%s; %s" % (lst, hint))
+
+
+def build_inputs_changed(files, where):
+    lst = ", ".join(files[:6]) + (" …" if len(files) > 6 else "")
+    return env_halt("build-inputs-changed", "%s: the change's build inputs cannot be prepared offline by the "
+                    "engine (%s) — run the suite by hand (dependency step + tests) and continue" % (where, lst), lst)
 
 
 def enter(p, stage, config_present=True, only=None):

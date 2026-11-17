@@ -136,3 +136,24 @@ def missing_ignored(raw, root, skipped, tree=None):
         if p not in out:
             out.append(p)
     return out
+
+
+# K2r6-B1 option A: an offline run that failed on dependency resolution or a download (a hook
+# fetching a prebuilt binary, `pub get`) — never a test failure
+DEP_FAILURE_RES = (
+    re.compile(r"Couldn't resolve the package '"),
+    re.compile(r"Failed host lookup: '"),
+    re.compile(r"\bSocketException\b.*\b(Failed host lookup|Connection refused|Network is unreachable|"
+               r"nodename nor servname)"),
+    re.compile(r"Building native assets failed"),
+    re.compile(r"pub get failed|Failed to update packages|Could not resolve dependencies|"
+               r"version solving failed|Because \w+ depends on .* which doesn't match any versions"),
+    re.compile(r"Error: Couldn't find package config|package_config\.json.* does not exist|"
+               r"The pubspec\.yaml file has changed since the pubspec\.lock file was generated"),
+)
+
+
+def dependency_failure(raw, rc=None):
+    """True when a red run's output carries a dependency-resolution/download signature."""
+    raw = raw or ""
+    return any(rx.search(raw) for rx in DEP_FAILURE_RES)

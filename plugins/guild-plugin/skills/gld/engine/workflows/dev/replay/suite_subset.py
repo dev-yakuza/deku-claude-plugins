@@ -85,10 +85,15 @@ def main(argv=None):
         summ = CH.parse_summary(r.raw, "flutter")
         row.update(secs=round(time.time() - t1, 1), rc=r.rc, passed=r.passed, warm=r.warm,
                    tree_kb=getattr(r, "tree_kb", None), ignored_copied=r.ignored_copied,
+                   build_inputs=getattr(r, "build_inputs", None), build_inputs_changed=getattr(r, "build_inputs_changed", None),
                    summary=summ.as_dict() if summ else None, missing_ignored=r.missing_ignored,
                    tail=CH.redact_lines(r.raw[-1200:]))
-        row["result"] = ("halted: env ignored-missing — %s" % ", ".join(r.missing_ignored)
-                         if (not r.passed and r.missing_ignored) else ("green" if r.passed else "red"))
+        if not r.passed and r.missing_ignored:
+            row["result"] = "halted: env ignored-missing — %s" % ", ".join(r.missing_ignored)
+        elif not r.passed and getattr(r, "build_inputs_changed", None):
+            row["result"] = "halted: env build-inputs-changed — %s" % ", ".join(r.build_inputs_changed)
+        else:
+            row["result"] = "green" if r.passed else "red"
     with open(a.out, "w", encoding="utf-8") as fh:
         json.dump(row, fh, ensure_ascii=False, indent=1)
     print(json.dumps({k: row.get(k) for k in ("sha", "result", "secs", "warm", "summary")}, ensure_ascii=False))

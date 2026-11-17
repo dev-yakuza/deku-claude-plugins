@@ -747,7 +747,7 @@ class R3M1WarmUp(unittest.TestCase):
                             {"C1": [{"test": "test/a_test.dart::t", "ac": "C1", "kind": "new"}]}, base)
         self.assertEqual(warmed, [])
         self.assertEqual(out["C1"].result, "unverified")
-        self.assertTrue(out["C1"].why.startswith("build-hook-changed: hook/build.dart"))
+        self.assertTrue(out["C1"].why.startswith("build-inputs-changed: hook/build.dart"))
         self.assertEqual(EFF.hook_changes(r, base), ["hook/build.dart"])
 
     def test_pubspec_paths_count(self):
@@ -862,12 +862,11 @@ def _commit(r, files, msg="c"):
 
 
 class R4M1WarmUp(unittest.TestCase):
-    def test_build_inputs_cover_test_config_build_yaml_and_analysis_options(self):
+    def test_build_inputs_cover_test_config_hooks_and_pubspec(self):
         for f in ("test/flutter_test_config.dart", "flutter_test_config.dart", "packages/x/test/flutter_test_config.dart",
-                  "build.yaml", "packages/x/build.yaml", "analysis_options.yaml", "analysis_options.ci.yaml",
-                  "hook/build.dart", "pubspec.lock"):
+                  "hook/build.dart", "pubspec.lock", "pubspec_overrides.yaml"):
             self.assertTrue(EFF.HOOK_RE.search(f), f)
-        for f in ("lib/build_utils.dart", "lib/analysis.dart", "test/a_test.dart", "docs/build.yaml.md"):
+        for f in ("lib/build_utils.dart", "test/a_test.dart", "build.yaml", "analysis_options.yaml"):   # r6: not inputs
             self.assertFalse(EFF.HOOK_RE.search(f), f)
 
     def test_test_config_change_skips_the_warm_up(self):
@@ -882,7 +881,7 @@ class R4M1WarmUp(unittest.TestCase):
         out, meta = EFF.run(h.p, {"commands": {"test": "flutter test"}}, ["C1"],
                             {"C1": [{"test": "test/a_test.dart::t", "ac": "C1", "kind": "new"}]}, base)
         self.assertEqual(warmed, [])
-        self.assertEqual(out["C1"].why, "build-hook-changed: test/flutter_test_config.dart")
+        self.assertEqual(out["C1"].why, "build-inputs-changed: test/flutter_test_config.dart")
 
     def test_warm_up_runs_on_a_pristine_base_then_the_tree_moves_to_head(self):
         from workflows.dev import ports as PT
@@ -1328,3 +1327,144 @@ class R5OfflineSuiteCommand(unittest.TestCase):
         self.assertEqual(offline_cmd("fvm flutter test"), "fvm flutter test --no-pub")
         for same in ("flutter test --no-pub x", "scripts/verify_test_coverage.sh r.json", "npm test", "flutter testx"):
             self.assertEqual(offline_cmd(same), same)
+
+
+# ---- review r6 (review-k2-r6.md) -------------------------------------------------------------------
+
+PUB = "name: app\ndependencies:\n  flutter:\n    sdk: flutter\n  sqlite3: ^2.0.0\n"
+LOCK = "packages:\n  sqlite3:\n    dependency: direct main\n    source: hosted\n    version: \"2.0.0\"\n"
+
+
+class R6BuildInputs(unittest.TestCase):
+    def _repo(self, extra=None):
+        files = {"pubspec.yaml": PUB, "pubspec.lock": LOCK, "lib/a.dart": "int f() => 1;\n",
+                 "test/a_test.dart": "void main(){ test('t', (){ expect(f(), 2); }); }\n"}
+        files.update(extra or {})
+        r = repo(self, files)
+        return r, git(r, "rev-parse", "HEAD")
+
+    def test_analysis_options_only_warms_base(self):
+        r, base = self._repo({"analysis_options.yaml": "a\n"})
+        _commit(r, {"analysis_options.yaml": "b\n", "build.yaml": "x\n"})
+        self.assertEqual(EFF.build_inputs(r, base), ("none", []))
+
+    def test_hosted_dependency_add_warms_the_head_copy(self):
+        r, base = self._repo()
+        _commit(r, {"pubspec.yaml": PUB + "  http: ^1.2.0\n",
+                    "pubspec.lock": LOCK + "  http:\n    dependency: direct main\n    source: hosted\n    version: \"1.2.0\"\n",
+                    "lib/a.dart": "int f() => 2;\n"})
+        self.assertEqual(EFF.build_inputs(r, base), ("hosted-deps", ["pubspec.lock", "pubspec.yaml"]))
+        h = Harness(self, fixture(), root=r, base=base)
+        seen = []
+
+        def warm(rev, tree):
+            seen.append((rev, open(os.path.join(tree, "pubspec.yaml")).read().count("http"),
+                         open(os.path.join(tree, "lib", "a.dart")).read()))
+            return _CR(True, 0, False, "", [], 60)
+        h.p.warm = warm
+        h.checks = [_CR(True, 0, False, "00:01 +1: t\n00:01 +1: All tests passed!\n", [], 60),
+                    _CR(False, 1, False, "  Expected: <2>\n    Actual: <1>\n00:01 +0 -1: t [E]\n00:01 +0 -1: Some tests failed.\n",
+                        [], 60)]
+        out, meta = EFF.run(h.p, {"commands": {"test": "flutter test"}}, ["C1"],
+                            {"C1": [{"test": "test/a_test.dart::t", "ac": "C1", "kind": "new"}]}, base)
+        self.assertEqual(seen, [("HEAD", 1, "int f() => 2;\n")])
+        self.assertEqual(meta["warm"], "ok")
+        self.assertEqual(out["C1"].result, "pass")
+
+    def test_non_hosted_changes_are_other(self):
+        cases = [
+            ({"pubspec.yaml": PUB + "  mine:\n    path: ../mine\n"}, None),
+            ({"pubspec.yaml": PUB + "  g:\n    git: https://x/y.git\n"}, None),
+            ({"pubspec.yaml": PUB + "dependency_overrides:\n  sqlite3: 2.1.0\n"}, None),
+            ({"pubspec.yaml": PUB + "hooks:\n  user_defines:\n    sqlite3:\n      source: system\n"}, None),
+            ({"pubspec_overrides.yaml": "x\n"}, None),
+            ({"hook/build.dart": "void main(){}\n"}, None),
+            ({"test/flutter_test_config.dart": "x\n"}, None),
+            ({"pubspec.yaml": PUB + "  http: ^1.2.0\n"}, {"hook/build.dart": "void main(){}\n"}),   # own hook at HEAD
+            ({"pubspec.yaml": PUB + "  http: ^1.2.0\n"}, {"flutter_test_config.dart": "x\n"}),   # root test config
+        ]
+        for change, base_extra in cases:
+            with self.subTest(change=sorted(change)):
+                r, base = self._repo(base_extra)
+                _commit(r, change)
+                self.assertEqual(EFF.build_inputs(r, base)[0], "other")
+        self.assertEqual(EFF.build_inputs(repo(self, {"a": "x"}), None)[0], "other")     # unknown base: fail closed
+        self.assertEqual(EFF.hook_changes(repo(self, {"pubspec.yaml": "x"}), None), ["(no base)"])
+
+    def test_other_halts_the_suite_and_nothing_runs(self):
+        from workflows.dev import ports as PT
+        r, base = self._repo()
+        _commit(r, {"pubspec.yaml": PUB + "  mine:\n    path: ../mine\n"})
+        ran = []
+        orig = PT.CH.run_command
+        PT.CH.run_command = lambda *a, **k: ran.append(a) or _CR(True, 0, False, "", [], 60)
+        try:
+            res = PT.suite_in_tree(r, base, ["flutter test"], "tester", 60, tmpdir(self), dict(os.environ))
+        finally:
+            PT.CH.run_command = orig
+        self.assertEqual(ran, [])
+        self.assertFalse(res.passed)
+        self.assertEqual(res.build_inputs_changed, ["pubspec.yaml"])
+        self.assertTrue(res.warm.startswith("skipped(build-inputs-changed"))
+
+    def test_stage_env_halts_on_build_inputs_and_on_dependency_signatures(self):
+        for raw, flag in (("", ["pubspec.yaml"]),
+                          ("Building native assets failed. See the logs for more details.\n", ["(dependency state)"])):
+            with self.subTest(flag=flag):
+                red = suite(raw + "00:01 +0 -1: Some tests failed.\n", passed=False, rc=1)
+                red.build_inputs_changed = flag
+                h = Harness(self, fixture(), roles=[], suites=[red])
+                res = T.run(h.p)
+                self.assertEqual((res.kind, res.fail_class), (res.FAIL, "prevalidate_env"))
+                self.assertTrue(res.notes[0].startswith("halted: env build-inputs-changed — %s" % flag[0]))
+                self.assertNotIn("guild:needs-human", h.labels())
+                self.assertIsNone(h.body_with("test:output"))
+        self.assertIn("build-inputs-changed", SB.ENV_HALT_REASONS)
+
+    def test_dependency_signatures(self):
+        for raw in ("ClientException with SocketException: Failed host lookup: 'pub.dev' (OS Error: nodename nor servname)",
+                    "Building native assets failed. See the logs for more details.",
+                    "Error: Couldn't resolve the package 'http' in 'package:http/http.dart'.",
+                    "Because app depends on foo ^9.0.0 which doesn't match any versions, version solving failed."):
+            self.assertTrue(PF.dependency_failure(raw), raw)
+        for raw in ("Expected: <1>\n  Actual: <2>", "Some tests failed.", "SocketException: closed by test"):
+            self.assertFalse(PF.dependency_failure(raw), raw)
+
+    def test_warm_up_test_imports_nothing_from_the_repo(self):
+        from workflows.dev.ports import WARMUP_DART, WARMUP_DIR
+        imports = re.findall(r"^import '([^']+)'", WARMUP_DART, re.M)
+        self.assertEqual(imports, ["package:flutter_test/flutter_test.dart"])
+        self.assertNotIn("test", WARMUP_DIR.split("/"))
+
+    def test_bundle_always_dropped_after_the_warm_up(self):
+        from workflows.dev import ports as PT
+        r = repo(self, {"pubspec.yaml": "name: x\n"})
+        tree = tmpdir(self)
+        open(os.path.join(tree, "pubspec.yaml"), "w").write("name: x\n")
+
+        def fake(cmds, t, sb, tmp, env=None, hosts=None, timeout_s=1800):
+            os.makedirs(os.path.join(t, "build", "unit_test_assets"), exist_ok=True)
+            return _CR(True, 0, False, "", [], 60), {}
+        orig = PT.CH.deps_step
+        PT.CH.deps_step = fake
+        try:
+            run_dir = tmpdir(self)
+            os.makedirs(os.path.join(run_dir, "tmp"))
+            res, px = PT.warm_in_place(r, tree, run_dir, dict(os.environ))
+        finally:
+            PT.CH.deps_step = orig
+        self.assertTrue(res.passed)
+        self.assertNotIn("placeholders", px)
+        self.assertFalse(os.path.exists(os.path.join(tree, "build", "unit_test_assets")))
+
+    def test_preflight_skipped_when_the_test_command_generates_files(self):
+        r = repo(self, {"pubspec.yaml": "name: app\n", ".gitignore": "*.g.dart\n",
+                        "test/a_test.dart": "import 'package:app/m.g.dart';\n"})
+        self.assertEqual(PF.ignored_needed(r), ["lib/m.g.dart"])
+        cfg = dict(CFG, commands={"test": ["dart run build_runner build -d", "flutter test"]})
+        h = Harness(self, fixture(), root=r, config=cfg, roles=[role("DONE", covers=[], e2e="E2E 불요: x")],
+                    suites=[suite("00:01 +0 -1: x [E]\n00:01 +0 -1: Some tests failed.\n", passed=False, rc=1)])
+        h.write_file("docs/specs/7/test-cases.md", "| C1 | a |\n")
+        res = T.run(h.p)
+        self.assertNotEqual(res.fail_class, "prevalidate_env")          # no preflight halt — the suite ran
+        self.assertEqual(len(h.calls["suites"]), 1)
