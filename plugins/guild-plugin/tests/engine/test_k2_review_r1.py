@@ -617,7 +617,7 @@ class R2M1OfflineReruns(unittest.TestCase):
         src = open(os.path.join(_util.ENGINE, "workflows", "dev", "ports.py"), encoding="utf-8").read()
         chk = src[src.index("    def check("):src.index("    def warm(")]
         self.assertNotIn("AllowlistProxy", chk)
-        self.assertIn("guild_engine_warmup_test.dart", src)
+        self.assertIn("WARMUP_DIR", src[src.index("def warm_in_place("):])
 
     def test_ignored_files_are_never_copied(self):
         r = repo(self, {"lib/a.dart": "x\n", ".gitignore": "lib/env/\n.env\n"})
@@ -697,7 +697,7 @@ class R3CopyIgnored(unittest.TestCase):
         git(r, "commit", "-qm", "t")
         h = Harness(self, fixture(), root=r, base=git(r, "rev-parse", "HEAD"))
         seen = []
-        h.p.warm = lambda tree: seen.append(os.path.exists(os.path.join(tree, "assets", "data.db")))
+        h.p.warm = lambda base, tree: seen.append(os.path.exists(os.path.join(tree, "assets", "data.db")))
         cfg = {"commands": {"test": "python3 -m unittest"}, "engine": {"effective": {"copy_ignored": ["assets/data.db"]}}}
         from guildcore.checks import CheckResult as CR
         h.checks = [CR(True, 0, False, "test_x (calc_test.T.test_x) ... ok\n\nRan 1 test in 0.0s\n\nOK\n", [], 60)]
@@ -767,7 +767,8 @@ class R3M1WarmUp(unittest.TestCase):
         src = open(os.path.join(_util.ENGINE, "workflows", "dev", "replay", "revert_subset.py"), encoding="utf-8").read()
         deps = src.index("CH.deps_step(")
         self.assertLess(deps, src.index("for g in GENERATED:"))       # ignored originals only after
-        self.assertIn("guild_engine_warmup_test.dart", src[deps - 900:deps])
+        self.assertIn('["flutter pub get"]', src[deps:deps + 80])     # the developer tree: pub get only
+        self.assertIn("warm_in_place(", src)                          # hooks run on pristine <base>
 
 
 class R3M2Leakage(unittest.TestCase):
@@ -807,8 +808,9 @@ class R3M2Leakage(unittest.TestCase):
         out = h.body_with("test:output")
         self.assertNotIn("secret line", out)
         self.assertIn("exit: red", out)
-        self.assertIn("pass: adds tax", out)
-        self.assertIn("fail: rounds", out)
+        self.assertIn("pass: test#1", out)          # r4: names not statically cited are numbered
+        self.assertIn("fail: test#2", out)
+        self.assertNotIn("adds tax", out)
 
     def test_without_copy_list_the_tail_is_posted(self):
         raw = "00:01 +1: adds tax\nnote: hello\n00:02 +2: All tests passed!\n"
@@ -821,7 +823,7 @@ class R3M2Leakage(unittest.TestCase):
         from guildcore import checks as CHK
         prof = CHK.sandbox_profile({"filesystem": {}})
         self.assertIn('(allow network-outbound (remote ip "localhost:*"))', prof)
-        self.assertNotIn("unix-socket", prof)                       # measured: flutter needs none
+        self.assertNotIn("(allow network-outbound (remote unix-socket", prof)   # measured: flutter needs none
         self.assertIn('(deny network-outbound (remote ip "localhost:1080"))', prof)
         self.assertLess(prof.index('localhost:*'), prof.index('localhost:1080'))   # last rule wins
 
@@ -838,3 +840,304 @@ class R3Minors(unittest.TestCase):
             self.assertNotIn("gld-eff", tt.path)
         src = open(os.path.join(_util.ENGINE, "workflows", "dev", "judges", "TEST.md"), encoding="utf-8").read()
         self.assertIn("existsSync", src)
+
+
+# ---- review r4 (review-k2-r4.md) -------------------------------------------------------------------
+
+from guildcore.checks import CheckResult as _CR  # noqa: E402
+
+
+def _commit(r, files, msg="c"):
+    for rel, text in files.items():
+        p_ = os.path.join(r, rel)
+        os.makedirs(os.path.dirname(p_), exist_ok=True)
+        with open(p_, "w") as fh:
+            fh.write(text)
+    git(r, "add", "-A")
+    git(r, "commit", "-qm", msg)
+    return git(r, "rev-parse", "HEAD")
+
+
+class R4M1WarmUp(unittest.TestCase):
+    def test_build_inputs_cover_test_config_build_yaml_and_analysis_options(self):
+        for f in ("test/flutter_test_config.dart", "flutter_test_config.dart", "packages/x/test/flutter_test_config.dart",
+                  "build.yaml", "packages/x/build.yaml", "analysis_options.yaml", "analysis_options.ci.yaml",
+                  "hook/build.dart", "pubspec.lock"):
+            self.assertTrue(EFF.HOOK_RE.search(f), f)
+        for f in ("lib/build_utils.dart", "lib/analysis.dart", "test/a_test.dart", "docs/build.yaml.md"):
+            self.assertFalse(EFF.HOOK_RE.search(f), f)
+
+    def test_test_config_change_skips_the_warm_up(self):
+        r = repo(self, {"pubspec.yaml": "name: x\n", "lib/a.dart": "int f() => 1;\n",
+                        "test/a_test.dart": "void main(){ test('t', (){ expect(f(), 1); }); }\n"})
+        base = git(r, "rev-parse", "HEAD")
+        _commit(r, {"test/flutter_test_config.dart": "Future<void> testExecutable(f) async => f();\n",
+                    "lib/a.dart": "int f() => 2;\n"})
+        h = Harness(self, fixture(), root=r, base=base)
+        warmed = []
+        h.p.warm = lambda b, t: warmed.append(b)
+        out, meta = EFF.run(h.p, {"commands": {"test": "flutter test"}}, ["C1"],
+                            {"C1": [{"test": "test/a_test.dart::t", "ac": "C1", "kind": "new"}]}, base)
+        self.assertEqual(warmed, [])
+        self.assertEqual(out["C1"].why, "build-hook-changed: test/flutter_test_config.dart")
+
+    def test_warm_up_runs_on_a_pristine_base_then_the_tree_moves_to_head(self):
+        from workflows.dev import ports as PT
+        r = repo(self, {"pubspec.yaml": "name: x\n", "lib/a.dart": "int f() => 1;\n", "lib/old.dart": "o\n",
+                        "test/a_test.dart": "void main(){ test('t', (){ expect(f(), 2); }); }\n",
+                        ".gitignore": "lib/env/\n.dart_tool/\nassets/data.db\n"})
+        base = git(r, "rev-parse", "HEAD")
+        _commit(r, {"lib/a.dart": "int f() => 2; // developer code\n", "lib/new.dart": "n\n"})
+        os.remove(os.path.join(r, "lib", "old.dart"))
+        git(r, "commit", "-qam", "rm")
+        os.makedirs(os.path.join(r, "lib", "env"))
+        open(os.path.join(r, "lib", "env", "env.dart"), "w").write("const k = 'AIzaSy-secret-value-1234567';\n")
+        seen = {}
+        calls = []
+
+        def fake_deps(cmds, tree, sb, tmp, env=None, hosts=None, timeout_s=1800):
+            calls.append(cmds)
+            if len(calls) == 1:
+                seen.update(cmds=cmds, a=open(os.path.join(tree, "lib", "a.dart")).read(),
+                            git=os.path.exists(os.path.join(tree, ".git")),
+                            env=os.path.exists(os.path.join(tree, "lib", "env", "env.dart")),
+                            deny=sb["filesystem"]["denyRead"])
+                os.makedirs(os.path.join(tree, ".dart_tool", "hooks_runner"))
+                return _CR(False, 1, False, "No file or variants found for asset: assets/data.db.\n", [], 60), {"a": 1}
+            seen["placeholder"] = os.path.getsize(os.path.join(tree, "assets", "data.db"))
+            return _CR(True, 0, False, "00:00 +1: All tests passed!\n", [], 60), {"a": 1}
+        orig = PT.CH.deps_step
+        PT.CH.deps_step = fake_deps
+        try:
+            h = Harness(self, fixture(), root=r, base=base)
+            run_dir = tmpdir(self)
+            for d in ("in", "out", "tmp"):
+                os.makedirs(os.path.join(run_dir, d))
+            trees = []
+
+            def warm(b, tree):
+                self.assertEqual(b, base)
+                trees.append(tree)
+                res, px = PT.warm_in_place(r, tree, run_dir, dict(os.environ))
+                seen["px"] = px
+                return res
+            h.p.warm = warm
+            h.checks = [_CR(True, 0, False, "00:01 +1: t\n00:01 +1: All tests passed!\n", [], 60),
+                        _CR(False, 1, False, "  Expected: <2>\n    Actual: <1>\n00:01 +0 -1: t [E]\n00:01 +0 -1: Some tests failed.\n",
+                            [], 60)]
+            snap = {}
+            orig_check = h._check
+
+            def check(cmd, cwd, owner, timeout_s, write_dirs):
+                if not snap:
+                    snap.update(a=open(os.path.join(cwd, "lib", "a.dart")).read(),
+                                new=os.path.exists(os.path.join(cwd, "lib", "new.dart")),
+                                old=os.path.exists(os.path.join(cwd, "lib", "old.dart")),
+                                hooks=os.path.isdir(os.path.join(cwd, ".dart_tool", "hooks_runner")),
+                                warmdir=os.path.exists(os.path.join(cwd, "guild_engine_warmup")),
+                                db=os.path.exists(os.path.join(cwd, "assets", "data.db")))
+                return orig_check(cmd, cwd, owner, timeout_s, write_dirs)
+            h.p.check = check
+            out, meta = EFF.run(h.p, {"commands": {"test": "flutter test"}}, ["C1"],
+                                {"C1": [{"test": "test/a_test.dart::t", "ac": "C1", "kind": "new"}]}, base)
+        finally:
+            PT.CH.deps_step = orig
+        self.assertEqual(seen["a"], "int f() => 1;\n")                # <base>, not the developer's HEAD
+        self.assertFalse(seen["git"])                                  # no link to the git dir
+        self.assertFalse(seen["env"])                                  # no ignored file
+        self.assertEqual(seen["cmds"][1], "flutter test --no-pub guild_engine_warmup/warmup_test.dart")
+        self.assertIn(os.path.realpath(r) + "/**", seen["deny"])
+        self.assertEqual(seen["placeholder"], 0)                       # an EMPTY engine-written placeholder
+        self.assertEqual(seen["px"]["placeholders"], ["assets/data.db"])
+        self.assertEqual(snap, {"a": "int f() => 2; // developer code\n", "new": True, "old": False, "hooks": True,
+                                "warmdir": False, "db": False})        # HEAD, warm artifacts kept, no leftovers
+        self.assertEqual(out["C1"].result, "pass")
+
+    def test_root_test_config_at_base_skips(self):
+        from workflows.dev import ports as PT
+        r = repo(self, {"pubspec.yaml": "name: x\n", "flutter_test_config.dart": "x\n"})
+        res, px = PT.warm_in_place(r, r, tmpdir(self), dict(os.environ))
+        self.assertIsNone(res)
+        self.assertIn("skipped", px)
+
+
+class R4M2Unreachable(unittest.TestCase):
+    def test_tree_sandbox_denies_every_checkout_and_the_common_dir(self):
+        from workflows.dev.ports import tree_sandbox
+        main = repo(self, {"a.txt": "x\n", ".gitignore": "node_modules/\n"})
+        linked = os.path.join(tmpdir(self), "wt")
+        git(main, "worktree", "add", "-q", "--detach", linked)
+        os.makedirs(os.path.join(main, "node_modules", "dep"))
+        with EFF.TempTree(main, None, []) as tt:
+            sb = tree_sandbox(tt.path, tmpdir(self), linked)          # the engine running in a LINKED worktree
+            fs = sb["filesystem"]
+            for root in (main, linked, os.path.join(main, ".git")):
+                self.assertIn(os.path.realpath(root) + "/**", fs["denyRead"], root)
+                self.assertIn(os.path.realpath(root) + "/**", fs["denyWrite"], root)
+            self.assertFalse([a for a in fs["allowWrite"] if a.startswith(os.path.realpath(main) + "/")])
+            self.assertIn(os.path.realpath(tt.path) + "/**", fs["allowWrite"])
+            self.assertEqual(fs["allowRead"], [os.path.realpath(os.path.join(main, "node_modules")) + "/**"])
+            self.assertFalse(os.path.exists(os.path.join(tt.path, ".git")))
+        with self.assertRaises(ValueError):
+            tree_sandbox(os.path.join(main, "sub"), tmpdir(self), main)
+
+    def test_suite_tree_overlays_uncommitted_non_ignored_files_only(self):
+        r = repo(self, {"a.dart": "1\n", "gone.dart": "x\n", ".gitignore": ".env\n"})
+        open(os.path.join(r, "a.dart"), "w").write("2\n")             # uncommitted edit
+        open(os.path.join(r, "new_test.dart"), "w").write("t\n")      # untracked, not ignored
+        open(os.path.join(r, ".env"), "w").write("SECRET=1\n")        # ignored
+        os.remove(os.path.join(r, "gone.dart"))
+        with EFF.TempTree(r, None, [], overlay=True) as tt:
+            self.assertEqual(open(os.path.join(tt.path, "a.dart")).read(), "2\n")
+            self.assertTrue(os.path.exists(os.path.join(tt.path, "new_test.dart")))
+            self.assertFalse(os.path.exists(os.path.join(tt.path, ".env")))
+            self.assertFalse(os.path.exists(os.path.join(tt.path, "gone.dart")))
+            self.assertEqual(tt.skipped_ignored, [".env"])
+
+    def test_profile_denies_launchservices_open_and_listening_ports(self):
+        prof = CH.sandbox_profile({}, deny_ports=[45678, 3128], allow_ports=[3128])
+        self.assertIn("(deny appleevent-send)", prof)
+        self.assertIn("(deny mach-lookup (global-name-regex", prof)
+        self.assertIn("launchservicesd", prof)
+        self.assertIn('(literal "/usr/bin/open")', prof)
+        for port in (45678, 8080, 9090, 2375, 2376, 5432, 6379, 3306, 27017, 11434, 10808, 6152):
+            self.assertIn('(deny network-outbound (remote ip "localhost:%d"))' % port, prof)
+        self.assertNotIn('"localhost:3128"))', prof.split("(allow network-outbound")[1].replace(
+            '(deny network-outbound (remote ip "localhost:3128"))', ""))   # the engine's own proxy port stays open
+        self.assertNotIn("(deny network-outbound)\n", prof)              # the inert filter-less form (measured)
+
+    @unittest.skipUnless(os.path.exists(CH.SANDBOX_EXEC), "sandbox-exec only on macOS")
+    def test_live_probe_lsappinfo_open_and_a_listening_port(self):
+        import socket
+        d = tmpdir(self)
+        srv = socket.socket()
+        srv.bind(("127.0.0.1", 0))
+        srv.listen()
+        self.addCleanup(srv.close)
+        port = srv.getsockname()[1]
+        prof = os.path.join(d, "p.sb")
+        with open(prof, "w") as fh:
+            fh.write(CH.sandbox_profile({}, deny_ports=CH.listening_ports()))
+        run = lambda *a: subprocess.run([CH.SANDBOX_EXEC, "-f", prof] + list(a), stdout=subprocess.PIPE,
+                                        stderr=subprocess.STDOUT, timeout=60)
+        p1 = run("/usr/bin/lsappinfo", "info", "-only", "name", "Finder")      # the reviewer's probe
+        self.assertNotEqual(p1.returncode, 0)
+        self.assertNotIn(b"LSDisplayName", p1.stdout)
+        shutil.copy("/usr/bin/lsappinfo", os.path.join(d, "lsa"))              # a copy: the mach deny holds
+        p2 = run(os.path.join(d, "lsa"), "info", "-only", "name", "Finder")
+        self.assertNotIn(b"LSDisplayName", p2.stdout)
+        self.assertNotEqual(run("/usr/bin/open", "-g", "x-guild-probe://x").returncode, 0)
+        code = ("import socket,sys\n"
+                "try:\n socket.create_connection(('127.0.0.1',%d),timeout=3);print('LISTENER-REACHED')\n"
+                "except OSError: print('blocked')\n"
+                "s=socket.socket();s.bind(('127.0.0.1',0));s.listen();socket.create_connection(s.getsockname());"
+                "print('own-port-ok')\n" % port)
+        p3 = run(sys_exe(), "-c", code)
+        self.assertIn(b"blocked", p3.stdout)
+        self.assertIn(b"own-port-ok", p3.stdout)                               # flutter's own ports keep working
+
+    def test_summary_prints_only_statically_cited_names(self):
+        raw = ("00:01 +1: A\n00:01 +2: I\n00:01 +3: z\n00:01 +4: ko 본문에 버튼 역할어가 없다\n00:02 +4: All tests passed!\n")
+        r = _CR(True, 0, False, raw, [], 60)
+        out = T.structured_summary(r, CH.parse_summary(raw, "flutter"), "flutter", ["본문에 버튼 역할어가 없다"])
+        self.assertIn("pass: 본문에 버튼 역할어가 없다", out)
+        self.assertNotIn("ko ", out)                                           # the dynamic group prefix is dropped
+        for i, ch in ((1, "A"), (2, "I"), (3, "z")):
+            self.assertIn("pass: test#%d" % i, out)
+            self.assertNotIn(": %s\n" % ch, out + "\n")
+
+    def test_cited_literals_require_the_name_in_source(self):
+        h = Harness(self, fixture())
+        h.write_file("test/a_test.dart", "void main(){ test('real name', (){}); for (final c in k.split('')) test(c, (){}); }\n")
+        got = T.cited_literals(h.p, [{"test": "test/a_test.dart::real name"}, {"test": "test/a_test.dart::AIza"}])
+        self.assertEqual(got, ["real name"])
+
+    def test_exact_values_are_scoped_to_the_run(self):
+        RD.clear_exact()
+        d = tmpdir(self)
+        open(os.path.join(d, "e.dart"), "w").write('const k = "previous-repo-secret-0123456789";\n')
+        RD.register_exact_from_files(d, ["e.dart"])
+        self.assertIn("[REDACTED]", RD.redact("previous-repo-secret-0123456789"))
+        h = Harness(self, fixture(), roles=[role("DONE", covers=[], e2e="E2E 불요: x")],
+                    suites=[suite("00:01 +0 -1: x [E]\n00:01 +0 -1: Some tests failed.\n", passed=False, rc=1)])
+        T.run(h.p)
+        self.assertEqual(RD.redact("previous-repo-secret-0123456789"), "previous-repo-secret-0123456789")
+
+
+def sys_exe():
+    import sys
+    return sys.executable
+
+
+class R4M3TestOnly(unittest.TestCase):
+    TEST = "void main(){ test('원격이 비어 있으면 업로드한다', (){ expect(sync(), 1); }); }\n"
+
+    def _issue(self, files):
+        r = repo(self, {"lib/sync.dart": "int sync() => 1;\n", "test/old_test.dart": "void main(){}\n"})
+        base = git(r, "rev-parse", "HEAD")
+        _commit(r, files, "test: (#1891)")
+        return r, base
+
+    def test_impl_excludes_docs_and_tests(self):
+        r, base = self._issue({"test/sync_test.dart": self.TEST, "docs/specs/1891/test-cases.md": "| C1 | a |\n",
+                               "design/notes.md": "x\n", "README.md": "y\n"})
+        files, src, bad = EFF.impl_files(r, base)
+        self.assertEqual((files, src, bad), ([], "derived", []))
+        files, src, _bad = EFF.impl_files(r, base, ["docs/specs/1891/test-cases.md", "test/sync_test.dart"])
+        self.assertEqual((files, src), ([], "result"))                 # the developer's list is filtered too
+        self.assertTrue(EFF.is_impl("lib/sync.dart"))
+
+    def _run(self, files, given=None):
+        r, base = self._issue(files)
+        h = Harness(self, fixture(), root=r, base=base, impl_files=given)
+        h.checks = [_CR(True, 0, False, "00:01 +1: 원격이 비어 있으면 업로드한다\n00:01 +1: All tests passed!\n", [], 60)]
+        return h, EFF.run(h.p, {"commands": {"test": "flutter test"}}, ["C1"],
+                          {"C1": [{"test": "test/sync_test.dart::원격이 비어 있으면 업로드한다", "ac": "C1", "kind": "new"}]},
+                          base, given)
+
+    def test_1891_shape_is_na_test_only(self):
+        h, (out, meta) = self._run({"test/sync_test.dart": self.TEST, "docs/specs/1891/test-cases.md": "| C1 | a |\n"})
+        self.assertEqual((out["C1"].result, out["C1"].why), ("n/a", "test-only"))
+        self.assertEqual(out["C1"].as_field(), "C1=n/a(test-only)")
+        self.assertTrue(meta["test_only"])
+        self.assertEqual(len(h.calls["checks"]), 1)                    # the HEAD run only — nothing reverted
+
+    def test_1895_shape_two_tests_and_docs_listed_by_the_developer(self):
+        _h, (out, meta) = self._run({"test/sync_test.dart": self.TEST, "test/lang_test.dart": "void main(){}\n",
+                                     "docs/specs/1895/design.md": "x\n"},
+                                    given=["docs/specs/1895/design.md", "test/lang_test.dart"])
+        self.assertEqual(out["C1"].result, "n/a")
+        self.assertEqual(meta["impl_source"], "result")
+
+    def test_stage_advances_and_records_na(self):
+        r, base = self._issue({"test/sync_test.dart": self.TEST, "docs/specs/7/test-cases.md": "| C1 | a |\n"})
+        covers = [{"test": "test/sync_test.dart::원격이 비어 있으면 업로드한다", "ac": "C1", "kind": "new"}]
+        h = Harness(self, fixture(), root=r, base=base, roles=[role("DONE", covers=covers, e2e="E2E 불요: x")],
+                    judges={"TEST": [judge_test(["C1"])]}, suites=[suite(FLUTTER_GREEN)])
+        h.checks = [_CR(True, 0, False, "00:01 +1: 원격이 비어 있으면 업로드한다\n00:01 +1: All tests passed!\n", [], 60)]
+        res = T.run(h.p)
+        self.assertEqual(res.token(), "OK ADVANCE: qa")
+        blk = [b for b in DecisionLog.load(h.gh.comments(7)).blocks if b.get("point") == "TEST"][0]
+        self.assertEqual(blk.get("checks"), "C1=n/a(test-only)")
+        self.assertEqual(blk.get("effective_check"), "n/a(test-only)")
+        self.assertIsNone(blk.get("grade"))
+        self.assertIn("effective (n/a: test-only)", h.body_with("test:output"))
+
+
+class R4LoopFamilies(unittest.TestCase):
+    def test_group_per_language_family_counts_as_one(self):
+        green = ("00:01 +0: ko 세 키가 모두 있다\n00:01 +1: ja 세 키가 모두 있다\n00:01 +2: en 세 키가 모두 있다\n"
+                 "00:01 +3: All tests passed!\n")
+        self.assertEqual(EFF.rerun_kind(green, "flutter", "세 키가 모두 있다", True), "passed")
+        red = ("00:01 +0: ko 세 키가 모두 있다\n00:01 +1: ja 세 키가 모두 있다\n  Expected: 'x'\n    Actual: <null>\n"
+               "00:01 +1 -1: ja 세 키가 모두 있다 [E]\n00:01 +2 -1: en 세 키가 모두 있다\n00:01 +2 -1: Some tests failed.\n")
+        self.assertEqual(EFF.rerun_kind(red, "flutter", "세 키가 모두 있다", False), "assertion")
+
+    def test_identical_names_across_iterations(self):
+        raw = ("00:01 +0: signout 상한을 넘겨 정리 부채가 남는다\n00:01 +1: signout 상한을 넘겨 정리 부채가 남는다\n"
+               "00:01 +2: All tests passed!\n")
+        self.assertEqual(EFF.rerun_kind(raw, "flutter", "상한을 넘겨 정리 부채가 남는다", True), "passed")
+
+    def test_other_tests_in_the_run_stay_ambiguous(self):
+        raw = "00:01 +0: ko 세 키\n00:01 +1: 다른 테스트\n00:01 +2: All tests passed!\n"
+        self.assertEqual(EFF.rerun_kind(raw, "flutter", "세 키", True), "ambiguous")

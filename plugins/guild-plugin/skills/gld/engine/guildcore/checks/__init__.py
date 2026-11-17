@@ -87,17 +87,48 @@ def _sb_target(entry):
     return "(literal %s)" % _sb_str(real)
 
 
-# K2r3-M2: the checks profile's network, MEASURED with word_app `flutter test` under sandbox-exec
-# (k2-notes): loopback TCP is required (the flutter tool and flutter_tester talk over a random
-# loopback port — without it the test fails at load); NO unix socket is required → none allowed
-# (docker.sock, the ssh agent, local proxies on unix sockets are unreachable). The usual local
-# forward-proxy ports are denied explicitly after the loopback allow (last rule wins).
+# K2r3-M2 / K2r4-M2: the checks profile's network, MEASURED with word_app `flutter test` under
+# sandbox-exec (k2-notes): loopback TCP is required (the flutter tool and flutter_tester talk over a
+# loopback port the tool opens itself — without it the test fails at load); NO unix socket is
+# required → none allowed. Loopback is narrowed twice (last rule wins): every port ALREADY listening
+# when the check starts is denied (local proxies, databases, Ollama, docker, the IDE's daemons —
+# flutter's own ports open after the profile is rendered), and a static list of common local
+# service/proxy ports is denied as well, in case one starts during the check.
 UNIX_SOCKETS_ALLOWED = ()
-LOOPBACK_PROXY_PORTS = (1080, 1081, 3128, 7890, 7891, 8118, 8888, 9050, 9150)
+LOOPBACK_DENY_PORTS = (80, 443, 1080, 1081, 1086, 1087, 2375, 2376, 3000, 3128, 3306, 4444, 5000, 5432,
+                       5672, 6152, 6153, 6379, 7890, 7891, 7897, 8000, 8001, 8080, 8081, 8118, 8443, 8888,
+                       9000, 9050, 9090, 9150, 9200, 9229, 10808, 10809, 11211, 11434, 15672, 27017)
+LOOPBACK_PROXY_PORTS = LOOPBACK_DENY_PORTS            # r3 name, kept for callers
+# K2r4-M2(a): the LaunchServices / `open` route — a sandboxed process asking launchservicesd to
+# open a URL hands it to the user's browser OUTSIDE the sandbox (reviewer probe: `lsappinfo`
+# answered under the r3 profile). Denied: the LaunchServices/lsd/coreservices mach services,
+# Apple Events, and exec of the helpers that use them.
+DENY_MACH_RE = r"^com\.apple\.([Cc]ore[Ss]ervices\.|lsd\.|launchservicesd|LaunchServices|ls\.|nsurlsessiond|" \
+               r"appleevents|pasteboard|pboard|sharingd|usernotifications|notificationcenterui)"
+DENY_EXEC = ("/usr/bin/open", "/usr/bin/osascript", "/usr/bin/lsappinfo", "/usr/bin/pbcopy",
+             "/usr/bin/pbpaste", "/usr/bin/say", "/usr/bin/automator", "/usr/bin/shortcuts")
 
 
-def sandbox_profile(block, extra_write=(), loopback=True, unix_sockets=UNIX_SOCKETS_ALLOWED):
-    """An SBPL profile from a rendered `sandbox` block (last matching rule wins)."""
+def listening_ports():
+    """TCP ports in LISTEN state right now (any address), via `lsof`; [] when unreadable."""
+    try:
+        out = subprocess.run(["/usr/sbin/lsof", "-nP", "-iTCP", "-sTCP:LISTEN", "-Fn"], stdout=subprocess.PIPE,
+                             stderr=subprocess.DEVNULL, timeout=20).stdout.decode("utf-8", "replace")
+    except (OSError, subprocess.SubprocessError):
+        return []
+    ports = set()
+    for ln in out.split("\n"):
+        m = re.match(r"^n.*:(\d+)$", ln.strip())
+        if m:
+            ports.add(int(m.group(1)))
+    return sorted(ports)
+
+
+def sandbox_profile(block, extra_write=(), loopback=True, unix_sockets=UNIX_SOCKETS_ALLOWED,
+                    deny_ports=None, allow_ports=()):
+    """An SBPL profile from a rendered `sandbox` block (last matching rule wins). `deny_ports`:
+    loopback ports to deny on top of the static list (the caller passes the ports listening at
+    check start); `allow_ports`: the engine's own loopback services (the deps proxy)."""
     fs = (block or {}).get("filesystem") or {}
     lines = ["(version 1)", "(allow default)", "(deny file-write*)",
              "(allow file-write* (literal \"/dev/null\") (literal \"/dev/tty\") (subpath \"/dev/fd\"))"]
@@ -108,14 +139,25 @@ def sandbox_profile(block, extra_write=(), loopback=True, unix_sockets=UNIX_SOCK
     for r in fs.get("denyRead") or []:
         tgt = r if not os.path.isdir(r) else r.rstrip("/") + "/**"
         lines.append("(deny file-read* %s)" % _sb_target(tgt))
+    # K2r4-M2: read exceptions inside a denied tree (dependency dirs the temp tree symlinks)
+    for r in fs.get("allowRead") or []:
+        tgt = r if not os.path.isdir(r) else r.rstrip("/") + "/**"
+        lines.append("(allow file-read* %s)" % _sb_target(tgt))
     # bash/sh here-document temp files (`sh-thd*`) land wherever the shell finds a writable
     # spot, not necessarily TMPDIR (verified) — allowed by NAME, after the denies (last wins)
     lines.append("(allow file-write* (regex #\"/sh-thd[^/]*$\"))")
-    lines += ["(deny network-outbound)"]
+    lines += ["(deny mach-lookup (global-name-regex #\"%s\"))" % DENY_MACH_RE, "(deny appleevent-send)",
+              "(deny process-exec %s)" % " ".join("(literal %s)" % _sb_str(x) for x in DENY_EXEC)]
+    # NOTE (measured, K2r4): after a filter-less `(deny network-outbound)` a later port-specific
+    # deny does NOT take effect (`localhost:*` allow wins) — the r3 profile's port denies were
+    # inert. The filtered form below is honoured: deny every ip and every unix socket, allow
+    # loopback, then deny the ports (probe: curl to a listening localhost port → rc 7).
+    lines += ["(deny network-outbound (remote ip \"*:*\"))", "(deny network-outbound (remote unix-socket))"]
     if loopback:
         lines.append("(allow network-outbound (remote ip \"localhost:*\"))")
-        for port in LOOPBACK_PROXY_PORTS:
-            lines.append("(deny network-outbound (remote ip \"localhost:%d\"))" % port)
+        for port in sorted(set(LOOPBACK_DENY_PORTS) | set(deny_ports or ())):
+            if port not in (allow_ports or ()):
+                lines.append("(deny network-outbound (remote ip \"localhost:%d\"))" % port)
     for u in unix_sockets or ():
         lines.append("(allow network-outbound (remote unix-socket (path-literal %s)))" % _sb_str(u))
     return "\n".join(lines) + "\n"
@@ -134,14 +176,16 @@ def check_env(role_env, tmp):
     return e
 
 
-def sandboxed(cmd, block, tmp):
+def sandboxed(cmd, block, tmp, allow_ports=(), deny_ports=None):
     """`cmd` (a shell string) wrapped in sandbox-exec with the profile; raises when the host has
-    no sandbox-exec (the engine must not run role-written code unconfined)."""
+    no sandbox-exec (the engine must not run role-written code unconfined). The loopback ports
+    listening NOW are denied (K2r4-M2) unless the caller passes them explicitly."""
     if not os.path.exists(SANDBOX_EXEC):
         raise RuntimeError("no sandbox-exec on this host — checks refuse to run unconfined")
     prof = os.path.join(tmp, "checks.sb")
     with open(prof, "w") as fh:
-        fh.write(sandbox_profile(block, extra_write=[tmp]))
+        fh.write(sandbox_profile(block, extra_write=[tmp], allow_ports=allow_ports,
+                                 deny_ports=listening_ports() if deny_ports is None else deny_ports))
     return "%s -f %s /bin/sh -c %s" % (SANDBOX_EXEC, _shq(prof), _shq(cmd))
 
 
@@ -150,7 +194,7 @@ def _shq(s):
 
 
 def run_command(cmd, timeout_s=UNATTENDED_CEILING_S, cwd=".", env=None, journal=None,
-                who="checks", poll_s=0.5, sandbox=None, tmp=None):
+                who="checks", poll_s=0.5, sandbox=None, tmp=None, allow_ports=()):
     """`sandbox` = the owning role's rendered sandbox block (required for code a role wrote);
     `tmp` = a private temp dir (the run dir's tmp/)."""
     cmds = list(cmd) if isinstance(cmd, (list, tuple)) else [cmd]
@@ -158,7 +202,8 @@ def run_command(cmd, timeout_s=UNATTENDED_CEILING_S, cwd=".", env=None, journal=
         if not tmp:
             raise ValueError("a sandboxed check needs a private tmp dir outside the worktree")
         env = check_env(env, tmp)
-        cmds = [sandboxed(c, sandbox, tmp) for c in cmds]
+        deny = listening_ports()                       # once, before any command of this check starts
+        cmds = [sandboxed(c, sandbox, tmp, allow_ports, deny) for c in cmds]
     raw, steps, t0 = [], [], time.time()
     rc, timed_out = 0, False
     for c in cmds:
@@ -413,7 +458,8 @@ def deps_step(cmds, worktree, sandbox, tmp, env=None, hosts=None, timeout_s=1800
     with AllowlistProxy(hosts if hosts is not None else deps_hosts(worktree)) as px:
         e = dict(env or os.environ)
         e.update(px.env())
-        r = run_command(cmds, timeout_s, cwd=worktree, env=e, sandbox=sandbox, tmp=tmp)
+        r = run_command(cmds, timeout_s, cwd=worktree, env=e, sandbox=sandbox, tmp=tmp,
+                        allow_ports=(px.srv.server_address[1],))
         return r, px.summary()
 
 

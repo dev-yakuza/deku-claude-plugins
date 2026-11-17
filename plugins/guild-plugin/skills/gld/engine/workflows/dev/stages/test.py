@@ -61,8 +61,31 @@ def case_ids(text):
 FL_TEST_RE = re.compile(r"^\d\d:\d\d \+\d+(?: ~\d+)?(?: -\d+)?: (.+?)( \[E\])?\s*$")
 
 
-def structured_summary(r, summ, runner):
-    """runner · exit class · per-test name and pass/fail — no other runner text (K2r3-M2)."""
+def cited_literals(p, covers):
+    """The cited test names that appear LITERALLY (quoted) in their test file (K2r4-M2): the only
+    names a structured summary may print."""
+    out = []
+    for c in covers or []:
+        path, name = EFF.parse_test_ref(c.get("test"))
+        short = (name or "").split(" › ")[-1]
+        text = p.read_file(path) if path else None
+        if short and text and any(q + short + q in text for q in ("'", '"', "`")) and short not in out:
+            out.append(short)
+    return out
+
+
+def _shown_name(full, known, idx):
+    for k in known:
+        if full == k or full.endswith(" " + k):
+            return k
+    return "test#%d" % idx
+
+
+def structured_summary(r, summ, runner, known=()):
+    """runner · exit class · per-test pass/fail — no other runner text (K2r3-M2). Test names are
+    runtime values (a loop over a secret makes one test per character), so a name is printed only
+    when it matches a statically cited literal (`cited_literals`); any other is `test#<n>`
+    (K2r4-M2)."""
     exit_cls = "timeout" if r.timed_out else ("green" if r.passed and (summ is None or summ.green) else "red")
     lines = ["runner: %s" % (runner or (summ.runner if summ else "unknown")), "exit: %s" % exit_cls]
     if summ is not None:
@@ -74,9 +97,9 @@ def structured_summary(r, summ, runner):
             m = FL_TEST_RE.match(ln)
             if m and not m.group(1).startswith(("loading ", "(setUpAll)", "(tearDownAll)", "All tests", "Some tests")):
                 seen[m.group(1)] = "fail" if m.group(2) else seen.get(m.group(1), "pass")
-        per = ["%s: %s" % (v, k) for k, v in seen.items()]
+        per = ["%s: %s" % (v, _shown_name(k, known, i + 1)) for i, (k, v) in enumerate(seen.items())]
     elif summ is not None:
-        per = ["fail: %s" % n for n in summ.failed_names]
+        per = ["fail: %s" % _shown_name(n, known, i + 1) for i, n in enumerate(summ.failed_names)]
     return "\n".join(lines + per[-RAW_TESTS:])
 
 
@@ -144,8 +167,9 @@ def run(p, only=None, config_present=True):
         cmds += commands_list((cfg.get("commands") or {}).get("vrt"))
     runner = EFF.runner_of(cfg)
     copy_list = ((cfg.get("engine") or {}).get("effective") or {}).get("copy_ignored") or []
+    from guildcore.records import redact as RD
+    RD.clear_exact()                  # K2r4-m3: exact values are scoped to this Issue's run
     if copy_list:                     # K2r3-M2: secrets known by value are redacted by value
-        from guildcore.records import redact as RD
         RD.register_exact_from_files(p.root, copy_list)
 
     # T1 — the engine runs the suite (§2.8)
@@ -188,7 +212,7 @@ def run(p, only=None, config_present=True):
     uncovered, vac, coverage, rows_unc, checks_field, tdec = [], [], [], [], "", None
     pending, env_suspect, images = False, None, []
     if raw_green:
-        shown = structured_summary(r, summ, runner) if copy_list else r.raw
+        shown = structured_summary(r, summ, runner, cited_literals(p, covers)) if copy_list else r.raw
         out = _judge_coverage(p, cfg, test_cases, covers, shown, ledger, visual_cases, tc_rel, deferred)
         if isinstance(out, B.StageResult):
             return out
@@ -218,7 +242,7 @@ def run(p, only=None, config_present=True):
               st["rc"], s_line if i == len(r.steps) - 1 else "") for i, st in enumerate(r.steps)] or \
         [(" && ".join(cmds), r.rc, s_line)]
     # with copy_ignored set, the raw tail is never posted — only a structured summary (K2r3-M2)
-    posted = structured_summary(r, summ, runner) if copy_list else r.raw
+    posted = structured_summary(r, summ, runner, cited_literals(p, covers)) if copy_list else r.raw
     body = R.test_output(p.issue, steps, posted, verify_line, claim_line, coverage, ran, not_run,
                          verbatim, [x for x in images if p.exists(x)], e2e)
     p.writer.upsert_comment(p.issue, R.TEST, body)
@@ -389,8 +413,8 @@ def _judge_coverage(p, cfg, test_cases, covers, raw, ledger, visual_cases, tc_re
     uncovered = sorted(ac for ac, v in verdicts.items() if v != "effective")
     rows_unc = [r_.get("row") for r_ in d.fields.get("visual_rows") or [] if r_.get("verdict") != "covered"] \
         if visual_cases else []
-    coverage = [(ac, verdicts[ac] if not (ac in outcomes and outcomes[ac].result == "unverified")
-                 else "effective (unverified)",
+    coverage = [(ac, verdicts[ac] if not (ac in outcomes and outcomes[ac].result in ("unverified", "n/a"))
+                 else ("effective (unverified)" if outcomes[ac].result == "unverified" else "effective (n/a: test-only)"),
                  [c.get("test") for c in _covers_by_ac(covers).get(ac, [])],
                  (outcomes[ac].why if ac in outcomes else (per.get(ac) or {}).get("why")))
                 for ac in acs]
@@ -415,7 +439,8 @@ def _record_test(p, d, acs, verdicts, outcomes, meta, ac_source, attempt, tool_m
                              "base_source": meta.get("base_source"), "ac_source": ac_source,
                              "brief": "tool" if tool_mode else None,
                              "unsure_acs": ",".join(ac for ac, v in verdicts.items() if v == "unsure") or None,
-                             "effective_check": "bypassed" if meta.get("bypassed") else None,
+                             "effective_check": "bypassed" if meta.get("bypassed") else
+                             ("n/a(test-only)" if meta.get("test_only") else None),
                              "ignored_copied": ",".join(meta.get("ignored_copied") or []) or None,
                              "ignored_refused": ",".join(meta.get("ignored_refused") or []) or None,
                              "grade": "trigger" if unver or ac_source != "test-cases" else None})

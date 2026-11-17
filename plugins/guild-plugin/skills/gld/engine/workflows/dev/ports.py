@@ -12,6 +12,7 @@ kept from K1:
 """
 
 import os
+import re
 
 from guildcore import capture as CAP
 from guildcore import checks as CH
@@ -20,6 +21,8 @@ from guildcore.adapters import git as G
 from guildcore.roles import runner as RR
 from guildcore.roles import settings as S
 from guildcore.roles.result import RESULT_SCHEMAS
+from guildcore.checks import visual as V
+from workflows.dev import effective as EFF
 from workflows.dev.stages.base import Ports
 
 WARMUP_DART = ("import 'package:flutter_test/flutter_test.dart';\n\n"
@@ -35,16 +38,102 @@ def prompt(call, issue):
     return text
 
 
-def warm_sandbox(tree, run_dir, main_worktree, issue=None):
-    """K2r3-M1: reader-grade (tester-verify + toolchain) over the TEMP tree, plus denyRead and
-    denyWrite of the whole main worktree (its `.git` objects/refs included)."""
-    sb = S.role_sandbox("tester-verify", tree, run_dir, issue, toolchain=True, tool_writes=S.toolchain_writes(tree))
+def repo_roots(root):
+    """Every checkout of the repository — the main one and each linked worktree (`git worktree
+    list`) — plus the shared git dir (`--git-common-dir`), realpaths (K2r4-M2)."""
+    out = []
+    lst = G.run(root, "worktree", "list", "--porcelain", check=False).decode("utf-8", "replace")
+    for ln in lst.split("\n"):
+        if ln.startswith("worktree "):
+            out.append(os.path.realpath(ln[len("worktree "):]))
+    common = G.run(root, "rev-parse", "--path-format=absolute", "--git-common-dir", check=False).decode().strip()
+    if common:
+        out.append(os.path.realpath(common))
+    out.append(os.path.realpath(root))
+    return list(dict.fromkeys(out))
+
+
+def tree_sandbox(tree, run_dir, repo_root, issue=None, extra_roots=()):
+    """K2r4-M2: the ONE sandbox of code the engine runs in a temp tree — the suite, the effective
+    re-runs and the networked warm-up. Reader-grade (tester-verify + toolchain caches) with write
+    access to the temp tree; reads AND writes of every checkout of the repository and of the
+    shared git dir are denied (no secret original, no other worktree, no refs/objects). The only
+    read exceptions are the dependency dirs the tree symlinks (`node_modules` …)."""
+    sb = S.role_sandbox("tester-verify", None, run_dir, issue, toolchain=True, tool_writes=S.toolchain_writes(tree))
     fs = dict(sb["filesystem"])
-    main = os.path.realpath(main_worktree) + "/**"
-    fs["denyRead"] = list(fs.get("denyRead") or []) + [main]
-    fs["denyWrite"] = list(fs.get("denyWrite") or []) + [main]
-    fs["allowWrite"] = [a for a in fs.get("allowWrite") or [] if not a.startswith(os.path.realpath(main_worktree) + "/")]
+    roots = repo_roots(repo_root) + [os.path.realpath(x) for x in extra_roots]
+    tr = os.path.realpath(tree)
+    if any((tr + "/").startswith(r + "/") for r in roots):
+        raise ValueError("temp tree inside a checkout of the repository: %s" % tr)
+    fs["denyRead"] = list(fs.get("denyRead") or []) + [r + "/**" for r in roots]
+    fs["denyWrite"] = list(fs.get("denyWrite") or []) + [r + "/**" for r in roots]
+    fs["allowWrite"] = [a for a in fs.get("allowWrite") or []
+                        if not any(os.path.realpath(a.rstrip("*").rstrip("/")) == r or
+                                   os.path.realpath(a.rstrip("*").rstrip("/")).startswith(r + "/") for r in roots)]
+    fs["allowWrite"].append(tr + "/**")
+    fs["allowRead"] = [d + "/**" for d in EFF.linked_dirs(tree)]
     return dict(sb, filesystem=fs)
+
+
+warm_sandbox = tree_sandbox                 # r3 name
+
+
+MISSING_ASSET_RE = re.compile(r"No file or variants found for asset: ([^\s]+?)\.?$", re.M)
+WARMUP_DIR = "guild_engine_warmup"           # outside test/: no test/flutter_test_config.dart wraps it
+
+
+def warm_in_place(root, tree, run_dir, env, issue=None, proxy_hosts=None, extra_roots=()):
+    """K2r4-M1: the networked warm-up NEVER runs the developer's tree. `tree` holds a PRISTINE
+    checkout of `<base>` (reviewed code, no ignored file, no `.git`): `pub get` + an ENGINE-written
+    empty test (in a new dir outside `test/`) under the deps proxy, in `tree_sandbox`. The caller
+    has ruled out changed build inputs (`effective.hook_changes`), so base's hook artifacts are
+    HEAD's; the caller then moves the tree to HEAD (`TempTree.advance`). The warm-up dir and any
+    placeholder are removed. Returns (CheckResult|None, proxy summary)."""
+    import shutil
+    if not os.path.exists(os.path.join(tree, "pubspec.yaml")):
+        return None, {}
+    if os.path.exists(os.path.join(tree, "flutter_test_config.dart")):
+        return None, {"skipped": "root flutter_test_config.dart"}
+    wdir = os.path.join(tree, WARMUP_DIR)
+    os.makedirs(wdir)
+    rel = os.path.join(WARMUP_DIR, "warmup_test.dart")
+    with open(os.path.join(tree, rel), "w", encoding="utf-8") as fh:
+        fh.write(WARMUP_DART)
+    placeholders = []
+    try:
+        sb = tree_sandbox(tree, run_dir, root, issue, extra_roots)
+        tmp = os.path.join(run_dir, "tmp")
+        r, px = CH.deps_step(["flutter pub get", "flutter test --no-pub %s" % rel], tree, sb, tmp,
+                             env=env, hosts=proxy_hosts)
+        # a pristine checkout lacks the git-ignored ASSETS pubspec lists (word_app: assets/data.db),
+        # and the asset bundle is built before the hooks. The engine writes EMPTY placeholders
+        # (never an original: this step has the network) and retries, at most twice.
+        for _ in range(2):
+            missing = [m for m in MISSING_ASSET_RE.findall(r.raw or "") if m not in placeholders]
+            if r.passed or not missing:
+                break
+            for m in missing:
+                n = os.path.normpath(m)
+                dst = os.path.join(tree, n)
+                if n.startswith("..") or os.path.isabs(n) or os.path.lexists(dst) or \
+                        not os.path.realpath(dst).startswith(os.path.realpath(tree) + os.sep):
+                    continue
+                os.makedirs(os.path.dirname(dst), exist_ok=True)
+                open(dst, "wb").close()
+                placeholders.append(n)
+            r, px2 = CH.deps_step(["flutter test --no-pub %s" % rel], tree, sb, tmp, env=env, hosts=proxy_hosts)
+            for k, v in px2.items():
+                px[k] = px.get(k, 0) + v if isinstance(v, int) else v
+        if placeholders:
+            px = dict(px, placeholders=placeholders)
+        return r, px
+    finally:
+        shutil.rmtree(wdir, True)
+        for n in placeholders:
+            try:
+                os.remove(os.path.join(tree, n))
+            except OSError:
+                pass
 
 
 def role_spec(call, issue, worktree, config, base=None, branch=None, unattended=True):
@@ -66,47 +155,48 @@ def live(issue, worktree, base, branch, config, clock, gh, writer, decisions, ru
     def run_role(call):
         return runner.run_role(role_spec(call, issue, worktree, config, base, branch, unattended))
 
-    def _sandboxed(cmds, cwd, owner, timeout_s, extra_write=()):
+    def _tree_run(cmds, tree, owner, timeout_s):
         run_dir = RR.new_run_dir(RR.run_root(worktree, issue, root_env), "check", owner)
-        sb = S.role_sandbox(owner if owner in S.WRITER_ROLES else "%s-verify" % owner, worktree, run_dir,
-                            issue, toolchain=True)
-        if extra_write:
-            fs = dict(sb.get("filesystem") or {})
-            fs["allowWrite"] = list(fs.get("allowWrite") or []) + [x.rstrip("/") + "/**" for x in extra_write]
-            if os.path.realpath(cwd) != os.path.realpath(worktree):
-                # K2-B4: the temp tree symlinks ignored dirs of the MAIN worktree — read-only here
-                fs["denyWrite"] = list(fs.get("denyWrite") or []) + [os.path.abspath(worktree) + "/**"]
-            sb = dict(sb, filesystem=fs)
+        sb = tree_sandbox(tree, run_dir, worktree, issue)
         env = C.child_env(root_env, {}, role_dir=run_dir)
-        r = CH.run_command(cmds, timeout_s, cwd=cwd, env=env, journal=journal, who="check-%s" % owner,
+        r = CH.run_command(cmds, timeout_s, cwd=tree, env=env, journal=journal, who="check-%s" % owner,
                            sandbox=sb, tmp=os.path.join(run_dir, "tmp"))
         runner.rebaseline(worktree, issue)
         return r
 
+    def _copy_list():
+        raw = getattr(config, "raw", None) or (config if isinstance(config, dict) else {})
+        return ((raw.get("engine") or {}).get("effective") or {}).get("copy_ignored") or []
+
     def suite(cmds, owner, timeout_s):
-        return _sandboxed(cmds, worktree, owner, timeout_s)
+        """K2r4-M2: the suite runs in a temp tree (HEAD + the worktree's uncommitted non-ignored
+        files + the repo's opt-in `copy_ignored`), never in the checkout: with the default config
+        no git-ignored original (secrets) is reachable. Failure images come back to the worktree."""
+        with EFF.TempTree(worktree, None, [], overlay=True) as tt:
+            tt.copy_listed(_copy_list())
+            r = _tree_run(cmds, tt.path, owner, timeout_s)
+            for img in V.failing_images(r.raw):
+                rel = os.path.relpath(img, tt.path) if os.path.isabs(img) else img
+                src = tt._inside(os.path.normpath(rel)) if not rel.startswith("..") else None
+                if src and os.path.isfile(src) and not os.path.islink(src) and rel.endswith(".png"):
+                    dst = os.path.join(worktree, rel)
+                    if os.path.realpath(dst).startswith(os.path.realpath(worktree) + os.sep):
+                        os.makedirs(os.path.dirname(dst), exist_ok=True)
+                        import shutil
+                        shutil.copyfile(src, dst)
+            r.raw = r.raw.replace(os.path.realpath(tt.path), worktree).replace(tt.path, worktree)
+            return r
 
     def check(cmd, cwd, owner, timeout_s, write_dirs):
-        # OFFLINE (K2r2-M1): the role-written test and the reverted impl get no network at all
-        return _sandboxed([cmd], cwd, owner, timeout_s, write_dirs)
+        # OFFLINE (K2r2-M1): the role-written test and the reverted impl get no network at all;
+        # `cwd` is the effective check's temp tree
+        return _tree_run([cmd], cwd, owner, timeout_s)
 
-    def warm(tree):
-        """The engine's own warm-up in the temp tree (K2r2-M1): an ENGINE-written empty test run
-        under the deps step's exact-host proxy builds dependency hooks (word_app: sqlite3 native
-        assets) — the same trust scope as K1's deps step; then the file is removed."""
-        if not os.path.exists(os.path.join(tree, "pubspec.yaml")):
-            return None
-        rel = os.path.join("test", "guild_engine_warmup_test.dart")
-        with open(os.path.join(tree, rel), "w", encoding="utf-8") as fh:
-            fh.write(WARMUP_DART)
-        try:
-            run_dir = RR.new_run_dir(RR.run_root(worktree, issue, root_env), "check", "warmup")
-            sb = warm_sandbox(tree, run_dir, worktree, issue)
-            r, _px = CH.deps_step(["flutter test --no-pub %s" % rel], tree, sb, os.path.join(run_dir, "tmp"),
-                                  env=C.child_env(root_env, {}, role_dir=run_dir))
-            return r
-        finally:
-            os.remove(os.path.join(tree, rel))
+    def warm(base_rev, tree):
+        """The engine's own warm-up (K2r4-M1): `warm_in_place` on the pristine <base> tree."""
+        run_dir = RR.new_run_dir(RR.run_root(worktree, issue, root_env), "check", "warmup")
+        r, _px = warm_in_place(worktree, tree, run_dir, C.child_env(root_env, {}, role_dir=run_dir), issue)
+        return r
 
     def capture(kind, stage, role, summary, evidence, area, surprise):
         return CAP.capture(worktree, kind, issue, stage, role, summary, evidence, area, surprise, clock=clock)

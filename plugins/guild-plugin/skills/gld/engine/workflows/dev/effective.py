@@ -350,6 +350,28 @@ def counts(raw, runner):
     return s.passed + s.failed, s.skipped
 
 
+FL_RUN_RE = re.compile(r"^\d\d:\d\d \+\d+(?: ~\d+)?(?: -\d+)?: (.+?)(?: \[E\])?\s*$")
+
+
+def loop_family(raw, runner, name, executed=None):
+    """K2r4-m1: a family of tests generated in a loop — the same literal name across iterations,
+    or under per-iteration groups (`group(ko/ja/en)`) — counts as ONE test, like a pytest
+    parametrize or a go sub-test: every test the filter ran ends with the cited literal name."""
+    if runner not in ("flutter", "dart") or not name:
+        return False
+    short = name.split(" › ")[-1]
+    ran, lines = set(), 0
+    for ln in (raw or "").split("\n"):
+        m = FL_RUN_RE.match(ln)
+        if m and not m.group(1).startswith(("loading ", "(setUpAll)", "(tearDownAll)", "All tests", "Some tests")):
+            ran.add(m.group(1))
+            lines += 1
+    # every executed test must have shown up by name (a run whose other tests are invisible is not
+    # a family — the runner prints at least one progress line per test)
+    return bool(ran) and all(x == short or x.endswith(" " + short) for x in ran) and \
+        (executed is None or lines >= executed)
+
+
 def rerun_kind(raw, runner, name, passed):
     """assertion | passed | runtime | load_error | none_ran | ambiguous | unknown (K2-B1, r2-B1)."""
     raw = raw or ""
@@ -359,7 +381,7 @@ def rerun_kind(raw, runner, name, passed):
     c = counts(raw, runner)
     if c is not None and c[0] == 0:
         return "none_ran"
-    if c is not None and c[0] != 1:
+    if c is not None and c[0] != 1 and not loop_family(raw, runner, name, c[0]):
         return "ambiguous"
     short = (name or "").split(" › ")[-1].split("::")[-1].split(".")[-1]
     s = CH.parse_summary(raw, runner)
@@ -410,13 +432,19 @@ def safe_rel(root, f, revs):
     return n
 
 
-HOOK_RE = re.compile(r"(^|/)hook/|(^|/)pubspec(_overrides)?\.(yaml|lock)$")
+# K2r3-M1 / K2r4-M1: changes to the BUILD inputs of the warm-up. The warm-up builds from a pristine
+# checkout of `<base>`; its hook artifacts equal HEAD's only when none of these changed: build
+# hooks (`hook/`), the pub manifests (`pubspec.yaml|lock`, `pubspec_overrides.yaml`), build_runner
+# config (`build.yaml`), analyzer options (`analysis_options*.yaml`, which can enable
+# experiments) and any `flutter_test_config.dart` (it wraps EVERY test `main` of its directory
+# subtree, the warm-up's included).
+HOOK_RE = re.compile(r"(^|/)hook/|(^|/)pubspec(_overrides)?\.(yaml|lock)$|(^|/)build(\.[\w-]+)?\.yaml$|"
+                     r"(^|/)analysis_options[\w.-]*\.yaml$|(^|/)flutter_test_config\.dart$")
 
 
 def hook_changes(root, base):
-    """Files the change touched that decide which build hooks run (K2r3-M1): any `hook/` dir,
-    `pubspec.yaml`, `pubspec.lock`, `pubspec_overrides.yaml` (path dependencies live there). An
-    unknown base counts as changed (fail closed)."""
+    """Files the change touched that are build inputs of the warm-up (HOOK_RE). An unknown base
+    counts as changed (fail closed)."""
     if not base:
         return ["(no base)"]
     out = G.run(root, "diff", "--name-only", "%s...HEAD" % base, check=False).decode()
@@ -435,42 +463,81 @@ def default_base(root):
     return None
 
 
+# K2r4-M3: what a revert may touch — implementation only. Docs (`*.md`, `docs/`, `design/`), tests
+# (TEST_PATH_RE) and non-code assets (images, goldens) are never reverted; a change made only of
+# those is TEST-ONLY → `effective: n/a(test-only)`.
+NON_IMPL_RE = re.compile(r"(^|/)(docs?|design)/|\.(md|mdx|markdown|rst|txt|adoc)$|"
+                         r"\.(png|jpe?g|gif|webp|svg|ico|pdf)$|(^|/)goldens?/|(^|/)(LICENSE|CHANGELOG|README)[^/]*$", re.I)
+
+
+def is_impl(f):
+    return bool(f) and not TEST_PATH_RE.search(f) and not NON_IMPL_RE.search(f)
+
+
 def impl_files(root, base, given=None):
     """(files, source, rejected): the developer's `impl_files` (execute's result.json) or, when
-    absent, files changed since `base` that are not test paths (`derived`). Unsafe entries are
-    rejected (K2-B4) and returned for the decision log."""
+    absent, files changed since `base` (`derived`) — in BOTH cases only implementation files
+    (`is_impl`, K2r4-M3). Unsafe entries are rejected (K2-B4) and returned for the decision log."""
     if given:
         raw, src = list(given), "result"
     else:
         out = G.run(root, "diff", "--name-only", "%s...HEAD" % base, check=False).decode()
-        raw, src = [f for f in out.split("\n") if f and not TEST_PATH_RE.search(f)], "derived"
+        raw, src = [f for f in out.split("\n") if f], "derived"
     ok, bad = [], []
     for f in raw:
         s = safe_rel(root, f, ("HEAD", base))
         (ok if s else bad).append(s or f)
-    return ok, src, bad
+    return [f for f in ok if is_impl(f)], src, bad
 
 
 DEP_DIRS = ("node_modules", ".venv", "venv", "vendor", "Pods")
 
 
+_LINKED = {}                          # temp tree → main-checkout dirs it symlinks (read exceptions)
+TEMP_PARENT = None                    # where temp trees go (None = the system temp dir; a harness sets it)
+
+
+def linked_dirs(tree):
+    return list(_LINKED.get(os.path.realpath(tree or ""), ()))
+
+
+def materialize(root, rev, dest):
+    """A PRISTINE copy of `rev`'s tracked files in `dest` — no `.git`, no link to the repository's
+    git dir (K2r4-M2: the check sandbox denies the common dir). `git archive` → tar with the
+    `data` filter (no absolute or escaping members/links)."""
+    import io
+    import tarfile
+    blob = G.run(root, "archive", "--format=tar", rev)
+    os.makedirs(dest, exist_ok=True)
+    with tarfile.open(fileobj=io.BytesIO(blob)) as tf:
+        tf.extractall(dest, filter="data")
+
+
 class TempTree(object):
-    """`git worktree add --detach` at HEAD; `revert(full)` puts the impl files back to `base`
-    (full: base-absent files removed; partial: ADDED files kept — the r2 second step for a
-    compile error). Removed on exit, also when entering fails (K2-m6). Every path operated on
-    must resolve inside the temp tree with no symlink component (K2-B4).
+    """A pristine copy of HEAD (`materialize`, no `.git`) in a fresh temp dir; `revert(full)` puts
+    the impl files back to `base` (full: base-absent files removed; partial: ADDED files kept — the
+    r2 second step for a compile error), written by the engine from the object store. Removed on
+    exit, also when entering fails (K2-m6). Every path operated on must resolve inside the temp
+    tree with no symlink component (K2-B4).
+    `overlay=True` (the suite's tree, K2r4-M2) also carries the main worktree's uncommitted
+    TRACKED edits and untracked NON-ignored files (never an ignored one).
     Ignored entries (K2r2-M1): NO ignored FILE is ever copied (generated secrets like
     `lib/env/env.dart` stay out); `.dart_tool` is copied without compile caches; tool-output
-    dirs are fresh; dependency dirs (`node_modules` …) are symlinked read-only; everything else
-    is left out and named in `skipped_ignored`."""
+    dirs are fresh; dependency dirs (`node_modules` …) are symlinked read-only (`linked_dirs` —
+    the check sandbox re-allows reading exactly those); everything else is left out and named
+    in `skipped_ignored`."""
 
-    def __init__(self, root, base, files, parent=None):
+    def __init__(self, root, base, files, parent=None, overlay=False, rev="HEAD", defer_ignored=False):
         self.root, self.base, self.files = root, base, files
         self.parent = parent
+        self.overlay = overlay
+        self.rev = rev
+        self.defer_ignored = defer_ignored
         self.path = None
         self.skipped_ignored = []
         self.copied = []
         self.refused = []
+        self.linked = []
 
     def copy_listed(self, paths):
         """The repo's opt-in `engine.effective.copy_ignored` (K2 r3): explicit relative paths of
@@ -521,12 +588,14 @@ class TempTree(object):
         return dst
 
     def __enter__(self):
-        d = tempfile.mkdtemp(dir=self.parent)            # no fixed prefix (K2r3-m3)
-        os.rmdir(d)
+        d = tempfile.mkdtemp(dir=self.parent or TEMP_PARENT)   # no fixed prefix (K2r3-m3)
         self.path = d
         try:
-            G.run(self.root, "worktree", "add", "--detach", "--quiet", d, "HEAD")
-            self._ignored()
+            materialize(self.root, self.rev, d)
+            if self.overlay:
+                self._overlay()
+            if not self.defer_ignored:
+                self.finish_ignored()
             for f in self.files:
                 if self._inside(f) is None:
                     raise ValueError("impl path escapes the temp tree: %s" % f)
@@ -544,12 +613,67 @@ class TempTree(object):
                 raise ValueError("impl path escapes the temp tree: %s" % f)
             at_base = G.ok(self.root, "cat-file", "-e", "%s:%s" % (self.base, f))
             if at_base:
-                G.run(self.path, "checkout", self.base, "--", f)
+                self._put(self.base, f, dst)
             elif full:
                 if os.path.lexists(dst):
                     os.remove(dst)
             else:
-                G.run(self.path, "checkout", "HEAD", "--", f)
+                self._put("HEAD", f, dst)
+
+    def finish_ignored(self):
+        self._ignored()
+        _LINKED[os.path.realpath(self.path)] = list(self.linked)
+
+    def advance(self, to="HEAD"):
+        """K2r4-M1: the tree was materialized at `self.rev` (pristine <base>, warmed IN PLACE so the
+        build-hook caches keep their paths); move its tracked files to `to` — files that differ are
+        written by the engine, files absent at `to` removed."""
+        names = G.run(self.root, "diff", "--name-only", "-z", "--no-renames", self.rev, to).decode("utf-8", "replace")
+        for f in [x for x in names.split("\0") if x]:
+            n = os.path.normpath(f)
+            dst = self._inside(n)
+            if dst is None:
+                raise ValueError("path escapes the temp tree: %s" % f)
+            if G.ok(self.root, "cat-file", "-e", "%s:%s" % (to, n)):
+                self._put(to, n, dst)
+            elif os.path.lexists(dst) and not os.path.isdir(dst):
+                os.remove(dst)
+        self.rev = to
+
+    def _put(self, rev, f, dst):
+        """`rev:f` written by the engine (regular files only; the mode's exec bit kept)."""
+        ent = G.run(self.root, "ls-tree", rev, "--", f).decode().split()
+        if not ent or ent[0] not in ("100644", "100755"):
+            raise ValueError("not a regular file at %s: %s" % (rev, f))
+        data = G.run(self.root, "cat-file", "blob", "%s:%s" % (rev, f))
+        os.makedirs(os.path.dirname(dst), exist_ok=True)
+        if os.path.lexists(dst):
+            os.remove(dst)
+        with open(dst, "wb") as fh:
+            fh.write(data)
+        os.chmod(dst, 0o755 if ent[0] == "100755" else 0o644)
+
+    def _overlay(self):
+        """Uncommitted tracked edits + untracked non-ignored files of the main worktree (regular
+        files only); tracked files deleted there are deleted here."""
+        mod = G.run(self.root, "ls-files", "-z", "-m", "-o", "--exclude-standard", check=False).decode("utf-8", "replace")
+        gone = G.run(self.root, "ls-files", "-z", "-d", check=False).decode("utf-8", "replace")
+        for rel in [x for x in gone.split("\0") if x]:
+            dst = self._inside(os.path.normpath(rel))
+            if dst and os.path.lexists(dst) and not os.path.isdir(dst):
+                os.remove(dst)
+        for rel in sorted(set(x for x in mod.split("\0") if x)):
+            n = os.path.normpath(rel)
+            src = os.path.join(self.root, n)
+            if n.startswith("..") or os.path.isabs(n) or os.path.islink(src) or not os.path.isfile(src):
+                continue
+            dst = self._inside(n)
+            if dst is None:
+                continue
+            os.makedirs(os.path.dirname(dst), exist_ok=True)
+            if os.path.lexists(dst):
+                os.remove(dst)
+            shutil.copy2(src, dst)
 
     def _ignored(self):
         lines = G.run(self.root, "ls-files", "-z", "--others", "--ignored", "--exclude-standard",
@@ -575,14 +699,14 @@ class TempTree(object):
                 os.makedirs(dst)
             elif base in DEP_DIRS:
                 os.symlink(src, dst)                   # read-only: the check sandbox denies main writes
+                self.linked.append(os.path.realpath(src))
             else:
                 self.skipped_ignored.append(rel + "/")
 
     def __exit__(self, *exc):
         if self.path:
-            G.run(self.root, "worktree", "remove", "--force", self.path, check=False)
+            _LINKED.pop(os.path.realpath(self.path), None)
             shutil.rmtree(self.path, True)
-            G.run(self.root, "worktree", "prune", check=False)
         return False
 
 
@@ -595,7 +719,7 @@ class CheckOutcome(object):
 
     def as_field(self):
         s = "%s=%s" % (self.ac, self.result)
-        if self.result == "unverified":
+        if self.result in ("unverified", "n/a"):
             s += "(%s)" % self.why
         return s
 
@@ -677,7 +801,7 @@ def run(p, cfg, effective_acs, covers_by_ac, base, given_impl=None, timeout_s=90
             out[ac] = CheckOutcome(ac, rows[0][0].get("test"), "unverified", "not a git worktree", line=rows[0][3])
         return out, meta
     impl, src, bad = impl_files(p.root, base, given_impl) if base else ([], None, [])
-    meta.update(impl_source=src, rejected=bad)
+    meta.update(impl_source=src, rejected=bad, test_only=bool(base) and not impl and not bad)
     warm = getattr(p, "warm", None)
     if warm is not None:
         # K2r3-M1: the networked warm-up runs dependency build hooks — the ROOT package's and path
@@ -691,10 +815,16 @@ def run(p, cfg, effective_acs, covers_by_ac, base, given_impl=None, timeout_s=90
             meta["build_hook_changed"] = changed
             return out, meta
     try:
-        with TempTree(p.root, base, impl) as tt:
+        # K2r4-M1: with a warm-up, the tree starts as a PRISTINE checkout of <base> (reviewed code,
+        # no ignored file); the networked warm-up runs there, in place (hook caches keep their
+        # paths); only then does the tree move to HEAD and get its ignored entries — offline
+        with TempTree(p.root, base, impl, rev=base if warm is not None else "HEAD",
+                      defer_ignored=warm is not None) as tt:
+            if warm is not None:
+                p.warm(base, tt.path)
+                tt.advance("HEAD")
+                tt.finish_ignored()
             meta["skipped_ignored"] = tt.skipped_ignored
-            if getattr(p, "warm", None) is not None:
-                p.warm(tt.path)                     # engine-written empty test, deps hosts only
             # opt-in ignored files AFTER the networked warm-up: offline re-runs only (K2 r3)
             tt.copy_listed(((cfg.get("engine") or {}).get("effective") or {}).get("copy_ignored"))
             meta.update(ignored_copied=tt.copied, ignored_refused=tt.refused)
@@ -723,9 +853,13 @@ def _phases(p, runner, pending, tt, base, impl, out, timeout_s):
             if not news:
                 out[ac] = CheckOutcome(ac, rows[0][0].get("test"), "pass", "assertion present; runs and passes at HEAD",
                                        None, rows[0][3], rows[0][4])
-            elif not base or not impl:
-                out[ac] = CheckOutcome(ac, news[0][0].get("test"), "unverified",
-                                       "no base" if not base else "no impl files to revert", line=news[0][3])
+            elif not base:
+                out[ac] = CheckOutcome(ac, news[0][0].get("test"), "unverified", "no base", line=news[0][3])
+            elif not impl:
+                # K2r4-M3: nothing but tests/docs changed — there is no implementation whose
+                # absence the test could detect; the judge's verdict stands, nothing loops back
+                out[ac] = CheckOutcome(ac, news[0][0].get("test"), "n/a", "test-only", "head:passed",
+                                       news[0][3], news[0][4])
             else:
                 live[ac] = news
     if not live:

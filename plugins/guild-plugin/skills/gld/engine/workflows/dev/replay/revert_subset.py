@@ -41,8 +41,9 @@ def sh(cwd, *a):
 
 
 class Port(object):
-    def __init__(self, root, env, run_dir):
+    def __init__(self, root, env, run_dir, extra_roots=()):
         self.root, self.env, self.run_dir = root, env, run_dir
+        self.extra_roots = list(extra_roots)          # the SOURCE checkout the clone was made from
         self.calls = []
 
     def read_file(self, rel):
@@ -52,29 +53,20 @@ class Port(object):
         except (IOError, OSError):
             return None
 
-    def warm(self, tree):
-        """ports.live's warm-up: an engine-written empty test under the deps proxy."""
-        rel = os.path.join("test", "guild_engine_warmup_test.dart")
-        with open(os.path.join(tree, rel), "w", encoding="utf-8") as fh:
-            fh.write("import 'package:flutter_test/flutter_test.dart';\n\nvoid main() {\n  test('guild engine warm-up', () {});\n}\n")
-        try:
-            from workflows.dev.ports import warm_sandbox
-            sb = warm_sandbox(tree, self.run_dir, self.root)
-            t0 = time.time()
-            r, px = CH.deps_step(["flutter test --no-pub %s" % rel], tree, sb, os.path.join(self.run_dir, "tmp"), env=self.env)
-            self.calls.append({"cmd": "warm-up", "rc": r.rc, "secs": round(time.time() - t0, 1), "proxy": px,
-                               "tail": CH.redact_lines(r.raw[-600:])})
-        finally:
-            os.remove(os.path.join(tree, rel))
+    def warm(self, base, tree):
+        """ports.warm_in_place: the tree is a PRISTINE checkout of <base>; engine-written test, deps proxy (K2r4-M1)."""
+        from workflows.dev.ports import warm_in_place
+        t0 = time.time()
+        r, px = warm_in_place(self.root, tree, self.run_dir, self.env, extra_roots=self.extra_roots)
+        self.calls.append({"cmd": "warm-up(base)", "rc": r.rc if r else None, "secs": round(time.time() - t0, 1),
+                           "proxy": px, "tail": CH.redact_lines(r.raw[-600:]) if r else None})
+        return r
 
     def check(self, cmd, cwd, owner, timeout_s, write_dirs):
-        sb = S.role_sandbox("tester-verify", self.root, self.run_dir, toolchain=True,
-                            tool_writes=S.toolchain_writes(self.root))
-        fs = dict(sb["filesystem"])
-        fs["allowWrite"] = list(fs.get("allowWrite") or []) + [d.rstrip("/") + "/**" for d in write_dirs]
-        fs["denyWrite"] = list(fs.get("denyWrite") or []) + [self.root + "/**"]
+        from workflows.dev.ports import tree_sandbox
+        sb = tree_sandbox(cwd, self.run_dir, self.root, extra_roots=self.extra_roots)    # K2r4-M2
         t0 = time.time()
-        r = CH.run_command([cmd], timeout_s, cwd=cwd, env=self.env, sandbox=dict(sb, filesystem=fs),
+        r = CH.run_command([cmd], timeout_s, cwd=cwd, env=self.env, sandbox=sb,
                            tmp=os.path.join(self.run_dir, "tmp"))             # OFFLINE (K2r2-M1)
         # re-run output is redacted before it is stored anywhere (K2 r3)
         self.calls.append({"cmd": cmd, "rc": r.rc, "secs": round(time.time() - t0, 1),
@@ -92,6 +84,8 @@ def main(argv=None):
     ap.add_argument("--copy-ignored", default="", help="comma list → engine.effective.copy_ignored")
     a = ap.parse_args(argv)
     os.makedirs(a.work, exist_ok=True)
+    EFF.TEMP_PARENT = os.path.join(os.path.abspath(a.work), "trees")      # the driver cleans it per Issue
+    os.makedirs(EFF.TEMP_PARENT, exist_ok=True)
     clone = os.path.join(a.work, "clone")
     if not os.path.isdir(clone):
         sh(a.work, "git", "clone", "-q", "--no-hardlinks", os.path.abspath(a.repo), clone)
@@ -131,23 +125,17 @@ def main(argv=None):
         env["GIT_CONFIG_NOSYSTEM"] = "1"
         dev_sb = S.role_sandbox("developer", clone, run_dir, toolchain=True, tool_writes=S.toolchain_writes(clone))
         t0 = time.time()
-        # K2r3-M1: the networked deps step runs BEFORE any git-ignored original exists in the clone,
-        # and warms with an ENGINE-written empty test, never a role's test
-        wrel = os.path.join("test", "guild_engine_warmup_test.dart")
-        with open(os.path.join(clone, wrel), "w", encoding="utf-8") as fh:
-            fh.write("import 'package:flutter_test/flutter_test.dart';\n\nvoid main() {\n  test('guild engine warm-up', () {});\n}\n")
-        try:
-            dr, px = CH.deps_step(["flutter pub get", "flutter test --no-pub %s" % wrel], clone, dev_sb,
-                                  os.path.join(run_dir, "tmp"), env=env)
-        finally:
-            os.remove(os.path.join(clone, wrel))
+        # the K1 deps step on the developer checkout: `pub get` only (resolves, runs no package
+        # code) and BEFORE any git-ignored original exists in the clone; the engine's warm-up that
+        # runs hooks builds a pristine <base> (Port.warm → ports.warm_in_place, K2r4-M1)
+        dr, px = CH.deps_step(["flutter pub get"], clone, dev_sb, os.path.join(run_dir, "tmp"), env=env)
         row["deps"] = {"rc": dr.rc, "secs": round(time.time() - t0, 1), "proxy": px}
         for g in GENERATED:                                  # the developer checkout's ignored files — offline from here on
             src = os.path.join(a.repo, g)
             if os.path.exists(src):
                 os.makedirs(os.path.dirname(os.path.join(clone, g)), exist_ok=True)
                 shutil.copy2(src, os.path.join(clone, g))
-        p = Port(clone, env, run_dir)
+        p = Port(clone, env, run_dir, extra_roots=[os.path.abspath(a.repo)])
         cfg = {"commands": {"test": "flutter test"},
                "engine": {"effective": {"copy_ignored": [x for x in a.copy_ignored.split(",") if x]}}}
         out, meta = EFF.run(p, cfg, [c["ac"] for c in covers], {c["ac"]: [c] for c in covers}, base, None, timeout_s=900)
