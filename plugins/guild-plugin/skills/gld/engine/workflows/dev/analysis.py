@@ -5,7 +5,7 @@ legacy leader did in prose that need no model.
   (`- <Goal|Constraint|Success>: <q> → <answer> (<date>, sprint plan)`), each with its tagged
   premises `(전제: #d)` (A1.0, J-AN-02 tagged half);
 * `premise_met(issue, comments)` — met = CLOSED+COMPLETED, or `guild:done` ∧ not a split parent ∧
-  not CLOSED/NOT_PLANNED (an.md:47 rule, one read per premise);
+  not CLOSED/NOT_PLANNED (catalog A1.0 rule, one read per premise);
 * `safety_net_lines(body)` — each line under `<!-- guild:safety-net -->` becomes its own AC verbatim
   (A-F17 — the judgment may phrase alongside, never replace);
 * `verify_anchor(anchor, root, sources)` — KICKOFF's `path:line`+quote anchors checked against the
@@ -18,7 +18,7 @@ legacy leader did in prose that need no model.
 * `irreversible(paths, globs)` — §3.2: the ecosystem globs (or `engine.irreversible_globs`);
 * `render_output(...)` / `parse_output(body)` — the analyze:output record: free prose stays prose,
   the machine lines are `Readiness: Goal=<t> · Constraint=<t> · Success=<t> (…)` (RD §D),
-  `work-type: <feature|bug|refactor>`, `cast: <roles>` (dev.md:97) and one `- AC #n …` line per
+  `work-type: <feature|bug|refactor>`, `cast: <roles>` (catalog D2.G4) and one `- AC #n …` line per
   acceptance criterion. The parser is tolerant of the legacy prose forms (bold, `AC-1`, tables) so
   a legacy-started Issue's analyze:output feeds design.
 
@@ -109,7 +109,7 @@ def safety_net_lines(body):
 
 
 def premise_met(issue, comments):
-    """an.md:47: met = CLOSED+COMPLETED, or guild:done ∧ no children:output ∧ not CLOSED/NOT_PLANNED."""
+    """catalog A1.0: met = CLOSED+COMPLETED, or guild:done ∧ no children:output ∧ not CLOSED/NOT_PLANNED."""
     from guildcore.state import label_names
     st = (issue.get("state") or "").upper()
     reason = (issue.get("stateReason") or "").upper()
@@ -430,11 +430,32 @@ WT_RE = re.compile(r"^work-type:\s*(feature|bug|refactor)\s*$", re.M)
 WT_LEGACY_RE = re.compile(r"type:(feature|bug|refactor)")
 
 
+DIM_TOKEN_RE = dict((d, re.compile(r"%s\**\s*[=:]\s*\**\s*`?(clear|partial|unclear)\b" % DIM_KEY[d], re.I)) for d in DIMS)
+
+
+def readiness_of(body):
+    """The engine line (READINESS_RE) or, tolerant of the legacy forms (bold, parentheticals holding `·`,
+    backticks), the three tokens on the first line naming `Readiness`. None when not all three are there."""
+    m = READINESS_RE.search(body or "")
+    if m:
+        return dict(zip(DIMS, (m.group(1), m.group(2), m.group(3))))
+    for ln in (body or "").split("\n"):
+        if "readiness" not in ln.lower():
+            continue
+        got = {}
+        for d in DIMS:
+            mm = DIM_TOKEN_RE[d].search(ln)
+            if mm:
+                got[d] = mm.group(1).lower()
+        if len(got) == 3:
+            return got
+    return None
+
+
 class AnalyzeRecord(object):
     def __init__(self, body):
         self.body = body or ""
-        m = READINESS_RE.search(self.body)
-        self.readiness = dict(zip(DIMS, (m.group(1), m.group(2), m.group(3)))) if m else None
+        self.readiness = readiness_of(self.body)
         seen, acs = set(), []
         for ln in self.body.split("\n"):
             mm = AC_LINE_RE.match(markers.clean(ln))

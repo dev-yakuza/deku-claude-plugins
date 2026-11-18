@@ -334,6 +334,14 @@ class JudgeSpecs(unittest.TestCase):
         self.assertEqual(JG.coerce_an_po({"action": "rerate_success", "rating": "partial"})[0]["rating"], "unclear")
         self.assertTrue(JG.coerce_integrate({"verdict": "gap", "gaps": []})[0]["gaps"][0]["needs_decision"])
 
+    def test_role_without_an_agent_file_still_runs(self):
+        """K4 smoke finding: `.claude/agents/explorer.md` does not exist in a real repo — no persona, default tier."""
+        from guildcore import config as CF
+        from workflows.dev.stages.base import RoleCall
+        d = repo(self, {".claude/guild/config.json": '{"language": "ko"}'})
+        sp = PO.role_spec(RoleCall("explorer", "kickoff", "analyze", "A2"), 7, d, CF.load(d))
+        self.assertEqual((sp.model, sp.persona), ("sonnet", ""))
+
     def test_prompt_templates_exist_and_specialists_share_one(self):
         from workflows.dev.stages.base import RoleCall
         for role, task in (("explorer", "kickoff"), ("product-owner", "analyze"), ("tech-lead", "design"),

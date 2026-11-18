@@ -495,7 +495,12 @@ def deps_main(worktree, run_dir, env, copy_list=(), issue=None, timeout_s=1800, 
 
 
 def role_spec(call, issue, worktree, config, base=None, branch=None, unattended=True):
-    per = config.persona(call.role) if hasattr(config, "persona") else None
+    try:
+        per = config.persona(call.role) if hasattr(config, "persona") else None
+    except (IOError, OSError):
+        # K4 smoke: the explorer (and any role the repo never installed) has no `.claude/agents/<role>.md`
+        # — the task template carries the whole instruction; tier = the role default
+        per = None
     model = getattr(call, "model", None) or (per.model if per else None) or "sonnet"
     return RR.RoleSpec(call.role, call.task, prompt(call, issue), issue, call.stage, call.step, worktree,
                        model, persona=(per.body if per else ""), inputs=call.inputs, base=base,
