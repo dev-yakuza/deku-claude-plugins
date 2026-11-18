@@ -72,6 +72,7 @@ class Env(object):
         d.driver_cls = FakeDriver
         self.h.p.journal = self.h.journal
         d.ports_for = lambda n, stage, variant=None: self.h.p
+        d.gh = lambda: self.h.gh                                    # never the real gh
         d.spawn = lambda argv, cwd, env, log: (self.spawned.append(argv) or 4242)
         self.spawned = []
         self.d = d

@@ -1,5 +1,7 @@
 # STATUS
 
+> **0.102 (engine)**: run `python3 <<SKILL_DIR>>/engine/gld_engine.py status show --issue $1` (one call) and print its output **verbatim**. The *Process* below is the 0.101.x reference; it is **not executed**.
+
 Show the current progress of an Issue. **Read-only**: never posts comments, never sets labels. State source = GitHub labels + stage-output markers (`_handoff.md` Sections A/B).
 
 `$1` = Issue number.

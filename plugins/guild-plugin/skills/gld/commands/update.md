@@ -105,6 +105,18 @@ Compare the two versions **semver-numerically** (major.minor.patch, each compone
 - `config.version` < plugin → show the gap and what an update brings (new/changed **commands** are already available plugin-side; the **repo-side** update refreshes gate scripts, the git pre-commit hook, settings hooks, the CLAUDE.md guild block, the label set, the config schema, and **role persona frontmatter + the persona marker region**). `--check` → stop here (nudge only). **`--check` reports the missing hook the parity branch above acts on, and stops** — `--check` changes nothing by definition, so it names the gap instead of closing it.
 
 **2. Adopt central-owned repo artifacts (each shown + confirmed — INV1)**
+
+**0.102 ordering — the gate FIRST** (engine release, K3 user decision 3). When the installed plugin is 0.102 or later and `config.version` is below 0.102, adopt the **gate script** bullet below (with its two universal rule files and the commit-gate wiring) **before every other artifact**, then stop and tell the human, in `config.language`:
+1. commit those gate files and merge that commit into the default branch **before** running the engine on any Issue (`/gld dev`, `/gld sprint run`, `/gld batch`) — the engine's role commits run the gate **from `<base>`** with `GUILD_GATE_CONFIG` pointing at base's config, and only a base gate of 0.102 honours it;
+2. until base has it, a branch that changes `.claude/guild/config.json` `gates` still cannot ship: the engine stops before push (`developer wrote outside its scope — … gates`) — safe, but a person's stop each time.
+Then continue with the rest of step 2. If the gate-script update is skipped (a local extension pending migration), say plainly that the engine stays on that pre-push stop for every gates-touching branch.
+
+**0.102 config and habits** (additive, each confirmed):
+- **`engine`** → add the `config.engine` block with its defaults (`answer_associations`, `attended_confirm_interpretation: false`, `first_sprint_mode: "auto"`, `budget_usd_per_issue: 35.0`, `handoff_judge: "default"`, `effective.copy_ignored: []` — the engine's `guildcore/config.py` `ENGINE_DEFAULTS` is the list); keep every key already present. **`commands.test_one`** → absent: leave it absent and say the engine uses each runner's built-in single-test command (set it only for a runner the engine does not know).
+- **`sprint.stage_groups`** → **keep it** (a downgrade to 0.101.3 reads it — deleting it would make a rolled-back sprint ungrouped); say once that 0.102 ignores it (the engine has no leader session).
+- **Leader habits → judgment-group tags** (design §8.1, one time): list every habit line of `.claude/agents/leader.md` in a table — (a) the judgment group it belongs to, written as the prefix `- [J:<GROUP>] …` (KICKOFF · STAKES · EX-ARB · SPLIT · INTEGRATE · TEST · QA · HANDOFF …), (b) a habit that is now code or a config key → "config proposal" (name the key), (c) a retirement candidate — and apply **only the rows the human approves**. Never edit leader.md's template region. Until approved, an untagged habit reaches only KICKOFF and ESCALATE.
+- **Rollback reminder** → print one line: `rollback = the whole plugin version — first python3 <<SKILL_DIR>>/engine/gld_engine.py dev valve halt --all --now (runbook: <<SKILL_DIR>>/docs/engine-rollback.md)`.
+
 Before touching any persona, snapshot the pre-run dirty set once — its own Bash call:
 ```bash
 git status --porcelain -- .claude/agents/

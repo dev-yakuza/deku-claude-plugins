@@ -1,5 +1,7 @@
 # DESIGN (stage)
 
+> **0.102 (engine)**: `/gld design $1` runs the engine's **design** stage alone — follow `<<SKILL_DIR>>/commands/dev.md` *Engine driver* with `--only design` on step 1. The rest of this file is the 0.101.x reference the roles' atoms cite; it is **not executed**.
+
 **Stage: design.** Core roles: **tech-lead ∥ tester** (leader orchestrates), **plus any conditional participation specialists the leader convenes** (designer/i18n/dba/analytics/performance/tech-writer/security — Step 1.5). The tech-lead drafts the skeleton; the tester writes test cases from the acceptance criteria **without seeing the skeleton** (bias-free). They run in parallel. Invocable directly (`/gld design <issue>`) or via `/gld dev`.
 
 `$1` = Issue number. Returns a Section D line.

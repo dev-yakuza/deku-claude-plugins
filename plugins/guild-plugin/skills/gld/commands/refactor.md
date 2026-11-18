@@ -1,5 +1,7 @@
 # REFACTOR (stage: execute variant — refactor)
 
+> **0.102 (engine)**: `/gld refactor $1` runs the engine's **execute** stage alone — follow `<<SKILL_DIR>>/commands/dev.md` *Engine driver* with `--only execute` on step 1. The engine picks the variant from the `type:` label — put `type:refactor` on the Issue for the refactor variant. The rest of this file is the 0.101.x reference the roles' atoms cite; it is **not executed**.
+
 **Stage: execute, variant for `type:refactor`.** Roles: **developer** (behavior-preserving transform) with **tech-lead conformance** (structure improved *and* behavior preserved), plus the always-on external auditor and any conditional specialists (Step 3.5). Invocable directly (`/gld refactor <issue>`) or via `/gld dev` (auto-selected when the Issue is `type:refactor`). Same spine as `implement` (execute → test); the developer's task shape differs — code is **transformed without changing behavior**, so the **existing tests are the safety net** (no new feature test).
 
 `$1` = Issue number. Returns a Section D line.

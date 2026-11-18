@@ -1,5 +1,7 @@
 # QA (stage)
 
+> **0.102 (engine)**: `/gld qa $1` runs the engine's **qa** stage alone — follow `<<SKILL_DIR>>/commands/dev.md` *Engine driver* with `--only qa` on step 1. The rest of this file is the 0.101.x reference the roles' atoms cite; it is **not executed**.
+
 **Stage: QA — holistic quality.** Role: **qa** (leader judges), plus a conditional **UI/UX review gate** (designer) when the change has a UI surface (Step 1.5). Runs **after `test`** (automated correctness) and before `done`. QA covers what automated tests don't: exploratory testing, E2E user flows, usability, real-app robustness — from the **user's black-box perspective**. Depth is **risk-based** (a tiny fix gets a light QA judgment; a UI feature gets exploratory + E2E planning). Invocable directly (`/gld qa <issue>`) or via `/gld dev`.
 
 `$1` = Issue number. Returns a Section D line (`_handoff.md`).

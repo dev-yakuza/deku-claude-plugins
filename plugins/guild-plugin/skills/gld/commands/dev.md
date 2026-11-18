@@ -10,6 +10,25 @@
 
 ---
 
+## Engine driver (0.102) — this section IS the command
+
+0.102 runs the spine as code (`<<SKILL_DIR>>/engine/gld_engine.py`, design §2.4). **Do only what this section says**; everything after the line `## Legacy spine (0.101.x reference)` is the old prose spine, kept as reference for the roles' atoms and the 0.101.3 downgrade — it is **not executed**. `E` below = `python3 <<SKILL_DIR>>/engine/gld_engine.py`. Each step is ONE Bash call; every answer is one `>>> ENGINE <<<` JSON line — say what it means in one line of `config.language`.
+
+0. **Mode** — `printenv GLD_UNATTENDED`, then in a SEPARATE call `printenv GLD_SUPERVISOR_VERSION` (one variable per call).
+   - `GLD_UNATTENDED` = `1` and `GLD_SUPERVISOR_VERSION` empty → an **old (0.101.x) supervisor or batch** started this session. Run `E dev run --issue $1 --unattended --detach` in the foreground with the Bash timeout 3600000; if the call ends by that timeout, run the same command again (it attaches to the same run). Print its last `"type":"result"` line verbatim and end. Never ask anything. (Documented degradation, §10.3: the old supervisor does not see the engine's rate limit or kill switch — regenerate it with `/gld sprint run`.)
+   - `GLD_UNATTENDED` = `1` and `GLD_SUPERVISOR_VERSION` set → a 0.102 supervisor never sends `/gld dev`; say so and stop.
+   - otherwise → **attended**, step 1.
+1. **Start or attach** — `E dev run --issue $1 --attended` (`/gld <stage> $1` adds `--only <stage>`). `{"started":true}` → step 2. `{"attached":true,"read_only":true}` → an unattended run owns #$1: only step 2 (no answer, hold or note).
+2. **Wait** — `E dev wait --issue $1 --max-seconds 540`, then for its `events` in order:
+   - `progress` → one line each (the KICKOFF interpretation and cast, an EX-ARB MAJOR dismiss, a child being driven).
+   - `ask` `{qid, kind, question, options[{token,label}], recommended, context_lines, predict_first}` → `AskUserQuestion` with the question, the context lines and one option per `options` entry (its `label`). Mark the `recommended` option `(권장)` (in `config.language`) — **except** when `predict_first` is true: then show no recommendation at all. Then `E dev answer --issue $1 --qid <qid> --choice <token>` (add `--text "<the person's own words>"` when they typed any), and go back to **step 1** (the worker ended at the question; step 1 starts it again).
+   - `terminal` `{exit_code, line, token, cost_usd, halted}` → report the token and the line, and the cost. `halted` → the kill switch or a plugin version change stopped it (show the line; nothing to retry). exit 3 → `gh auth login`, then `/gld resume $1`. exit 75 → a rate limit; `/gld resume $1` after the reset. **End.**
+   - no `ask`/`terminal` yet → step 2 again.
+3. **The person interrupts** (they type while you wait): `E dev hold --issue $1`, then their words verbatim as `E dev note --issue $1 --text "<their words>"` (add `--stage <stage>` when they name one), then step 1 when they want it to go on. A note is a human directive: it reaches every judgment of that stage.
+- The worker outlives this session; `/gld resume $1` attaches to it. Questions are answered only through `dev answer` (attended) or the `guild-answer:` line on the Issue (unattended).
+
+## Legacy spine (0.101.x reference)
+
 ## Phase 0 — Setup
 
 1. **Validate `$1`**: must be an Issue number. Confirm it exists and is not a PR:

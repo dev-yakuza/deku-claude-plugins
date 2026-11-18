@@ -141,15 +141,38 @@ def render_running(rows, missing):
     return "\n".join(out) + "\n"
 
 
-def directives(gh, open_only=True):
+def own_comment_ids(n, common=None):
+    """The engine's own comment ids of #n from this clone's journal ([] when there is none here)."""
+    try:
+        from guildcore.journal import Journal
+        return Journal(common or git_common_dir("."), n).own_comment_ids()
+    except Exception:                                            # noqa: BLE001 — no journal here: association only
+        return []
+
+
+def repo_of(common_dir):
+    """owner/repo of a registered clone (its origin remote), or None."""
+    try:
+        p = subprocess.run(["git", "--git-dir", common_dir, "remote", "get-url", "origin"],
+                           stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    except OSError:
+        return None
+    m = re.search(r"github\.com[:/]([^/\s]+/[^/\s]+?)(?:\.git)?\s*$", p.stdout.decode("utf-8", "replace"))
+    return m.group(1) if p.returncode == 0 and m else None
+
+
+def directives(gh, open_only=True, common=None):
     """`by: human` `point: directive` blocks of open Issues (redacted text as stored)."""
     out = []
     for r in list_snapshots(gh, state="open" if open_only else "all"):
         if not any(l.startswith("guild:") for l in r["labels"]):
             continue
-        log = DecisionLog.load(gh.comments(r["number"]))
+        # K5: only engine/member-written decision comments (a stranger's comment carrying the marker is not a
+        # directive — the runbook asks a person to RE-POST these as their own words)
+        from guildcore.records import markers
+        log = DecisionLog.load(markers.trusted(gh.comments(r["number"]), own_comment_ids(r["number"], common)))
         for b in log.directives():
-            out.append({"issue": r["number"], "id": b.id, "at": b.get("at"),
+            out.append({"issue": r["number"], "id": b.id, "at": b.get("at"), "repo": getattr(gh, "repo", None),
                         "text": b.get("text") or b.get("reason") or b.get("choice") or ""})
     return out
 
@@ -157,5 +180,5 @@ def directives(gh, open_only=True):
 def render_directives(rows):
     if not rows:
         return "no open directive blocks\n"
-    return "\n".join("#%d %s %s — %s" % (r["issue"], r["id"], r["at"] or "?", r["text"])
-                     for r in rows) + "\n"
+    return "\n".join("%s#%d %s %s — %s" % ((r["repo"] + " ") if r.get("repo") else "", r["issue"], r["id"],
+                                            r["at"] or "?", r["text"]) for r in rows) + "\n"

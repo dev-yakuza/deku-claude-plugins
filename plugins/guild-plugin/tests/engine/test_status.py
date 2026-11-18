@@ -254,9 +254,12 @@ class EntryPoint(unittest.TestCase):
         self.assertEqual((rc, out), (0, _util.read(os.path.join(STATUS_TXT, "117.txt"))))
 
     def test_unknown_workflow_and_usage(self):
-        self.assertEqual(self.run_entry("dev", "run", "--issue", "1")[0], 64)
+        self.assertEqual(self.run_entry("nope", "run", "--issue", "1")[0], 64)
         self.assertEqual(self.run_entry()[0], 64)
-        self.assertEqual(self.run_entry("version")[1], "guild engine K1\n")
+        self.assertEqual(self.run_entry("dev")[0], 64)
+        # K5: under GLD_ENGINE_TEST a `dev` run without an isolated config dir is refused before anything
+        self.assertEqual(self.run_entry("dev", "run", "--issue", "1", env={"CLAUDE_CONFIG_DIR": ""})[0], 64)
+        self.assertEqual(self.run_entry("version")[1], "guild engine K5\n")
 
     def test_old_python_halts_6(self):
         code = ("import sys; sys.path.insert(0, %r); import gld_engine as g; g.MIN_PY = (99, 0); "

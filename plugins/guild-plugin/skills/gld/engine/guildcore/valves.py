@@ -35,9 +35,9 @@ KEYS = (
     re.compile(r"^grading\.(highrisk_human_rate|grader_rate)$"),
     re.compile(r"^ab\.lever$"),
 )
-# grading rates may only be LOWERED from these floors-by-design defaults, and never below the floor (§9.5)
-GRADING_DEFAULT = {"grading.highrisk_human_rate": 1.0, "grading.grader_rate": 1.0}
-GRADING_FLOOR = {"grading.highrisk_human_rate": 0.3, "grading.grader_rate": 0.1}
+# grading rates may only be LOWERED from the §9.5 defaults, and never below the floor
+GRADING_DEFAULT = {"grading.highrisk_human_rate": 0.3, "grading.grader_rate": 0.25}     # after the first sprint
+GRADING_FLOOR = {"grading.highrisk_human_rate": 0.2, "grading.grader_rate": 0.15}
 HUMAN_ONLY = ("grading.highrisk_human_rate", "grading.grader_rate")
 # valve name → the engine config key a stage reads through `Ports.engine_cfg`
 ENGINE_KEY = {"kickoff.confirm_interpretation": "attended_confirm_interpretation",
@@ -73,8 +73,8 @@ def check_value(key, value):
                                                 "stakes.pause_on_partial", "split.require_human"):
         if not isinstance(value, bool):
             raise ValueError("%s takes true|false" % key)
-    if key == "handoff_judge" and value not in ("default", "always", "shadow"):
-        raise ValueError("handoff_judge takes default|always|shadow")
+    if key == "handoff_judge" and value not in ("default", "always"):
+        raise ValueError("handoff_judge takes default|always")
     if key.startswith("judges.") and value not in ("haiku", "sonnet", "opus"):
         raise ValueError("%s takes haiku|sonnet|opus" % key)
 

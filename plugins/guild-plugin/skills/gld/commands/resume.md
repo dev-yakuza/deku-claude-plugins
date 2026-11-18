@@ -1,5 +1,7 @@
 # RESUME
 
+> **0.102 (engine)**: route with `python3 <<SKILL_DIR>>/engine/gld_engine.py status route --issue $1` (one call; print its line). `dev` → follow `<<SKILL_DIR>>/commands/dev.md` *Engine driver* (it attaches to a running worker). Any other answer → print it and stop. The *Process* below is the 0.101.x reference; it is **not executed**.
+
 Continue an in-progress Issue from where it left off. Guild's state lives in GitHub labels (`_handoff.md` Section A), so resume is stateless recovery: read the label, continue the spine from that stage.
 
 `$1` = Issue number.

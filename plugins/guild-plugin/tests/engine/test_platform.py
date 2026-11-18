@@ -213,8 +213,19 @@ class Journal(unittest.TestCase):
             journal.render("bogus", "t")
 
 
+# K5 wires the engine: exactly these plugin files may name it (the attended driver, the stage stubs, status /
+# resume routing, the supervisor + batch call sites and their renderer, /gld update and the rollback runbook).
+ENGINE_CALLERS = {
+    "commands/dev.md", "commands/analyze.md", "commands/design.md", "commands/implement.md",
+    "commands/debug.md", "commands/refactor.md", "commands/test.md", "commands/qa.md", "commands/resume.md",
+    "commands/status.md", "commands/batch.md", "commands/update.md", "commands/sprint/run.md",
+    "commands/atoms/render_supervisor.py", "templates/sprint-supervisor.sh", "docs/engine-rollback.md",
+}
+
+
 class Inert(unittest.TestCase):
-    """K0 ships inert: nothing in the plugin calls the engine, and the engine cannot write."""
+    """K0–K4 shipped inert; K5 wires the engine — only the ENGINE_CALLERS name it, and the engine cannot write
+    outside its write path."""
 
     def test_no_plugin_file_references_the_engine(self):
         hits = []
@@ -224,7 +235,8 @@ class Inert(unittest.TestCase):
             for fn in files:
                 p = os.path.join(base, fn)
                 try:
-                    if "gld_engine.py" in _util.read(p) or "/engine/" in _util.read(p):
+                    if ("gld_engine.py" in _util.read(p) or "/engine/" in _util.read(p)) and \
+                            os.path.relpath(p, _util.SKILL) not in ENGINE_CALLERS:
                         hits.append(p)
                 except UnicodeDecodeError:
                     pass

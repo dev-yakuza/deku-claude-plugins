@@ -199,6 +199,7 @@ The classes the supervisor writes — **this list is the code's, verbatim**:
 | `dependency-blocked` · `base-unresolved` · `branch-ambiguous` · `account-rate-limited` | **차단** — 의존이 아직 랜딩되지 않았거나, 후보 브랜치가 둘 이상이거나, 계정 한도의 리셋이 4시간 넘게 남았다. 실패로 렌더하지 말 것 — **재실행이 큐를 이어받는다** |
 | `branch-assumed` | **정보** — 실패도 차단도 아니다. 이슈 번호가 맞는 브랜치가 하나뿐이어서 그것으로 재개했다는 기록. 소유를 증명한 것은 아니므로 사람이 확인할 수 있게 남긴다 |
 | `split-stalled` | **미완**(실패로 집계) — 분할 부모의 자식 오케스트레이션이 전진을 멈췄다 |
+| `busy` · `busy-skipped` | **미처리**(0.102) — 다른 엔진 실행이 그 이슈를 잡고 있었다(종료 4). `busy` 는 제자리 대기 기록, `busy-skipped` 는 두 번 기다려도 잡혀 있어 이번 실행에서 건너뜀. 실패도 차단도 아니다 — **재실행이 이어받는다** |
 
 ⚠ `base-decision-failed`와 `base-unresolved`는 **다른 일**이다. 앞은 base 결정 자체가 실패한
 것(입력이 깨졌거나 출력을 파싱할 수 없다 — 의존에 대해 아는 것이 없으므로 하류가 추측 위에

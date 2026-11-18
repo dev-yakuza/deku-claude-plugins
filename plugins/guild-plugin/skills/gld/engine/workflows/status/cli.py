@@ -49,6 +49,7 @@ def parser():
     p = sub.add_parser("directives")
     p.add_argument("--open", action="store_true", help="open Issues only (default: all states)")
     p.add_argument("--repo")
+    p.add_argument("--all-repos", action="store_true", help="every clone in the config-dir registry (runbook ①b)")
     return ap
 
 
@@ -98,7 +99,20 @@ def main(argv, out=None, err=None, clock=None, ledger=None):
             out.write(running.render_running(rows, missing))
             return 0
         if a.cmd == "directives":
-            out.write(running.render_directives(running.directives(make_gh(a.repo), a.open)))
+            if not a.all_repos:
+                out.write(running.render_directives(running.directives(make_gh(a.repo), a.open)))
+                return 0
+            rows, skipped = [], []
+            for d in running.registry():
+                repo = running.repo_of(d) if os.path.isdir(d) else None
+                if repo is None:
+                    skipped.append(d)
+                    continue
+                rows += running.directives(make_gh(repo), a.open, d)
+            text = running.render_directives(rows)
+            for d in skipped:
+                text += "skipped (registry entry missing or no GitHub origin): %s\n" % d
+            out.write(text)
             return 0
     except running.RunningError as e:
         err.write("%s\n" % e)

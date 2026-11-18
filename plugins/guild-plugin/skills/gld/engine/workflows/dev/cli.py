@@ -590,15 +590,34 @@ def parser():
     he = sub.add_parser("health")
     he.add_argument("--first-sprint", action="store_true")
     he.add_argument("--sprint", type=int)
+    he.add_argument("--issues")
     g = sub.add_parser("grade")
     g.add_argument("--sprint", type=int)
+    g.add_argument("--issues")
     g.add_argument("--import", dest="import_csv")
     g.add_argument("--out")
     return ap
 
 
+def _test_guard(d):
+    """Under GLD_ENGINE_TEST=1 the engine must never read or write a real config dir (~/.claude*): no isolated
+    CLAUDE_CONFIG_DIR → refused before any version check, registry write or GitHub call."""
+    if d.env.get("GLD_ENGINE_TEST") != "1":
+        return None
+    cfg = d.env.get("CLAUDE_CONFIG_DIR") or ""
+    home = os.path.realpath(os.path.expanduser("~"))
+    real = os.path.realpath(cfg) if cfg else ""
+    if not cfg or real == home or os.path.basename(real).startswith(".claude") and os.path.dirname(real) == home:
+        return "GLD_ENGINE_TEST=1 needs an isolated CLAUDE_CONFIG_DIR (never ~/.claude*)"
+    return None
+
+
 def main(argv, deps=None):
     d = deps or Deps()
+    bad = _test_guard(d)
+    if bad:
+        _sent(d, {"error": bad})
+        return 64
     a = parser().parse_args(argv)
     if a.cmd is None:
         parser().print_help(d.err)
