@@ -272,7 +272,7 @@ def suite_in_tree(worktree, base, cmds, owner, timeout_s, run_dir, env, copy_lis
 # K3 (K2r6-m4): the live engine runs the K1 deps step in the Issue worktree before every suite —
 # `pub get` ONLY (resolution runs no package code — review-k2-r8), so only the REGISTRY hosts are
 # reachable (no GitHub release hosts: those serve native-asset hooks, which run in the warm-up).
-DEPS_MAIN_CMDS = {"pubspec.yaml": ["flutter pub get"], "package.json": ["npm ci --ignore-scripts"]}
+DEPS_MAIN_CMDS = {"pubspec.yaml": ["flutter pub get"], "package.json": ["npm ci --ignore-scripts"]}   # (npm: see deps_main)
 REGISTRY_HOSTS = {"pubspec.yaml": ("pub.dev", "pub.dartlang.org", "storage.googleapis.com"),
                   "package.json": ("registry.npmjs.org", "registry.yarnpkg.com")}
 
@@ -295,6 +295,15 @@ def read_allowlist(tree, run_dir):
                     os.path.join(os.path.expanduser("~"), "Library", "Android", "sdk")):
             if sdk and os.path.isdir(sdk):
                 out.append(os.path.realpath(sdk) + "/**")
+    if os.path.exists(os.path.join(tree, "package.json")):
+        # measured (K3r2, word_app): npm is a script inside the node install (nvm puts it under the home
+        # dir) — the node toolchain's prefix is an SDK, read only
+        import shutil as _sh
+        for tool in ("node", "npm", "npx"):
+            w = _sh.which(tool)
+            if w:
+                pre = os.path.dirname(os.path.dirname(os.path.realpath(w)))
+                out.append(pre + "/**")
     # git's xcrun shim reads its cache in the per-user temp dir (noise, not a failure, when denied)
     try:
         ut = subprocess.run(["getconf", "DARWIN_USER_TEMP_DIR"], stdout=subprocess.PIPE,
@@ -323,17 +332,33 @@ def deps_sandbox(tree, run_dir, repo_root, copy_list=(), issue=None, extra_roots
     return dict(sb, filesystem=fs)
 
 
-def deps_main(worktree, run_dir, env, copy_list=(), issue=None, timeout_s=1800):
-    """Run the manifest's resolve-only dependency command in the worktree under the registry-only
-    proxy. Returns CheckResult (with `.proxy`) or None when the repo has no known manifest."""
+def deps_main(worktree, run_dir, env, copy_list=(), issue=None, timeout_s=1800, tools=()):
+    """Run EVERY manifest's resolve-only dependency command in the worktree under the registry-only
+    proxy (K3r2-M2: pubspec AND package.json), plus the `npx` tools the 1L checks name (prefetched
+    into the npm cache, `--version` only). The FIRST manifest's result is the step's verdict; the
+    node steps are best-effort (their failure becomes `skipped(env)` on the check that needs them).
+    Returns CheckResult (with `.proxy`, `.notes`) or None when the repo has no known manifest."""
+    first, notes = None, []
     for manifest, cmds in DEPS_MAIN_CMDS.items():
-        if os.path.exists(os.path.join(worktree, manifest)):
-            sb = deps_sandbox(worktree, run_dir, worktree, copy_list, issue)
-            r, px = CH.deps_step(cmds, worktree, sb, os.path.join(run_dir, "tmp"), env=env,
-                                 hosts=REGISTRY_HOSTS[manifest], timeout_s=timeout_s)
-            r.proxy = px
-            return r
-    return None
+        if not os.path.exists(os.path.join(worktree, manifest)):
+            continue
+        if manifest == "package.json":
+            cmds = ["npm ci --ignore-scripts --no-audit --no-fund"] if os.path.exists(
+                os.path.join(worktree, "package-lock.json")) else ["npm install --ignore-scripts --no-audit --no-fund --no-package-lock"]
+            cmds += ["npx --yes %s --version" % shlex.quote(t) for t in tools]
+        sb = deps_sandbox(worktree, run_dir, worktree, copy_list, issue)
+        r, px = CH.deps_step(cmds, worktree, sb, os.path.join(run_dir, "tmp"), env=env,
+                             hosts=REGISTRY_HOSTS[manifest], timeout_s=timeout_s)
+        r.proxy = px
+        if first is None and manifest == "pubspec.yaml":
+            first = r
+        elif not r.passed:
+            notes.append("%s step failed: %s" % (manifest, CH.redact_lines((r.raw.strip().split("\n") or ["?"])[-1])))
+        if first is None and manifest != "pubspec.yaml":
+            first = r if r.passed else CH.CheckResult(True, 0, False, r.raw, r.steps, r.ceiling_s)
+    if first is not None:
+        first.notes = notes
+    return first
 
 
 def role_spec(call, issue, worktree, config, base=None, branch=None, unattended=True):
@@ -487,9 +512,19 @@ def live_execute(issue, main, variant, config, clock, gh, writer, decisions, run
         return RR.new_run_dir(RR.run_root(worktree, issue, root_env), "check", tag)
     p.run_tmp = run_tmp
 
+    def base_checks():
+        from workflows.dev import local_checks as LC
+        lh = None
+        if p.base and G.ok(worktree, "cat-file", "-e", "%s:lefthook.yml" % p.base):
+            lh = G.run(worktree, "show", "%s:lefthook.yml" % p.base).decode("utf-8", "replace")
+        skipped = []
+        return LC.derive(lh, raw, skipped), skipped
+
     def deps():
+        from workflows.dev import local_checks as LC
         rd = run_tmp("deps")
-        r = deps_main(worktree, rd, C.child_env(root_env, {}, role_dir=rd), copy_list, issue)
+        tools = LC.npx_tools(base_checks()[0]) if ((raw.get("local_developer") or {}).get("enabled")) else ()
+        r = deps_main(worktree, rd, C.child_env(root_env, {}, role_dir=rd), copy_list, issue, tools=tools)
         runner.rebaseline(worktree, issue)
         return r
     p.deps = deps
@@ -545,37 +580,71 @@ def live_execute(issue, main, variant, config, clock, gh, writer, decisions, run
     p.local_dev = local_dev
 
     def commit_local(files, tests, variant="implement"):
-        """1L-5 (K3r1-B4 + user decision 2): the BASE gate in `--git-hook` mode over the staged
-        change (rc ≠ 0 refuses), then the repo's configured checks (`commands.lint`, `commands.
-        typecheck`) — all in the sandbox with the scrubbed env — then the engine commit, hooks off."""
-        paths = list(dict.fromkeys(list(files) + list(tests)))
-        G.run(worktree, "add", "--", *paths)
+        """1L-5 (K3r1-B4, K3r2-M2): the pre-commit hook's own checks (from <base>'s lefthook.yml —
+        `local_checks.derive`) run OFFLINE in the 1L sandbox over the staged files, then <base>'s
+        gate `--git-hook` (rc ≠ 0 refuses), then the engine commit with hooks off. A check that cannot
+        run for an environment reason is `skipped(env)` (decision log + PR unattended log), never a
+        refusal. Only paths the worktree really changed are staged (`--literal-pathspecs`, K3r2-m4)."""
+        from workflows.dev import local_checks as LC
+        from workflows.dev.stages import base as SB
+        changed = set(x[3:] for x in G.run(worktree, "status", "--porcelain", "-uall").decode("utf-8", "replace")
+                      .split("\n") if len(x) > 3)
+        paths = [x for x in dict.fromkeys(list(files) + list(tests)) if x in changed]
+        if not paths:
+            return False, "nothing the local job changed is in the worktree"
+        G.run(worktree, "--literal-pathspecs", "add", "--", *paths)
         rd = run_tmp("gate")
         sb = local_sandbox(worktree, rd, issue)
+        env = C.child_env(root_env, {}, role_dir=rd)
+        env.update(S.render_gitconfig(worktree, os.path.join(rd, "in", "gitconfig")))
+        env["npm_config_offline"] = "true"           # measured: npx otherwise waits ~70 s for the registry
+        staged = [x for x in G.run(worktree, "diff", "--cached", "--name-only").decode("utf-8", "replace").split("\n") if x]
+        checks, dropped = base_checks()
+        for chk in checks:
+            cmd = chk.command(staged)
+            if cmd is None:
+                continue
+            r = CH.run_command([cmd], 1800, cwd=worktree, env=env, sandbox=sb, tmp=os.path.join(rd, "tmp"))
+            verdict = LC.classify(r)
+            if verdict.startswith("env:"):
+                SB.record_code(p, "execute", "local-check", "skipped(%s)" % verdict, refs=chk.name,
+                               reason="check `%s` could not run here — %s" % (chk.name, verdict[4:]))
+                continue
+            if verdict == "fail":
+                return False, "check `%s`: %s" % (chk.name, CH.redact_lines((r.raw.strip().split("\n") or ["failed"])[-1]))
         base_sha = G.run(worktree, "rev-parse", p.base).decode().strip()
         gates = S.export_gates_readonly(worktree, base_sha)[0]
         gate = os.path.join(gates, "scripts", "gate_precommit.py") if gates else None
         if gate and not os.path.exists(gate):
             gate = os.path.join(gates, "gate_precommit.py")
         if gate and os.path.exists(gate):
-            env = C.child_env(root_env, {"GUILD_GATE_CONFIG": S.gate_config_path(gates)}, role_dir=rd)
-            env.update(S.render_gitconfig(worktree, os.path.join(rd, "in", "gitconfig")))
-            r = CH.run_command(["python3 %s --git-hook </dev/null" % shlex.quote(gate)], 600, cwd=worktree, env=env,
+            genv = dict(env, GUILD_GATE_CONFIG=S.gate_config_path(gates))
+            r = CH.run_command(["python3 %s --git-hook </dev/null" % shlex.quote(gate)], 600, cwd=worktree, env=genv,
                                sandbox=sb, tmp=os.path.join(rd, "tmp"))
             if not r.passed:
                 return False, "gate: " + CH.redact_lines((r.raw.strip().split("\n") or ["gate refused"])[0])
-        for key in ("lint", "typecheck"):
-            cmds = (raw.get("commands") or {}).get(key)
-            for c in ([cmds] if isinstance(cmds, str) else list(cmds or [])):
-                r = CH.run_command([c], 1800, cwd=worktree, env=C.child_env(root_env, {}, role_dir=rd), sandbox=sb,
-                                   tmp=os.path.join(rd, "tmp"))
-                if not r.passed:
-                    return False, "%s `%s`: %s" % (key, c, CH.redact_lines((r.raw.strip().split("\n") or ["failed"])[-1]))
         kind = {"debug": "fix", "refactor": "refactor"}.get(variant, "feat")
         G.commit(worktree, "%s(#%d): local model implementation" % (kind, issue))
         runner.rebaseline(worktree, issue)
         return True, None
     p.commit_local = commit_local
+
+    def net_run(rev, files):
+        """K3r2-M3 (P2): the ENGINE runs the safety-net tests itself — at `rev` (the proof commit/tree =
+        unchanged production code + the net, or HEAD) in a prepared temp tree, offline, in the tree
+        sandbox. None when the runner cannot be driven per file (then the net stays unverified)."""
+        cmd = net_command(raw, files)
+        if not cmd:
+            return None
+        rd = run_tmp("net")
+        with EFF.TempTree(worktree, p.base, [], rev=rev) as tt:
+            tt.copy_listed(copy_list)
+            sb = tree_sandbox(tt.path, rd, worktree, issue)
+            r = CH.run_command([offline_cmd(cmd)], 1800, cwd=tt.path, env=C.child_env(root_env, {}, role_dir=rd),
+                               sandbox=sb, tmp=os.path.join(rd, "tmp"))
+        runner.rebaseline(worktree, issue)
+        return r
+    p.net_run = net_run
     return p
 
 
@@ -599,3 +668,14 @@ def local_sandbox(worktree, run_dir, issue=None):
                                        "guild/config.json", "guild/knowledge/**", "commands/**", "skills/**")]
     fs["allowWrite"] = list(fs.get("allowWrite") or []) + [os.path.join(cl, "guild", "memory") + "/**"]
     return dict(sb, filesystem=fs)
+
+
+def net_command(raw, files):
+    """A per-file command for the configured runner (no snapshot writes), or None."""
+    from workflows.dev import effective as _E
+    rn = _E.runner_of(raw or {})
+    q = " ".join(shlex.quote(f) for f in files)
+    return {"flutter": "flutter test --no-pub %s", "dart": "dart test %s", "jest": "npx jest --ci %s",
+            "vitest": "npx vitest run %s", "pytest": "python3 -m pytest -q %s",
+            "unittest": "python3 -m unittest -v %s"}.get(rn, "") % q if rn in (
+        "flutter", "dart", "jest", "vitest", "pytest", "unittest") else None

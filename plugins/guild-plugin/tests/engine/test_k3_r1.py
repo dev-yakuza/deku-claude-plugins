@@ -465,7 +465,7 @@ class FakeJudges(object):
 
 
 @unittest.skipUnless(os.path.exists(CH.SANDBOX_EXEC), "no sandbox-exec")
-class LiveExecute(unittest.TestCase):
+class LiveBase(unittest.TestCase):
     def setUp(self):
         self.remote = tmpdir(self)
         git(self.remote, "init", "-q", "--bare", "-b", "main")
@@ -515,6 +515,10 @@ class LiveExecute(unittest.TestCase):
         p.stage_start = "2026-11-16T00:00:30Z"
         return p
 
+
+
+@unittest.skipUnless(os.path.exists(CH.SANDBOX_EXEC), "no sandbox-exec")
+class LiveExecute(LiveBase):
     def test_end_to_end_advance(self):
         p = self.live([self.developer(), RoleResult("DONE"), RoleResult("DONE", None, {"findings": []})])
         r = X.run(p, "implement")

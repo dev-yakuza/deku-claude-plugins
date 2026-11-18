@@ -63,6 +63,7 @@ class XEpisode(object):
         self.loopback_start = None
         self.loopback_end = None
         self.evidence = None
+        self.audit_mentions = []     # K3r2-m1: block text a script wrote (python/Write) — never posted as a body file
 
     @property
     def key(self):
@@ -113,6 +114,9 @@ def episodes(paths):
                                 cur.evidence = po[2]
                 if cur is None:
                     continue
+                txt = json.dumps(st["input"], ensure_ascii=False)
+                if "### audit-record" in txt:
+                    cur.audit_mentions.append(txt.replace("\\n", "\n"))
                 le = P.label_edit(st, n)
                 if le:
                     cur.labels.append(le)
@@ -382,6 +386,9 @@ def legacy_next(blocks_all, k, ep):
     b = blocks_all[k]
     if k + 1 < len(blocks_all) and blocks_all[k + 1].invocation == b.invocation:
         return "retry"
+    nxt_head = "### audit-record %d" % (b.n + 1)
+    if b.invocation and any(nxt_head in m and ("invocation: %s" % b.invocation) in m for m in ep.audit_mentions):
+        return "retry"                # the next block of THIS invocation was written by a script (K3r2-m1)
     adds = [a for adds, _r in ep.labels for a in adds]
     if "guild:test" in adds:
         return "advance"
@@ -401,7 +408,7 @@ def why_mismatch(blk, nxt, ekind, ep):
     dwc = any("DONE_WITH_CONCERNS" in x for x in lines)
     if nxt == "retry" and ekind == "advance":
         if dwc:
-            return "LEGACY: leader looped back on a DONE_WITH_CONCERNS (spine: DWC never blocks; user decision: now EX-DWC)"
+            return "EX-DWC-DEPENDENT: legacy leader looped back on a DONE_WITH_CONCERNS — now decided by EX-DWC (a judgment), not replayed"
         return "LEGACY: loop-back reason not on the record (role-axis rule not followed — B-F-18)"
     if nxt == "exit" and ekind == "advance":
         causes = [(markers.clean(b.split("\n")[1]) if len(b.split("\n")) > 1 else "") for b in ep.pauses]

@@ -25,6 +25,8 @@ SJ_POINTS = ("TEST", "QA", "VIS-ENV", "DIRECTIVE", "HANDOFF", "EX-ARB", "EX-DWC"
 
 def _worthy(b):
     ch = b.get("choice") or ""
+    if b.get("point") in ("dwc-recorded", "local-check"):        # K3r2-M1/M2: always to the human
+        return True
     if b.get("assumption") or b.get("effective_check") == "bypassed":
         return True
     if "ok_with_assumption" in ch or ch.startswith("decide") or ch.startswith("escalate"):

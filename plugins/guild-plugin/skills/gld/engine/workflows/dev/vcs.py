@@ -116,9 +116,10 @@ class Vcs(object):
                 return "unparseable"
         mb = self.merge_base(base)
         if mb:
-            for c in [x for x in self._g("rev-list", "%s..HEAD" % mb, "--", rel).split("\n") if x]:
-                parent = self._g("rev-parse", "%s^" % c).strip()
-                if gates(self.show(c, rel)) != gates(self.show(parent, rel) if parent else None):
+            # K3r2-m2: --full-history — a toggle on a side branch merged back is still seen; each parent
+            for c in [x for x in self._g("rev-list", "--full-history", "%s..HEAD" % mb, "--", rel).split("\n") if x]:
+                parents = self._g("rev-list", "--parents", "-n", "1", c).split()[1:]
+                if any(gates(self.show(c, rel)) != gates(self.show(pp, rel)) for pp in (parents or [None])):
                     return True
         try:
             with open(self.root + "/" + rel, encoding="utf-8") as fh:

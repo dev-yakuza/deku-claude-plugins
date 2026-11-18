@@ -282,9 +282,13 @@ class Variants(unittest.TestCase):
                      roles=[dev(safety_net=sha, net=["test/a_net_test.dart"], net_run=["test/a_net_test.dart +1"]),
                             TL_DONE, auditor()])
         h.p.branch = "refactor/#7-x"
+        runs = []
+        h.p.net_run = lambda rev, files: runs.append((rev, list(files))) or suite(FLUTTER_GREEN)   # K3r2-M3
         r = X.run(h.p, "refactor")
         self.assertEqual(r.kind, "ADVANCE")
+        self.assertEqual(runs, [(sha, ["test/a_net_test.dart"]), ("HEAD", ["test/a_net_test.dart"])])
         ev = h.body_with("test-evidence:step-1")
+        self.assertIn("engine@%s: test/a_net_test.dart — green" % sha[:12], ev)
         self.assertIn("<!-- guild:safety-net-evidence -->", ev)
         self.assertIn("sha: %s" % sha, ev)
         self.assertIn("verified: yes", ev)

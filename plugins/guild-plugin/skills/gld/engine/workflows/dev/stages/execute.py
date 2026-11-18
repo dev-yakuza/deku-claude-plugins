@@ -115,6 +115,7 @@ def run(p, variant):
     if isinstance(e, B.StageResult):
         return e
     cx = Ctx(variant)
+    p._xcx = cx
     cx.stage_start = getattr(p, "stage_start", None) or p.now()
     from guildcore.records import redact as RD
     RD.clear_exact()                      # K3r1-M4: exact values of copy_ignored files, scoped to this run
@@ -244,8 +245,7 @@ def attempts(p, e, cx):
         if getattr(cx, "evidence_concern", None):
             dwc_now.append(("developer", cx.evidence_concern))
             cx.evidence_concern = None
-        if green and dev_ok and dwc_now and not role_triggers:                  # user decision 1
-            role_triggers += dwc_judgment(p, cx, attempt, dwc_now)
+        cx.dwc_pending = list(dwc_now) if (green and dev_ok and not role_triggers) else []
         cx.dwc = ["%s: %s" % (r, t) for r, t in dwc_now]
         cx.pr_summary_path = safe_role_path(p, dev, (dev.extras or {}).get("pr_summary_path"))   # K3r1-B1
         out = arbitrate_step(p, cx, attempt, scan, scan_ran, head, untracked, role_triggers,
@@ -560,6 +560,7 @@ def evidence_step(p, cx, dev, attempt):
     deps = getattr(p, "deps", None)
     dep_reason = None
     if deps is not None:                                                    # K3 carry-over 3
+        cx.pre_deps_status = p.vcs.status()                                  # K3r2-m5: before pub get rewrites a lock
         d = deps()
         if d is not None and not d.passed:
             tail = CH.redact_lines("\n".join((d.raw or "").split("\n")[-4:]))
@@ -622,6 +623,9 @@ def evidence_step(p, cx, dev, attempt):
         net_block = RN.render_block(nb)
         cx.net_now = nb
         if green:
+            green, reason = engine_net_run(p, cx, dev, nb)                      # K3r2-M3 (P2)
+            net_block = RN.render_block(nb)
+        if green:
             # K3r1-m12: a VERIFIED net is frozen — its D-R checks still run on every re-entry
             bad = RN.checks(p.root, p.base, p.branch, nb, net_mode=cx.net_mode)
             if bad:
@@ -641,11 +645,57 @@ def deps_failure_kind(p, d):
     (the Issue did not touch a manifest); a failing resolution on manifests the branch changed is the
     developer's mistake → a loop-back for this Issue."""
     mb = p.vcs.merge_base(p.base)
+    pre = getattr(getattr(p, "_xcx", None), "pre_deps_status", None)
     changed = set(p.vcs.names("%s..HEAD" % mb) if mb else []) | set(
-        ln[3:] for ln in (p.vcs.status() or "").split("\n") if len(ln) > 3)
+        ln[3:] for ln in ((pre if pre is not None else p.vcs.status()) or "").split("\n") if len(ln) > 3)
     if any(os.path.basename(f) in MANIFESTS for f in changed):
         return "issue"          # even a host the proxy refused: the branch asked for it (a retry that
     return "env"                # still fails goes to stagnation → a person, never a sprint-wide halt)
+
+
+SNAP_WRITTEN_RE = re.compile(r"\b(\d+ )?snapshots? (written|updated)\b|Writing golden|updated golden", re.I)
+
+
+def _head_path(p, sha, f):
+    if p.vcs.show("HEAD", f) is not None:
+        return f
+    for st, paths in p.vcs.name_status("%s..HEAD" % sha, renames=True) if hasattr(p.vcs, "name_status") else []:
+        if st.startswith("R") and paths[0] == f:
+            return paths[-1]
+    return None
+
+
+def engine_net_run(p, cx, dev, nb):
+    """K3r2-M3: the net's `run:` lines are the ENGINE's — at the proof (old code + net) and at HEAD.
+    The developer's `net_run` text only feeds the mismatch log. Not runnable → `unverified(net)`, and
+    `verified: yes` is never written. Returns (green, reason)."""
+    nr = getattr(p, "net_run", None)
+    files = [f for f in nb.get("net") or [] if f not in [x.split(" @ ")[0] for x in nb.get("post-transform-net") or []]]
+    sha = nb.get("sha")
+    claim = " ".join((dev.extras or {}).get("net_run") or [])
+    cx.net_engine = "unverified(net)"
+    if not files or not sha or nr is None:
+        nb["run"] = ["unverified(net): %s" % ("no net files" if not files else "no sha" if not sha else "engine cannot run the net here")]
+        return True, None
+    old = nr(sha, files)
+    if old is None:
+        nb["run"] = ["unverified(net): no per-file command for this runner"]
+        return True, None
+    red_old = not old.passed or SNAP_WRITTEN_RE.search(old.raw or "")
+    heads = [_head_path(p, sha, f) for f in files]
+    new = nr("HEAD", [h for h in heads if h]) if all(heads) else None
+    nb["run"] = ["engine@%s: %s — %s" % (sha[:12], " ".join(files), "green" if not red_old else "RED"),
+                 "engine@HEAD: %s — %s" % (" ".join(h for h in heads if h),
+                                          "unrunnable" if new is None else ("green" if new.passed else "RED"))]
+    if claim and red_old and "fail" not in claim.lower():
+        B.record_code(p, STAGE, "net-claim-mismatch", "mismatch", reason="developer net_run claims green; the engine's "
+                      "run at the proof is red")
+    if red_old:
+        return False, "the safety net is red (or wrote a snapshot) on the unchanged code — engine run at %s" % sha[:12]
+    if new is None or not new.passed:
+        return False, "the safety net does not pass at HEAD (engine run)"
+    cx.net_engine = "ok"
+    return True, None
 
 
 def net_from_result(p, cx, dev):
@@ -699,7 +749,7 @@ def net_verify(p, cx, tl_line, findings):
     """P4.11 / J-R2 (code): `verified: yes` iff the checks passed and neither the tech-lead nor the
     auditor named a net file."""
     nb = getattr(cx, "net_now", None)
-    if not nb:
+    if not nb or getattr(cx, "net_engine", None) != "ok":       # K3r2-M3: never `verified: yes` unobserved
         return
     named = any(any(n and n in (tl_line or "") for n in nb["net"]) for _ in [0]) or \
         any(f.file in nb["net"] for f in findings)
@@ -888,12 +938,32 @@ def arbitrate_step(p, cx, attempt, scan, scan_ran, head, untracked, role_trigger
             return nh(p, cx, "developer %s for #%d — %s" % (dev_route[0], p.issue, dev_route[1] or ""),
                       "developer %s" % dev_route[0].lower())
     vcs = p.vcs
-    arb = XA.arbitrate(rec, scan, scan_ran, unattended=p.unattended, attempt=attempt,
-                       attempts_in_invocation=XA.attempts_in_invocation(rec, cx.stage_start) + (0 if local_pass else 1),
-                       major_spent=cx.major_spent, role_triggers=role_triggers, evidence_reason=evidence_reason,
-                       ex_arb=ex, unchanged=lambda pr, c: vcs.unchanged(pr.block.head, c.file),
-                       untracked=untracked, ident=_ident(p), samecause=_samecause(p), human=human,
-                       local_pass=local_pass)
+    n_att = XA.attempts_in_invocation(rec, cx.stage_start) + (0 if local_pass else 1)
+
+    def decide(triggers):
+        return XA.arbitrate(rec, scan, scan_ran, unattended=p.unattended, attempt=attempt,
+                            attempts_in_invocation=n_att, major_spent=cx.major_spent, role_triggers=triggers,
+                            evidence_reason=evidence_reason, ex_arb=ex,
+                            unchanged=lambda pr, c: vcs.unchanged(pr.block.head, c.file), untracked=untracked,
+                            ident=_ident(p), samecause=_samecause(p), human=human, local_pass=local_pass)
+    arb = decide(role_triggers)
+    # K3r2-M1: EX-DWC only where it can change the outcome and never into a person — the attempt would
+    # ADVANCE, the cap is not reached and the MAJOR budget is unspent; its loop_back SPENDS that budget
+    # (legacy: "MAJOR 급 → MAJOR 루프백 1회"), and DWC never votes in the stagnation guard. At the cap or
+    # with the budget spent, the concern is recorded (PR + unattended log) and the stage proceeds.
+    pend = getattr(cx, "dwc_pending", None) or []
+    if arb.kind == "advance" and pend:
+        if n_att < XA.EXECUTE_MAX_ATTEMPTS and not cx.major_spent:
+            extra = dwc_judgment(p, cx, attempt, pend)
+            if extra:
+                arb2 = decide(role_triggers + extra)
+                if arb2.kind == "retry":
+                    arb, cx.major_spent = arb2, True
+        else:
+            B.record_code(p, STAGE, "dwc-recorded", "recorded", refs=",".join(r for r, _t in pend),
+                          reason="concern not retried (%s): %s" % (
+                              "attempt cap" if n_att >= XA.EXECUTE_MAX_ATTEMPTS else "MAJOR budget spent",
+                              B.one_line("; ".join(t for _r, t in pend), 300)))
     head = head or vcs.head()
     n = rec.next_n() if rec else 1
     block = arb.block(n, cx.stage_start, head, local_pass=cx.local_job if local_pass and arb.kind != "advance" else None,
@@ -1163,7 +1233,7 @@ def pr_body(p, cx, sections, base_note):
     return body + "\n"
 
 
-CLOSING_RE = re.compile(r"\b(close[sd]?|fix(?:e[sd])?|resolve[sd]?)(\s*:?\s+)(#|[\w.-]+/[\w.-]+#)(\d+)", re.I)
+CLOSING_RE = re.compile(r"\b(close[sd]?|fix(?:e[sd])?|resolve[sd]?)(\s*:?\s+)(#|[\w.-]+/[\w.-]+#|https?://\S+?/issues/)(\d+)", re.I)
 
 
 def role_text(text, one_line=True):

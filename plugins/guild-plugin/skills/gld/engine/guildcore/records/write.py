@@ -281,10 +281,10 @@ class GhWriter(object):
 
     # -- PR create (K3 execute Step 5) -------------------------------------------------------------
     def pr_create(self, head, base, title, body, draft=False):
-        body, title = _final_redact(body), _final_redact(title)
         """Open the Issue's PR once: an open PR whose head is `head` is returned instead (a resumed
         write). Draft unsupported (422 naming draft) → once more without draft (D-5.3). Returns
         {number, url, created, draft}."""
+        body, title = _final_redact(body), _final_redact(title)
         def find():
             hits = [h for h in self.read.pr_for_head(head) if not h.get("isCrossRepository")]
             return {"number": hits[0]["number"], "url": hits[0].get("url"), "found": True} if hits else None

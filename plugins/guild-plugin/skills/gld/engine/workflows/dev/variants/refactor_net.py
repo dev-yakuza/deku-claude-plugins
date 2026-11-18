@@ -225,8 +225,11 @@ def checks(root, base, branch, block, support=(), visual_images=(), net_mode="wi
     net = list(dict.fromkeys(block.get("net") or []))
     ptn = [p.split(" @ ")[0].strip() for p in block.get("post-transform-net") or []]
     run = "\n".join(block.get("run") or [])
-    # D-R1: every net file at sha ran green there; no snapshot written
-    for f in net:
+    # D-R1: every net file at sha ran green there; no snapshot written. Since K3r2-M3 the ENGINE runs
+    # the net (`engine@…` lines) — the text check applies only to a developer-reported `run:`; an
+    # `unverified(net)` block is not checked here (it can never become `verified: yes`)
+    engine_run = run.startswith(("engine@", "unverified(net)"))
+    for f in ([] if engine_run else net):
         if f in ptn:
             continue
         if f not in run:

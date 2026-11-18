@@ -379,7 +379,7 @@ def prior_block(record, axis):
         if b.local_pass:
             continue
         if axis == "role":
-            if b.role_axis:
+            if any(not _is_dwc(x) for x in b.role_axis):
                 return b
         else:
             if b.scan_none:
@@ -387,6 +387,10 @@ def prior_block(record, axis):
             if any(f.token == "looped-back" for f in b.findings):
                 return b
     return None
+
+
+def _is_dwc(line):
+    return bool(re.match(r"^(?:- )?role-axis: \S+ DWC — ", markers.clean(line)))
 
 
 def _role_reason(line):
@@ -397,13 +401,13 @@ def _role_reason(line):
 def stagnation(record, signature, role_triggers, evidence_reason, samecause=None):
     """Any VOTING axis fires → the stagnation reason, else None. The role axis votes iff a role /
     verify reason triggers now; the auditor axis iff a finding does (non-empty signature)."""
-    cur_roles = [(r, why) for r, _v, why in role_triggers]
+    cur_roles = [(r, why) for r, v, why in role_triggers if v != "DWC"]     # K3r2-M1: concerns never vote
     if evidence_reason:
         cur_roles.append(("verify", evidence_reason))
     if cur_roles:
         pb = prior_block(record, "role")
         if pb is not None:
-            prev = [_role_reason(x) for x in pb.role_axis]
+            prev = [_role_reason(x) for x in pb.role_axis if not _is_dwc(x)]
             for role, why in cur_roles:
                 for prole, pwhy in prev:
                     if _is_timeout(why) and _is_timeout(pwhy):
