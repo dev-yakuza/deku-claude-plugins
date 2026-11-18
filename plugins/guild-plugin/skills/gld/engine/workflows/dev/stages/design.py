@@ -413,10 +413,62 @@ def ac_sha(ac):
     return _plan_sha("\n".join("%s: %s" % (a["id"], a["text"]) for a in ac))
 
 
+PLAN_RECORD = "split-plan"
+
+
+def _neutral(obj):
+    """Every string of the plan through `markers.value` (redact + neutralise; idempotent)."""
+    if isinstance(obj, str):
+        return markers.value(obj, one_line=False)
+    if isinstance(obj, list):
+        return [_neutral(x) for x in obj]
+    if isinstance(obj, dict):
+        return dict((k, _neutral(v)) for k, v in obj.items())
+    return obj
+
+
+def render_plan_record(text, children):
+    """The engine's split record on the parent (K5, K4r2-m5 / K4r4 carry-over 8): the exact plan text (its sha is
+    in the SPLIT block) and the child numbers by slice key — what another host or a fresh clone resumes from."""
+    return "\n".join([markers.open_tag(PLAN_RECORD),
+                      "<details><summary>Guild split plan — engine record, do not edit</summary>", "",
+                      "plan_sha: %s" % _plan_sha(text),
+                      "children: %s" % json.dumps(dict(sorted(children.items())), sort_keys=True),
+                      "plan: %s" % text, "", "</details>", markers.close_tag(PLAN_RECORD)])
+
+
+def read_plan_record(comments):
+    """(plan_text, {key: number}) from the parent's trusted split record, or (None, {})."""
+    c = markers.find(comments, PLAN_RECORD)
+    if c is None:
+        return None, {}
+    text, kids = None, {}
+    for ln in markers.body_of(c).split("\n"):
+        if ln.startswith("plan: "):
+            text = ln[len("plan: "):]
+        elif ln.startswith("children: "):
+            try:
+                kids = dict((str(k), int(v)) for k, v in json.loads(ln[len("children: "):]).items())
+            except (ValueError, TypeError, AttributeError):
+                kids = {}
+    return text, kids
+
+
+def publish_plan(p, text, children):
+    _old, kids = read_plan_record(B.records(p))
+    kids = dict(kids, **children)
+    p.writer.upsert_comment(p.issue, PLAN_RECORD, render_plan_record(text, kids))
+
+
 def load_plan(p, blk):
-    """(plan, None) from the engine spec store, verified against the recorded SPLIT block — or
-    (None, why)."""
+    """(plan, None) from the engine spec store — or, on another host / a fresh clone, from the parent's split
+    record on GitHub (K5) — verified against the recorded SPLIT block; or (None, why)."""
     text = RO.get(p, PLAN_FILE)
+    if text is None:
+        rtext, _kids = read_plan_record(B.records(p))
+        if rtext is not None and blk.get("plan_sha") and blk.get("plan_sha") == _plan_sha(rtext):
+            RO.put(p, PLAN_FILE, rtext)
+            text = rtext
     if text is None:
         return None, "no stored split plan"
     if not blk.get("plan_sha") or blk.get("plan_sha") != _plan_sha(text):
@@ -461,9 +513,11 @@ def do_split(p, e, rec, split, sk_text, children, is_leaf, answers, rows, assump
                 "render": {"rows": [list(r) for r in rows], "visual": bool(visual), "specialists": list(specialists),
                            "spec_files": sorted(spec_files), "assumptions": list(assumptions),
                            "concerns": list(concerns), "trace": list(trace)}}
+        plan = _neutral(plan)                       # K5 (P1): the plan is posted on GitHub — redacted before its sha
         text = json.dumps(plan, ensure_ascii=False, sort_keys=True)
         RO.put(p, PLAN_FILE, text)
         extra["plan_sha"] = _plan_sha(text)
+        publish_plan(p, text, {})                   # K5 (K4r2-m5): host portability — the plan lives on GitHub too
     B.record_judgment(p, STAGE, "SPLIT", "J-DE-05", d, choice=choice,
                       reason=("AC not in any slice: %s" % ", ".join(missing)) if missing else (d.fields.get("reason") or "")[:300],
                       extra=extra)
@@ -546,6 +600,7 @@ def make_children(p, e, rec, plan, children, answers, trusted):
                 s["key"], i + 1, len(slices), B.one_line(str(ex), 320)),
                 "transient" if ex.kind in ("transient", "ambiguous") else "defect")
         have[full] = n
+        publish_plan(p, json.dumps(plan, ensure_ascii=False, sort_keys=True), {full: int(n)})   # K5: numbers on GitHub
     now, stop = B.own_children_or_stop(p, STAGE)
     if stop is not None:
         return stop

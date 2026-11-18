@@ -71,7 +71,7 @@ class TrustUnknown(Exception):
         self.why, self.cls = why, cls
 
 
-def author_trust(p, issue):
+def author_trust(p, issue, _issue=None):
     """P2, THREE-valued (K4r2-M2): ("member", assoc) | ("outsider", assoc) — or `TrustUnknown`.
     member = the association read back and is one of `members(p)`; outsider = it read back as
     anything else (or the body carries the engine-only `UNTRUSTED_ORIGIN`: a child split from an
@@ -80,8 +80,9 @@ def author_trust(p, issue):
     controls a member's body ADDS (safety-net AC, the harness guard); folding it into member would
     honour an outsider's plan lines. auth / rate-limit read errors re-raise (exit 3 / 75)."""
     from guildcore.adapters.gh import GhError, classify_error
+    n = int(_issue if _issue is not None else p.issue)
     try:
-        assoc = p.gh.issue_author_association(p.issue)
+        assoc = p.gh.issue_author_association(n)
     except GhError as ex:
         kind = classify_error(str(ex))
         if kind in ("auth", "ratelimit"):
@@ -91,11 +92,51 @@ def author_trust(p, issue):
     except Exception as ex:                                     # noqa: BLE001 — unknown, never a side
         raise TrustUnknown("issue author association unreadable — %s" % ex.__class__.__name__, "defect")
     assoc = (assoc or "").strip() if isinstance(assoc, str) or assoc is None else ""
+    if UNTRUSTED_ORIGIN in (issue.get("body") or ""):
+        return "outsider", "%s (split from an outsider's Issue)" % (assoc or "?")
+    parent = engine_parent(p, issue)
+    if parent is not None:
+        # K5 (K4 carry-over 8): a child THIS engine created inherits its parent's trust — the journal (or the
+        # parent's split record) proves the engine wrote it; its own association is the engine token's
+        # (an App / bot token is not a member) and says nothing about who asked for the work
+        try:
+            prow = dict(p.gh.issue(parent), number=parent)
+        except GhError as ex:
+            kind = classify_error(str(ex))
+            if kind in ("auth", "ratelimit"):
+                raise
+            raise TrustUnknown("parent #%d unreadable — %s" % (parent, B.one_line(str(ex), 120)),
+                               "transient" if kind == "transient" else "defect")
+        pt, passoc = author_trust(p, prow, _issue=parent)
+        return pt, "%s (inherited from parent #%d)" % (passoc, parent)
     if not assoc:
         raise TrustUnknown("issue author association unreadable — empty answer", "defect")
-    if UNTRUSTED_ORIGIN in (issue.get("body") or ""):
-        return "outsider", "%s (split from an outsider's Issue)" % assoc
     return ("member" if assoc in members(p) else "outsider"), assoc
+
+
+def engine_parent(p, issue):
+    """The parent number when this Issue is a child the engine created (its parent's journal holds the
+    number, or the parent's trusted split record names it), else None."""
+    from guildcore import state as ST
+    parent = ST.parent_of(issue.get("body") or "")
+    me = int(issue.get("number") or p.issue)
+    if parent is None or int(parent) == me:
+        return None
+    gd = getattr(p, "git_dir", None)
+    if gd:
+        try:
+            from guildcore.journal import Journal
+            if me in set(int(e["number"]) for e in Journal(gd, parent).own_issues()):
+                return int(parent)
+        except Exception:                                    # noqa: BLE001 — not provable here: the record decides
+            pass
+    from workflows.dev.stages.design import read_plan_record
+    from guildcore.records import markers as MK
+    try:
+        _t, kids = read_plan_record(MK.trusted(p.gh.comments(parent), ()))
+    except Exception:                                        # noqa: BLE001 — unreadable: not inherited
+        return None
+    return int(parent) if me in kids.values() else None
 
 
 def trusted_body(p, issue):

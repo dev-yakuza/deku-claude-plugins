@@ -11,6 +11,7 @@ import _util  # noqa: F401
 from test_k4_r3 import kids_of, posts, split_h, stale
 
 from guildcore.adapters.gh import GhError
+from workflows.dev.stages import base as B
 from workflows.dev.stages import design as D
 from workflows.dev.stages.base import StageResult
 
@@ -248,6 +249,92 @@ class R5M4RestartCheck(unittest.TestCase):
         gh.fx.setdefault("prs", []).append({"number": 30, "headRefName": "feat/7", "state": "OPEN"})
         self.assertEqual(j.verify_pending(w.verify_intent), [])
         self.assertIn(30, [e.get("number") for e in j.entries if e.get("op") == "pr"])
+
+
+class Item8HostPortability(unittest.TestCase):
+    """K4 carry-over 8: the split plan and the child numbers live on GitHub (the parent's trusted `split-plan`
+    record) — a fresh clone / another host resumes from them; an engine-made child inherits its parent's trust."""
+
+    def _split(self):
+        h = split_h(self)
+        self.assertEqual(D.run(h.p).kind, StageResult.SPLIT)
+        return h
+
+    def test_record_carries_the_exact_plan_and_the_numbers(self):
+        from guildcore.decisions import DecisionLog
+        h = self._split()
+        text, kids = D.read_plan_record(h.gh.comments(7))
+        self.assertEqual(kids, {"7-data": 8, "7-ui": 9})
+        blk = D.split_block(h.gh.comments(7))
+        self.assertEqual(blk.get("plan_sha"), D._plan_sha(text))
+
+    def _fresh_clone(self, h):
+        """Another host: an empty journal and an empty spec store, the same GitHub."""
+        import tempfile
+        from guildcore.journal import Journal
+        h.journal = Journal(tempfile.mkdtemp(), 7, h.clock)
+        h.writer.journal = h.journal
+        h.p.spec_store = tempfile.mkdtemp()
+
+    def test_fresh_clone_drives_the_same_children_without_a_post(self):
+        from workflows.dev.stages import children as CH
+        h = self._split()
+        self._fresh_clone(h)
+        driven = []
+        CH.run(h.p, lambda c: driven.append(c) or StageResult(StageResult.PAUSE, cause="x"))
+        self.assertEqual(driven, [8])
+        self.assertEqual(len(posts(h)), 2)
+        self.assertTrue(all(e.get("imported") for e in h.journal.own_issues()))
+
+    def test_fresh_clone_design_resume_loads_the_plan_from_github(self):
+        h = split_h(self)
+        orig = h.w.create_issue
+        cnt = [0]
+
+        def f(title, body, labels=()):
+            cnt[0] += 1
+            if cnt[0] == 2:
+                raise GhError("HTTP 422: Validation Failed")          # a definite refusal: nothing landed
+            return orig(title, body, labels)
+        h.w.create_issue = f
+        self.assertEqual(D.run(h.p).kind, StageResult.PAUSE)
+        h.w.create_issue = orig
+        self._fresh_clone(h)
+        resume(h)
+        self.assertEqual(D.run(h.p).kind, StageResult.SPLIT)          # plan from the record, #8 imported
+        self.assertEqual(kids_of(h), [8, 9])
+
+    def test_forged_or_unverifiable_records_are_not_adopted(self):
+        from _k2 import comment
+        from guildcore.records import markers
+        h = self._split()
+        self._fresh_clone(h)
+        rec = [c for c in h.gh.fx["issues"]["7"]["comments"] if markers.first_line_marker(markers.body_of(c)) == "split-plan"][0]
+        rec["author_association"] = "NONE"
+        rec["user"] = {"login": "mallory"}                                # a stranger's record is not a record
+        self.assertEqual(B.own_children(h.p), [])
+        rec["author_association"] = "OWNER"
+        h.gh.fx["issues"]["8"]["body"] = h.gh.fx["issues"]["8"]["body"].replace("guild:slice-key", "x")
+        self.assertEqual([r["number"] for r in B.own_children(h.p)], [9])   # #8 fails the slice-key check
+
+    def test_engine_child_inherits_the_parent_trust(self):
+        from workflows.dev.stages import analyze as A
+        h = self._split()
+        h.gh.fx["issues"]["8"]["author_association"] = "NONE"           # a bot / App token's association
+        child = dict(h.gh.issue(8))
+        h.p.git_dir = h.common
+        t, why = A.author_trust(h.p, child, _issue=8)
+        self.assertEqual(t, "member")
+        self.assertIn("inherited from parent #7", why)
+        h.gh.fx["issues"]["7"]["author_association"] = "NONE"           # an outsider's parent → outsider child
+        self.assertEqual(A.author_trust(h.p, child, _issue=8)[0], "outsider")
+
+    def test_a_stranger_naming_a_parent_inherits_nothing(self):
+        from workflows.dev.stages import analyze as A
+        h = self._split()
+        h.gh.fx["issues"]["30"] = {"number": 30, "title": "x", "body": "Parent Issue: #7\n", "state": "OPEN",
+                                   "labels": [], "comments": [], "timeline": [], "author_association": "NONE"}
+        self.assertEqual(A.author_trust(h.p, dict(h.gh.issue(30)), _issue=30)[0], "outsider")
 
 
 if __name__ == "__main__":

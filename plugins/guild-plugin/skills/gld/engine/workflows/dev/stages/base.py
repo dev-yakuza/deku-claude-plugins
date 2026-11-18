@@ -483,6 +483,34 @@ def _gone_error(text):
     return gone_error(text)
 
 
+def import_children(p, prefix):
+    """K5 (K4 carry-over 8 — host portability): the child numbers the parent's split record on GitHub names,
+    for keys this clone's journal does not know (another host made them, or a fresh clone). Each one is
+    confirmed BY NUMBER before it is journaled (`imported`): its body carries `slice-key <key>` and
+    `Parent Issue: #<parent>`, the engine's own login wrote it, and it is in this repository — a number that
+    fails any of these is not adopted (the stop / re-create paths that follow are the usual ones)."""
+    from workflows.dev.stages.design import read_plan_record
+    _text, kids = read_plan_record(records(p))
+    if not kids:
+        return
+    j = p.writer._ij()
+    known_keys = set(str(e.get("key") or "") for e in j.own_issues())
+    known_nums = set(int(e["number"]) for e in j.own_issues())
+    repo = None
+    for key, n in sorted(kids.items()):
+        if not key.startswith(prefix) or key in known_keys or int(n) in known_nums:
+            continue
+        repo = repo if repo is not None else p.writer.home_repo(p.issue)
+        try:
+            row, why = p.writer.own_issue_row(int(n), repo)
+        except Exception:                                     # noqa: BLE001 — not adopted; the usual paths decide
+            continue
+        body = (row or {}).get("body") or ""
+        if why is None and ("<!-- guild:slice-key %s -->" % key) in body and ("Parent Issue: #%d" % p.issue) in body \
+                and p.writer._by_engine(row):
+            j.own_write("issue", key=key, number=int(n), token=None, imported=True)
+
+
 def own_children(p, include_withdrawn=False):
     """The child Issues THIS engine created for `p.issue`: the numbers its journal holds (keys
     `<parent>-…`), each read by number (`GET /repos/{o}/{r}/issues/N`) — never a listing, never the
@@ -499,6 +527,7 @@ def own_children(p, include_withdrawn=False):
     from guildcore.adapters.gh import GhError, GhWriteError, classify_error
     from guildcore.records.write import closed_duplicate, withdrawn
     prefix = "%d-" % int(p.issue)
+    import_children(p, prefix)
     p.writer.resolve_creates(prefix=prefix)
     orphans = p.writer.orphan_creates(prefix)
     if orphans:
