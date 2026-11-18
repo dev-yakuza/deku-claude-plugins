@@ -690,7 +690,14 @@ def cmd_answer(d, a):
         _sent(d, {"answered": False, "error": str(e)})
         return 64
     d.save()
-    _sent(d, {"answered": True, "qid": a.qid, "resolution": did, "choice": a.choice})
+    out = {"answered": True, "qid": a.qid, "resolution": did, "choice": a.choice}
+    try:                                    # K6 predict-first: the recommendation is revealed only now, after the answer
+        res = p.decisions._log().by_id(did)
+        if res is not None and res.get("recommended") is not None:
+            out["revealed"] = {"recommended": res.get("recommended"), "recommended_by": res.get("recommended_by")}
+    except Exception:                       # noqa: BLE001 — the answer landed; the reveal line is a courtesy
+        pass
+    _sent(d, out)
     return 0
 
 

@@ -30,7 +30,8 @@ parse_guild_answer = answer_rec.parse
 
 class Question(object):
     def __init__(self, kind, text, options, recommended=None, recommended_by=None,
-                 context_lines=(), predict_first=False, point=None, refs=None, stakes=None, waits_at=None):
+                 context_lines=(), predict_first=False, point=None, refs=None, stakes=None, waits_at=None,
+                 group=None):
         if kind not in ASK_KINDS:
             raise ValueError("ask kind must be one of the §2.6 set: %s" % kind)
         toks = [o["token"] for o in options]
@@ -46,6 +47,8 @@ class Question(object):
         # K5r2-M1: the stage the question waits at when the asking stage moves the label in the same write
         # (decisions.scope_of / live) — absent = the asking stage
         self.waits_at = waits_at
+        self.group = group                # the §9.5 group the recommendation comes from (workflows.dev.predict)
+        self.pf_why = None                # why predict_first is on (workflows.dev.predict.apply) — recorded
         self.nonce = None
 
     def commitment(self):
@@ -64,6 +67,7 @@ class Question(object):
             f["waits_at"] = self.waits_at
         if self.predict_first:
             f["recommended_sha"] = self.commitment()
+            f["predict_first"] = self.pf_why or "true"     # §9.5: only these answers count as a human judgment
         else:
             f["recommended"] = self.recommended
         return f
@@ -77,32 +81,44 @@ class Question(object):
         return ev
 
 
+def journal_nonce(journal, question):
+    """K1-m4 / K6 predict-first: the nonce (and the hidden recommendation) is journaled BEFORE the commitment is
+    written — returns the local token that ties it to the block (`journal_qid`), or None when nothing is hidden."""
+    if journal is None or not question.predict_first or question.recommended is None:
+        return None
+    question.commitment()
+    token = os.urandom(6).hex()
+    journal.append("event", what="predict-first-nonce", token=token, nonce=question.nonce,
+                   recommended=question.recommended)
+    return token
+
+
+def journal_qid(journal, token, qid):
+    if journal is not None and token and qid:
+        journal.append("event", what="predict-first-qid", token=token, qid=qid)
+
+
 def surface(question, attended, decisions, events=None, clock=None, writer=None, issue=None,
             stage=None, pause_line=None, journal=None, cause=None):
     """Attended → pending block + `ask` event; unattended → pause. Returns the qid. `cause` (a rendered
     needs-human cause line) rides in the attended block too (K4r1-m1): an unattended resume that
     finds the question unanswered completes the pause with ITS cause, not a generic `defect:`."""
+    # K1-m4: the nonce is journaled BEFORE the commitment is written (crash-safe reveal); the block is found
+    # again by this local token
+    token = journal_nonce(journal, question)
     fields = question.pending_fields(stage=stage)
     if cause:
         fields["cause"] = cause
-    token = os.urandom(6).hex()
-    if journal is not None and question.nonce:
-        # K1-m4: the nonce is journaled BEFORE the commitment is written (crash-safe reveal);
-        # the block is found again by this local token
-        journal.append("event", what="predict-first-nonce", token=token, nonce=question.nonce,
-                       recommended=question.recommended)
     if attended:
         qid = decisions.record(fields)
         decisions.stamp_server_time(qid)
-        if journal is not None and question.nonce:
-            journal.append("event", what="predict-first-qid", token=token, qid=qid)
+        journal_qid(journal, token, qid)
         if events is not None:
             events.emit("ask", clock.now(), **question.event(qid))
         return qid
     from guildcore import pause as P
     res = P.pause(writer, decisions, issue, pause_line, question=question, stage=stage)
-    if journal is not None and question.nonce:
-        journal.append("event", what="predict-first-qid", token=token, qid=res["did"])
+    journal_qid(journal, token, res["did"])
     return res["did"]
 
 

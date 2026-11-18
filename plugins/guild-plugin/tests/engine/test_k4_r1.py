@@ -319,8 +319,16 @@ class M4(unittest.TestCase):
     def test_exception_with_unwritable_pause_is_1(self):
         h = K4(self)
         d = driver(h, {"analyze": _raise(OSError("disk"))})
-        h.w.create_comment = _raise(GhError("HTTP 500"))
+        h.w.create_comment = _raise(GhError("HTTP 422: Validation Failed"))
         self.assertEqual(d.run(7).exit_code, 1)
+
+    def test_exception_with_pause_unwritable_by_an_outage_is_a_service_wait(self):
+        # K5r2-m8: GitHub down while the pause is written → exit 75 `gh-service`, never a member failure
+        h = K4(self)
+        d = driver(h, {"analyze": _raise(OSError("disk"))})
+        h.w.create_comment = _raise(GhError("HTTP 500"))
+        out = d.run(7)
+        self.assertEqual((out.exit_code, getattr(out, "wait_reason", None)), (75, "gh-service"))
 
     def test_child_exception_pauses_the_child_and_a_child_exit_ends_the_parent(self):
         kid = {"8": {"number": 8, "title": "c", "state": "OPEN", "body": "x\n\nParent Issue: #7\n",

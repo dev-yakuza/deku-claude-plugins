@@ -365,8 +365,10 @@ class Driver(object):
                 continue
             if not self.unattended:
                 opts = [{"token": t, "label": t} for t in blk.options()]
+                # K6: a predict-first question (its block carries only `recommended_sha`) is asked again blind
                 q = ASK.Question(blk.get("kind"), blk.get("question") or "-", opts, recommended=blk.get("recommended")
-                                 if blk.get("recommended") in blk.options() else None)
+                                 if blk.get("recommended") in blk.options() else None,
+                                 predict_first=bool(blk.get("recommended_sha") or blk.get("predict_first")))
                 if p.events is not None:
                     p.events.emit("ask", p.now(), **q.event(blk.id))
                 return Outcome(B.StageResult(B.StageResult.ASK, line=blk.get("question") or "-", qid=blk.id), 0)

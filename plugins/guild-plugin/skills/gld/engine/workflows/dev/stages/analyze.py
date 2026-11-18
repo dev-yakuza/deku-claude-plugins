@@ -40,6 +40,7 @@ from workflows.dev import analysis as AN
 from workflows.dev import arbitration as ARB
 from workflows.dev import judging as JG
 from workflows.dev import roleout as RO
+from workflows.dev import predict as PF
 from workflows.dev.stages import base as B
 
 STAGE = "analyze"
@@ -337,7 +338,7 @@ def run(p, only=None, config_present=True):
             q, res = answers[kind]
             ch = res.get("choice")
             if ch in [i["id"] for i in k.interpretations]:
-                rec = q.get("recommended")
+                rec = q.get("recommended") or res.get("recommended")      # K6: a predict-first answer reveals it
                 k.chosen = ch
             for dim in AN.DIMS:
                 if k.readiness[dim] == "unclear":
@@ -352,11 +353,12 @@ def run(p, only=None, config_present=True):
     did = B.record_judgment(p, STAGE, "KICKOFF", "J-DEV-01,J-AN-05,J-AN-06,J-AN-10,J-AN-13", d,
                             choice=",".join("%s=%s" % (x, k.readiness[x]) for x in AN.DIMS),
                             reason="; ".join(k.coerced)[:300] or None,
-                            extra={"chosen": k.chosen, "work_type": k.work_type,
-                                   "cast": k.cast["participation"] + k.cast["gates"],
-                                   "ui_surface": k.ui_surface, "safety_net_visual": k.safety_net_visual,
-                                   "areas": k.areas[:10], "explorer": explorer_state,
-                                   "code_coercions": len(k.coerced) or None})
+                            extra=dict(PF.kickoff_chosen_fields(p, k.chosen), **{
+                                "work_type": k.work_type,
+                                "cast": k.cast["participation"] + k.cast["gates"],
+                                "ui_surface": k.ui_surface, "safety_net_visual": k.safety_net_visual,
+                                "areas": k.areas[:10], "explorer": explorer_state,
+                                "code_coercions": len(k.coerced) or None}))
     trace.append("KICKOFF %s (%s)%s" % (did, d.by, (" · coerced: %d" % len(k.coerced)) if k.coerced else ""))
 
     # A4 — harness guard

@@ -342,6 +342,13 @@ def pause(p, stage, cause_kind, line, token_cause, prose="", env_key=None, quest
     `extra_labels`/`remove_labels` ride in the SAME label write (test's pending regeneration
     moves guild:test → guild:execute together with guild:needs-human)."""
     pz = PAUSE.Pause(cause_kind, line, prose, env_key, directive_line)
+    token = None
+    if question is not None:
+        # K6 predict-first (§2.6, R5J-M4): forced on → the pending block carries `recommended_sha` only, the nonce
+        # journaled first; the pause comment never names the recommendation
+        from workflows.dev import predict as PF
+        PF.apply(p, question, stage)
+        token = ASK.journal_nonce(p.journal, question)
     if extra_labels or remove_labels:
         did = None
         from guildcore.records import needs_human
@@ -351,6 +358,7 @@ def pause(p, stage, cause_kind, line, token_cause, prose="", env_key=None, quest
             f["cause"] = cause
             did = p.decisions.record(f)
             p.decisions.stamp_server_time(did)
+            ASK.journal_qid(p.journal, token, did)
         answer = (int(did[1:]), [o["token"] for o in question.options]) if did else None
         c = p.writer.create_comment(p.issue, needs_human.render(cause, prose, directive_line, answer))
         if did:
@@ -358,6 +366,7 @@ def pause(p, stage, cause_kind, line, token_cause, prose="", env_key=None, quest
         p.writer.labels_apply(p.issue, add=[NEEDS_HUMAN] + list(extra_labels), remove=list(remove_labels))
         return StageResult(StageResult.PAUSE, cause=token_cause, qid=did)
     res = PAUSE.pause(p.writer, p.decisions, p.issue, pz, question=question, stage=stage)
+    ASK.journal_qid(p.journal, token, res["did"])
     return StageResult(StageResult.PAUSE, cause=token_cause, qid=res["did"])
 
 
@@ -366,6 +375,8 @@ def ask(p, stage, question, needs_human_line, pause_args=None):
     question (`pause_args` = kwargs of `pause`)."""
     if not p.unattended:
         from guildcore.records import needs_human
+        from workflows.dev import predict as PF
+        PF.apply(p, question, stage)                       # K6 predict-first: the ask event hides the recommendation
         pa = pause_args or {}
         try:
             cause = needs_human.cause_line(pa.get("cause_kind") or "ambiguity", pa.get("line") or needs_human_line,

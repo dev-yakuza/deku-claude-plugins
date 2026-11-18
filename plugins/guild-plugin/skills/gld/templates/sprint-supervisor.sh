@@ -2252,7 +2252,10 @@ while [ ${#QUEUE[@]} -gt 0 ]; do
       esac
       if [ "$W_TRIES" -gt 6 ]; then
         echo "  ⏭ Issue #$ISSUE — $W_WHAT after 6 waits; left for the re-run ($W_END)"
-        record_event "$ISSUE" "$W_END" "$W_WHAT after 6 waits — not a failure; re-run picks it up"
+        case "$ENG_WAIT" in       # literal classes — daily.md's class table is checked against them
+          create-settle) record_event "$ISSUE" create-unsettled "$W_WHAT after 6 waits — not a failure; re-run picks it up" ;;
+          *)             record_event "$ISSUE" gh-unavailable "$W_WHAT after 6 waits — not a failure; re-run picks it up" ;;
+        esac
         board_col "$ISSUE" blocked "$W_END"
         BLOCKED=$((BLOCKED + 1)); BLOCKED_ISSUES+=("#$ISSUE ($W_END)")
         break
@@ -2263,7 +2266,10 @@ while [ ${#QUEUE[@]} -gt 0 ]; do
       if [ "$WAIT" -lt 60 ]; then WAIT=60; fi
       if [ "$WAIT" -gt 1800 ]; then WAIT=1800; fi
       echo "  ⏳ Issue #$ISSUE — $W_WHAT; waiting $((WAIT/60))m (not a rate limit) ($W_TRIES/6)"
-      record_event "$ISSUE" "${ENG_WAIT}-wait" "$W_WHAT — the engine re-checks after ${WAIT}s ($W_TRIES/6)"
+      case "$ENG_WAIT" in
+        create-settle) record_event "$ISSUE" create-settle-wait "$W_WHAT — the engine re-checks after ${WAIT}s ($W_TRIES/6)" ;;
+        *)             record_event "$ISSUE" gh-service-wait "$W_WHAT — the engine re-checks after ${WAIT}s ($W_TRIES/6)" ;;
+      esac
       heartbeat "${ENG_WAIT}-until-$(( $(date +%s) + WAIT ))"
       hb_sleep "$WAIT" "$ENG_WAIT"
       heartbeat "running"
