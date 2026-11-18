@@ -446,6 +446,22 @@ def neutral(text):
     return markers.value(text)
 
 
+# ---- the Issue text a role or judge reads (K5 — K4r2-m10 carry-over: every execute/test/qa read) -----------
+
+def issue_text(p, issue, cap=None):
+    """'# title\n\nbody' for a role input or a judge brief, read through the THREE-valued author trust
+    (P2): member → as is; outsider (or a child split from an outsider's Issue) → `OUTSIDER_PREFACE` first,
+    so the body is data, not instructions; unknown → `analyze.TrustUnknown` propagates (the caller stops
+    with `unknown_trust_result` — never a guess either way)."""
+    from workflows.dev.stages import analyze as A
+    t, _assoc = A.author_trust(p, issue)
+    body = issue.get("body") or ""
+    if cap is not None:
+        body = body[:cap]
+    text = "# %s\n\n%s" % (issue.get("title") or "", body)
+    return text if t == "member" else A.OUTSIDER_PREFACE + text
+
+
 # ---- a split parent's own children (K4r3-B1 / m1 / m5) -------------------------------------------------
 
 class ChildrenStop(Exception):

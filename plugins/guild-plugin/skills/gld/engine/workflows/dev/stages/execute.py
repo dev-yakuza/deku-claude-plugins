@@ -93,6 +93,7 @@ class Ctx(object):
         self.staged_note = None
         self.staged_tests = []
         self.ran_1l = False
+        self.issue_text = None            # K5: the Issue text through the three-valued trust read
         self.local_job = None
         self.major_spent = False
         self.reinvoked = False
@@ -123,6 +124,11 @@ def run(p, variant):
         RD.register_exact_from_files(p.root, copy_ignored_list(p))
     comments = B.records(p)
     B.note_untrusted(p, STAGE)
+    from workflows.dev.stages import analyze as A
+    try:                                                                        # K5 (K4r2-m10): P2 three-valued
+        cx.issue_text = B.issue_text(p, p.gh.issue(p.issue))
+    except A.TrustUnknown as ex:
+        return A.unknown_trust_result(p, STAGE, ex)
     nc = VR.design_input(p, variant, comments)                                  # P0.2
     if nc:
         return B.StageResult(B.StageResult.FAIL, line=nc, fail_class="needs_context")
@@ -400,7 +406,10 @@ def _inputs(p, cx, retry_note):
     des = OUT.find(comments, "design:output")
     ana = OUT.find(comments, "analyze:output")
     lb = cx.loopback
-    ins = {"issue.md": "# %s\n\n%s\n" % (issue.get("title") or "", issue.get("body") or ""),
+    text = getattr(cx, "issue_text", None)
+    if text is None:                    # entered without the stage's trust read (a direct helper call) → read it now
+        text = B.issue_text(p, issue)
+    ins = {"issue.md": text.rstrip("\n") + "\n",
            "design.md": des.body if des else "(none)",
            "analyze.md": ana.body if ana else "(none)",
            "skeleton-path.txt": "docs/specs/%d/skeleton.md\n" % n,
@@ -1331,7 +1340,7 @@ def env_pause(p, line, token, step):
     is still taken — the engine cannot act on a free-text directive by itself)."""
     from workflows.dev import directive as DR
     try:
-        g = DR.gather(p.gh, p.issue)
+        g = DR.gather(p.gh, p.issue, p=p)
     except Exception:                     # noqa: BLE001 — the read never blocks the stop itself
         g = None
     dline = None

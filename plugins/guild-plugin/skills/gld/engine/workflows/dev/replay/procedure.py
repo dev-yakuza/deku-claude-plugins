@@ -552,6 +552,8 @@ def build(ep, leg, cfg, work, real_tc=None):
     comments.pauses = list(ep.state["pauses"])
     fx = {"repo": "o/r", "issues": {str(n): {"number": n, "title": "t", "body": "Issue #%d" % n, "state": "OPEN",
                                              "url": "https://github.com/o/r/issues/%d" % n,
+                                             # K5 (P2 trust reads): the replayed Issues are the operator's own
+                                             "author_association": "OWNER",
                                              "labels": [{"name": l} for l in labels],
                                              "comments": comments.comments(), "timeline": []}},
           "prs": [], "check_runs": {}, "annotations": {}}

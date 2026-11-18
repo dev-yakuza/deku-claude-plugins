@@ -42,9 +42,8 @@ class XHarness(Harness):
         if not any(DESIGN.split("\n")[0] in (c.get("body") or "") for c in cm):
             cm.insert(0, comment(DESIGN, 50))
         root = root or wt_repo(case)
-        fx = fixture(labels=labels, comments=cm, prs=prs, body=body)
-        if author is not None:                  # K4r3-m2: execute reads the net marker only from a member's body
-            fx["issues"]["7"]["author_association"] = author
+        # K4r3-m2 / K5: execute reads the Issue (and its net marker) through the author trust; None = unreadable
+        fx = fixture(labels=labels, comments=cm, prs=prs, body=body, author=author)
         Harness.__init__(self, case, fx, roles=roles, judges=judges, suites=suites, unattended=unattended,
                          root=root, config=config or XCFG, base="main", test_cases=None, **kw)
         self.p.branch = "feature/#7-x"

@@ -505,7 +505,7 @@ def _env_pause(p, cfg, images):
     from workflows.dev import directive as DR
     env = (cfg.get("visual") or {}).get("env") or "visual.env"
     text = "visual failures look environmental — %s vs %s; %d images" % (env, p.host or "this host", len(images))
-    g = DR.gather(p.gh, p.issue)
+    g = DR.gather(p.gh, p.issue, p=p)
     kind, dline, dd = DR.judge(p, STAGE, g, text, "T3.3")
     if dd is not None:
         B.record_judgment(p, STAGE, "DIRECTIVE", "J-H1,Q-DIRECTIVE", dd, reason=dline)

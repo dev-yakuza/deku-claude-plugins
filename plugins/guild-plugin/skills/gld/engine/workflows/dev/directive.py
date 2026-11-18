@@ -20,31 +20,46 @@ SPRINT_RE = re.compile(r"^Sprint: #(\d+)\s*$", re.M)
 
 
 DIRECTIVE_EXCLUDED = ("NONE", "FIRST_TIME_CONTRIBUTOR", "FIRST_TIMER", "MANNEQUIN")
+MEMBERS = ("OWNER", "MEMBER", "COLLABORATOR")
 
 
-def _unmarked(comments):
-    """Human directives: unmarked comments — never from a drive-by author (K2r2-m2)."""
+def _unmarked(comments, members=MEMBERS):
+    """Human directives: unmarked comments of MEMBERS only (K5, P2 — a directive is a control line; a comment
+    whose association is missing is not a member's: fail closed. K2r2-m2 excluded only drive-by authors)."""
     return [c for c in comments if not markers.is_guild_comment(markers.body_of(c))
-            and c.get("author_association") not in DIRECTIVE_EXCLUDED]
+            and c.get("author_association") in members]
 
 
-def gather(gh, issue_n, issue=None):
-    """{read: [#n…], trackers: [#t], parent: #p|None, comments: [(n, comment)]}."""
+def gather(gh, issue_n, issue=None, p=None):
+    """{read: [#n…], trackers: [#t], parent: #p|None, comments: [(n, comment)]}.
+    K5 (P2): the body's `Sprint: #t` / `Parent Issue: #p` lines decide which OTHER Issues' comments are read as
+    directives — they are followed only when the body is a member's (three-valued trust through `p`; an
+    outsider's or an unknown-trust body is read for its own comments only: the stop is taken either way)."""
     issue = issue or gh.issue(issue_n)
     body = issue.get("body") or ""
+    members = MEMBERS
+    if p is not None:
+        from workflows.dev.stages import analyze as A
+        members = A.members(p)
+        try:
+            follow = A.trusted_body(p, issue)[0]
+        except A.TrustUnknown:
+            follow = False
+        if not follow:
+            body = ""
     parent = ST.parent_of(body)
     reads = [issue_n]
-    got = [(issue_n, c) for c in _unmarked(gh.comments(issue_n))]
+    got = [(issue_n, c) for c in _unmarked(gh.comments(issue_n), members)]
     tracker_src = body
     if parent:
         reads.append(parent)
-        got += [(parent, c) for c in _unmarked(gh.comments(parent))]
+        got += [(parent, c) for c in _unmarked(gh.comments(parent), members)]
         tracker_src = gh.issue(parent).get("body") or ""
     trackers = []
     for t in [int(x) for x in SPRINT_RE.findall(tracker_src)]:
         if (gh.issue(t).get("state") or "").upper() == "OPEN":
             trackers.append(t)
-            got += [(t, c) for c in _unmarked(gh.comments(t))]
+            got += [(t, c) for c in _unmarked(gh.comments(t), members)]
     return {"issue": issue_n, "parent": parent, "trackers": trackers, "comments": got}
 
 

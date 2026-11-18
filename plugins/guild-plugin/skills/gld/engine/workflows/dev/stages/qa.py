@@ -139,13 +139,19 @@ def run(p, only=None, config_present=True, diff_paths=None):
     if copy_list:                     # K2r3-M2: the same exact-value redaction as the test stage
         RD.register_exact_from_files(p.root, copy_list)
     issue = p.gh.issue(p.issue)
+    from workflows.dev.stages import analyze as A
+    try:                                        # K5 (K4r2-m10): issue.md and the QA brief through P2 trust
+        issue_md = B.issue_text(p, issue)
+        issue_brief = B.issue_text(p, issue, cap=4000)
+    except A.TrustUnknown as ex:
+        return A.unknown_trust_result(p, STAGE, ex)
     test_out = OUT.find(comments, "test:output")
     ledger = V.visual_ledger(test_out.body) if test_out else None
     pr = find_pr(p)                                                        # Q2.1 first
     pr_body = (pr or {}).get("body")
     diff = diff_paths if diff_paths is not None else _diff_paths(p)
 
-    inputs = {"issue.md": "# %s\n\n%s" % (issue.get("title") or "", issue.get("body") or ""),
+    inputs = {"issue.md": issue_md,
               "test-output.md": test_out.body if test_out else "(none)",
               "pr-body.md": pr_body if pr_body is not None else "(no open PR found)",
               "e2e.txt": str((cfg.get("commands") or {}).get("e2e")),
@@ -179,7 +185,7 @@ def run(p, only=None, config_present=True, diff_paths=None):
     habit_stop = ci.is_red and (p.engine_cfg("qa", {}) or {}).get("stop_on_ci_red") is True
 
     prev_qa = _prev_qa(comments)
-    d, checklist = _judge(p, cfg, qres, dres, test_out, issue, diff, prev_qa)  # Q2.5
+    d, checklist = _judge(p, cfg, qres, dres, test_out, issue_brief, diff, prev_qa)  # Q2.5
     defects = [x for x in d.fields.get("defects") or [] if x.get("blocking")]
     if dres is not None and dres.status == "BLOCKED" and not any(
             "designer" in (x.get("line") or "") or x.get("id", "").startswith("UX") for x in defects):
@@ -316,7 +322,7 @@ def _judge(p, cfg, qres, dres, test_out, issue, diff, prev_qa=()):
     brief = [("qa", "QA report:\nRESULT: %s\n%s" % (qres.line or qres.status, json.dumps(qres.extras, ensure_ascii=False)[:6000])),
              ("designer", "Designer: %s" % ((dres.line or dres.status) if dres else "not convened")),
              ("bar", "Quality bar:\n" + qb[:4000]),
-             ("issue", "Issue:\n%s\n%s" % (issue.get("title") or "", (issue.get("body") or "")[:4000])),
+             ("issue", "Issue:\n%s" % issue),             # K5: the trust-read text (issue_text, capped)
              ("test", "test:output:\n" + ((test_out.body if test_out else "")[:5000])),
              ("diff", "Changed files:\n" + "\n".join(diff or ["(unknown)"])),
              ("candidates", "Human-QA candidates from qa:\n" + "\n".join(str(x) for x in qres.extras.get("human_items") or [])),
@@ -346,7 +352,7 @@ def _judge(p, cfg, qres, dres, test_out, issue, diff, prev_qa=()):
 
 
 def _ci_stop(p, ci):
-    g = DR.gather(p.gh, p.issue)
+    g = DR.gather(p.gh, p.issue, p=p)
     kind, dline, dd = DR.judge(p, STAGE, g, ci.line, "Q2.3")
     if dd is not None:
         B.record_judgment(p, STAGE, "DIRECTIVE", "J-H1,Q-DIRECTIVE,Q-CI-HABIT", dd, reason=dline)

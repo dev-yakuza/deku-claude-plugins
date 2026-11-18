@@ -488,6 +488,7 @@ class LiveBase(unittest.TestCase):
         self.cfg = {"language": "ko", "commands": {"test": "python3 -m unittest discover -s tests -v"},
                     "visual": {}}
         fx = {"repo": "o/r", "issues": {"7": {"number": 7, "title": "make a better", "body": "b", "state": "OPEN",
+                                               "author_association": "OWNER",      # K5: execute's P2 trust read
                                                "labels": [{"name": "guild:execute"}],
                                                "comments": [comment("<!-- guild:design:output -->\nd\n<!-- /guild:design:output -->", 50)],
                                                "timeline": []}}, "prs": []}

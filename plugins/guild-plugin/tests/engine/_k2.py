@@ -23,8 +23,11 @@ FLUTTER_GREEN = "00:01 +1: a\n00:02 +2: b\n03:19 +2: All tests passed!\n"
 FLUTTER_RED = "00:01 +1: a\n00:02 +1 -1: widget shows title [E]\n00:03 +1 -1: Some tests failed.\n"
 
 
-def fixture(labels=("guild:test",), comments=(), prs=(), body="Issue body", n=7, extra_issues=None):
+def fixture(labels=("guild:test",), comments=(), prs=(), body="Issue body", n=7, extra_issues=None, author="OWNER"):
+    # K5 (K4r2-m10): execute/test/qa read the Issue text through the three-valued author trust — the fixture's
+    # Issue carries its author's association (None = unreadable)
     fx = {"repo": "o/r", "issues": {str(n): {"number": n, "title": "t", "body": body, "state": "OPEN",
+                                             "author_association": author,
                                              "url": "https://github.com/o/r/issues/%d" % n,
                                              "labels": [{"name": l} for l in labels],
                                              "comments": list(comments), "timeline": []}},
