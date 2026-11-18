@@ -152,21 +152,23 @@ WAIT_MAX=14400   # 4h ceiling on any single rate-limit wait; the shared region c
     # a mid-spine label — what `/gld dev` did, without a leader session.
 
     # The engine's own exit codes FIRST — before the rate-limit fence and every failure arm (§2.4):
-    # 4 busy (another engine run holds this Issue) → wait in place 5 min, at most twice, then skip it
-    # (reported `busy-skipped #N`, not failed); 6 halted / 126·127 (no usable python) → stop the batch now.
+    # 4 busy (another engine run holds this Issue) → wait in place 5 min (1-min slices), at most twice, then
+    # skip it (reported `busy-skipped #N`, not failed); 3 gh auth / 6 halted / 126·127 (no usable python, or
+    # the engine file is gone — exit 2 with no file) → stop the batch now.
+    if [ "$EXIT_CODE" -eq 2 ] && [ ! -f "$ENGINE" ]; then EXIT_CODE=127; fi
     if [ "$EXIT_CODE" -eq 4 ]; then
       BUSY_TRIES=$((BUSY_TRIES + 1))
       if [ "$BUSY_TRIES" -le 2 ]; then
         echo "  ⏳ Issue #$ISSUE — another engine run holds it; waiting 5 min in place ($BUSY_TRIES/2)"
-        sleep 300
+        B_N=0; while [ "$B_N" -lt 5 ]; do sleep 60; B_N=$((B_N + 1)); done
         continue
       fi
       echo "  ⏭ Issue #$ISSUE — busy-skipped (still held by another engine run)"
       BUSY_SKIPPED+=("#$ISSUE")
       break
     fi
-    if [ "$EXIT_CODE" -eq 6 ] || [ "$EXIT_CODE" -eq 126 ] || [ "$EXIT_CODE" -eq 127 ]; then
-      ENGINE_HALT="$(grep -ao 'halted: [a-z][a-z -]*' "$LOG" 2>/dev/null | tail -1 || true)"
+    if [ "$EXIT_CODE" -eq 3 ] || [ "$EXIT_CODE" -eq 6 ] || [ "$EXIT_CODE" -eq 126 ] || [ "$EXIT_CODE" -eq 127 ]; then
+      ENGINE_HALT="$(grep -ao 'halted: [a-z][a-z -]*\|gh auth failed' "$LOG" 2>/dev/null | tail -1 || true)"
       echo "[batch] ⛔ the engine stopped the batch at #$ISSUE: ${ENGINE_HALT:-exit $EXIT_CODE} — fix it, then re-run this script"
       exit 1
     fi

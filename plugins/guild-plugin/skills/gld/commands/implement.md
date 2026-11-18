@@ -1,6 +1,6 @@
 # IMPLEMENT (stage: execute variant)
 
-> **0.102 (engine)**: `/gld implement $1` runs the engine's **execute** stage alone — follow `<<SKILL_DIR>>/commands/dev.md` *Engine driver* with `--only execute` on step 1. The execute variant comes from the Issue's `type:` label (`type:bug` → debug, `type:refactor` → refactor, else implement). The rest of this file is the 0.101.x reference the roles' atoms cite; it is **not executed**.
+> **0.102 (engine)**: `/gld implement $1` runs the engine's **execute** stage alone — follow `<<SKILL_DIR>>/commands/dev.md` *Engine driver* with `--only execute` on step 1. The execute variant comes from the Issue's `type:` label (`type:bug` → debug, `type:refactor` → refactor, else implement). The rest of this file is the 0.101.x reference the roles' atoms cite; it is **not executed**. **Reference (0.102) — removed in the next release.**
 
 **Stage: execute, variant for `type:feature`.** Roles: **developer** (fills the skeleton via TDD) with **tech-lead conformance check**, plus the **always-on external auditor** and any **conditional specialists / gate reviews** the leader convenes (security/infra/i18n/dba/analytics/performance — Step 3.5). Invocable directly (`/gld implement <issue>`) or via `/gld dev` (auto-selected when the Issue is `type:feature`, or has no `type:` label — see `dev.md`'s default-to-feature rule). The spine is identical to `debug`/`refactor` (execute → test); only the *developer's task shape* differs — a feature is **built via TDD from the tech-lead's skeleton**.
 

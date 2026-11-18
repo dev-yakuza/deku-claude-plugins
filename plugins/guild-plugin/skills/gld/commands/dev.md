@@ -15,7 +15,7 @@
 0.102 runs the spine as code (`<<SKILL_DIR>>/engine/gld_engine.py`, design §2.4). **Do only what this section says**; everything after the line `## Legacy spine (0.101.x reference)` is the old prose spine, kept as reference for the roles' atoms and the 0.101.3 downgrade — it is **not executed**. `E` below = `python3 <<SKILL_DIR>>/engine/gld_engine.py`. Each step is ONE Bash call; every answer is one `>>> ENGINE <<<` JSON line — say what it means in one line of `config.language`.
 
 0. **Mode** — `printenv GLD_UNATTENDED`, then in a SEPARATE call `printenv GLD_SUPERVISOR_VERSION` (one variable per call).
-   - `GLD_UNATTENDED` = `1` and `GLD_SUPERVISOR_VERSION` empty → an **old (0.101.x) supervisor or batch** started this session. Run `E dev run --issue $1 --unattended --detach` in the foreground with the Bash timeout 3600000; if the call ends by that timeout, run the same command again (it attaches to the same run). Print its last `"type":"result"` line verbatim and end. Never ask anything. (Documented degradation, §10.3: the old supervisor does not see the engine's rate limit or kill switch — regenerate it with `/gld sprint run`.)
+   - `GLD_UNATTENDED` = `1` and `GLD_SUPERVISOR_VERSION` empty → an **old (0.101.x) supervisor or batch** started this session. Run `E dev run --issue $1 --unattended --detach` once: it starts a detached unattended run (or reports the one already running) and returns at once. Then `E dev wait --issue $1 --max-seconds 540` again and again until its `events` hold a `terminal`; print that event's `line` verbatim and end. Never ask anything, never run `dev run` a second time. (Documented degradation, §10.3: the old supervisor does not see the engine's rate limit or kill switch — regenerate it with `/gld sprint run`.)
    - `GLD_UNATTENDED` = `1` and `GLD_SUPERVISOR_VERSION` set → a 0.102 supervisor never sends `/gld dev`; say so and stop.
    - otherwise → **attended**, step 1.
 1. **Start or attach** — `E dev run --issue $1 --attended` (`/gld <stage> $1` adds `--only <stage>`). `{"started":true}` → step 2. `{"attached":true,"read_only":true}` → an unattended run owns #$1: only step 2 (no answer, hold or note).
@@ -28,6 +28,8 @@
 - The worker outlives this session; `/gld resume $1` attaches to it. Questions are answered only through `dev answer` (attended) or the `guild-answer:` line on the Issue (unattended).
 
 ## Legacy spine (0.101.x reference)
+
+> **Reference (0.102) — not executed; removed in the next release.** Kept for the roles' atoms that cite it and the 0.101.3 downgrade.
 
 ## Phase 0 — Setup
 

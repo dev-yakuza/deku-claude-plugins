@@ -1,5 +1,7 @@
 # EXECUTE SPINE (shared stage skeleton — implement / debug / refactor)
 
+> **Reference (0.102) — not executed; removed in the next release.** 0.102 runs execute as engine code (`dev.md` *Engine driver*); this file stays for the roles' atoms that cite it and the 0.101.3 downgrade.
+
 **Not a stage.** The **execute** stage's common Steps 0–6, shared by its three variants: `implement.md` (`type:feature`), `debug.md` (`type:bug`), `refactor.md` (`type:refactor`). Read by whichever variant `dev.md` Phase 2 selected (or by a direct `/gld implement|debug|refactor <issue>`). The spine is identical across the three — only the *developer's task shape* and a few checks differ, so each variant file supplies the **slots** in Section A and this file runs everything else. A variant stays individually runnable: read the variant file (its header, its slot values, its own hard rules), then execute the steps below substituting those values.
 
 > **Bash**: `_bash_rules.md` — one simple call each, no `&&`, `|`, `;`, `$(...)`, or redirection. State/handoff: `_handoff.md`.

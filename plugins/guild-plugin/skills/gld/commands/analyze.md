@@ -1,6 +1,6 @@
 # ANALYZE (stage)
 
-> **0.102 (engine)**: `/gld analyze $1` runs the engine's **analyze** stage alone — follow `<<SKILL_DIR>>/commands/dev.md` *Engine driver* with `--only analyze` on step 1. The rest of this file is the 0.101.x reference the roles' atoms cite; it is **not executed**.
+> **0.102 (engine)**: `/gld analyze $1` runs the engine's **analyze** stage alone — follow `<<SKILL_DIR>>/commands/dev.md` *Engine driver* with `--only analyze` on step 1. The rest of this file is the 0.101.x reference the roles' atoms cite; it is **not executed**. **Reference (0.102) — removed in the next release.**
 
 **Stage: analyze.** Role: **leader** (embodied by the main session). Runs the **discuss gate**, analyzes requirements, classifies work type, posts the analysis. Invocable directly (`/gld analyze <issue>`) or as the first stage of `/gld dev`.
 

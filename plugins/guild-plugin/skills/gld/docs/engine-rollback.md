@@ -48,8 +48,10 @@ question is judged again by the legacy flow at that point (on a re-upgrade the e
 4. **`/gld update` in each repository — it adopts the gate first** (commit it and merge to the default
    branch before any engine run; see update.md "0.102 ordering").
 5. Regenerate the supervisor (`/gld sprint run`), then `E dev valve resume --all`, and confirm with
-   `E status running --all-repos` that no repository still has `HALT`.
+   `E status running --all-repos` that its first line reads `HALT: none` (every repository still halted is
+   listed as a `HALT  <git-common-dir>` line).
 
-An old (0.101.x) supervisor left running after an upgrade still works through `/gld dev N` (dev.md's
-engine driver attaches with `--detach`) but does not see the engine's rate limits or the kill switch —
-regenerate it.
+An old (0.101.x) supervisor left running after an upgrade still works through `/gld dev N`: dev.md's
+engine driver starts a DETACHED unattended worker with `--detach` and waits with `dev wait` (a session's
+60-minute Bash timeout never restarts a live run — the worker holds the Issue lock). It does not see the
+engine's rate limits or the kill switch — regenerate it.

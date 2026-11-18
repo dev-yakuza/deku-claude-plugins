@@ -1,6 +1,6 @@
 # TEST (stage)
 
-> **0.102 (engine)**: `/gld test $1` runs the engine's **test** stage alone — follow `<<SKILL_DIR>>/commands/dev.md` *Engine driver* with `--only test` on step 1. The rest of this file is the 0.101.x reference the roles' atoms cite; it is **not executed**.
+> **0.102 (engine)**: `/gld test $1` runs the engine's **test** stage alone — follow `<<SKILL_DIR>>/commands/dev.md` *Engine driver* with `--only test` on step 1. The rest of this file is the 0.101.x reference the roles' atoms cite; it is **not executed**. **Reference (0.102) — removed in the next release.**
 
 **Stage: test.** Role: **tester** (leader judges completion). Runs the tests, enforces the **verify gate** (raw evidence, not self-report); the leader judges automated-correctness completion and **advances to the QA stage** (test no longer marks `done` — QA does). Invocable directly (`/gld test <issue>`) or via `/gld dev`.
 

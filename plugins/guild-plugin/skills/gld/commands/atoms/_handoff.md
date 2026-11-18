@@ -631,7 +631,8 @@ Every **human-readable string Guild emits is written in the repo's `config.langu
 **`window-invalid`** · **`marker-unwritable`** · **`container-lost`** · **`sigTERM`** ·
 **`sigHUP`** · `plan-hash-mismatch` · **`plugin-version-changed`** · **`engine-kill-switch`** ·
 **`engine-env-<reason>`** (`endpoint` · `python` · `uninitialized` · `plugin-not-listed` · `ignored-missing` ·
-`build-inputs-changed` · `unknown`) — the engine's exit 6 / 126·127 (0.102, design §2.4): fix the environment
+`build-inputs-changed` · `missing` (the engine file is gone from the plugin cache) · `unknown`) · **`engine-gh-auth`**
+(exit 3: `gh auth login`, then `/gld sprint run`) — the engine's exit 6 / 126·127 (0.102, design §2.4): fix the environment
 (for `ignored-missing` list the path in `engine.effective.copy_ignored`; for `build-inputs-changed` run the
 suite by hand first), then `/gld sprint run` regenerates the supervisor and continues. The event classes
 `busy` · `busy-skipped` (exit 4 — another engine run holds the Issue) mean an unprocessed member, picked up by

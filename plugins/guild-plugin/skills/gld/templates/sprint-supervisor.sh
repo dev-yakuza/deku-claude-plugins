@@ -47,6 +47,8 @@ DRAFT_STACKED=<DRAFT_STACKED>
 # 1 = `config.sprint.stage_groups`: each member runs as up to three grouped sessions
 # (analyze+design | execute | test+qa — dev.md "Grouped sessions") instead of one session for
 # the whole spine, so a later group does not carry an earlier one's context. Literal 0/1.
+# Reference (0.102): the engine ignores GLD_STAGE_SCOPE, so the grouped branches below are inert; kept for the
+# 0.101.3 downgrade and removed in the next release (K5 user decision 3).
 STAGE_GROUPS=<STAGE_GROUPS>
 # K5 (design §2.4, §10.3): each member is ONE engine run — this plugin's own `gld_engine.py`, by absolute
 # path (no `claude -p "/gld dev N"` leader session). SUPERVISOR_VERSION is the plugin version that generated
@@ -942,6 +944,11 @@ MARKER_MAX=3
 # line, never a stop: the kill switch is the primary stop, and a transient CLI error must not end a sprint.
 engine_gate() {
   local common v
+  # K5r1-m4: the engine file itself first — a plugin cache that dropped this version's directory would make
+  # every member exit 2 (`python3 /missing/path`) and fail one by one
+  if [ ! -f "$ENGINE" ]; then
+    HALT_REASON="engine-env-missing"; return 1
+  fi
   common="$(git -C "$HUMAN_REPO" rev-parse --path-format=absolute --git-common-dir 2>/dev/null || true)"
   if [ -n "$common" ] && [ -f "$common/guild/engine/HALT" ]; then
     HALT_REASON="engine-kill-switch"; return 1
@@ -2190,22 +2197,28 @@ while [ ${#QUEUE[@]} -gt 0 ]; do
     #   6 halted / 126·127 (the interpreter cannot run) — stop the sprint: kill switch →
     #     engine-kill-switch, version mismatch → plugin-version-changed, `halted: env <r>` →
     #     engine-env-<r>, 126·127 → engine-env-python. The other members are not recorded as failed.
+    #   3 gh auth (K5r1-m5) — every member would fail the same way: stop the sprint (engine-gh-auth).
+    #   2 with the engine file gone (K5r1-m4) — the interpreter could not open it: engine-env-missing.
+    if [ "$EXIT_CODE" -eq 2 ] && [ ! -f "$ENGINE" ]; then EXIT_CODE=127; ENGINE_MISSING=1; fi
     if [ "$EXIT_CODE" -eq 4 ]; then
       BUSY_TRIES=$((BUSY_TRIES + 1))
       if [ "$BUSY_TRIES" -le 2 ]; then
         echo "  ⏳ Issue #$ISSUE — another engine run holds it; waiting 5 min in place ($BUSY_TRIES/2)"
         record_event "$ISSUE" busy "another engine run holds #$ISSUE — waited in place ($BUSY_TRIES/2)"
-        sleep 300
+        # K5r1-m9: in WAIT_CHUNK slices — a TERM is handled within a minute, not after five
+        B_N=0; while [ "$B_N" -lt 300 ]; do sleep "$WAIT_CHUNK"; B_N=$((B_N + WAIT_CHUNK)); done
         continue
       fi
       echo "  ⏭ Issue #$ISSUE — still held by another engine run; left unprocessed"
       record_event "$ISSUE" busy-skipped "another engine run still holds #$ISSUE — unprocessed, the next run picks it up"
       break
     fi
-    if [ "$EXIT_CODE" -eq 6 ] || [ "$EXIT_CODE" -eq 126 ] || [ "$EXIT_CODE" -eq 127 ]; then
+    if [ "$EXIT_CODE" -eq 3 ] || [ "$EXIT_CODE" -eq 6 ] || [ "$EXIT_CODE" -eq 126 ] || [ "$EXIT_CODE" -eq 127 ]; then
       ENGINE_HALT="$(grep -ao 'halted: [a-z][a-z -]*' "$LOG" 2>/dev/null | tail -1 || true)"
       case "$EXIT_CODE:$ENGINE_HALT" in
-        126:*|127:*)                         HALT_REASON="engine-env-python" ;;
+        3:*)                                 HALT_REASON="engine-gh-auth" ;;
+        127:*) if [ "${ENGINE_MISSING:-0}" = 1 ]; then HALT_REASON="engine-env-missing"; else HALT_REASON="engine-env-python"; fi ;;
+        126:*)                               HALT_REASON="engine-env-python" ;;
         *"halted: kill-switch"*)             HALT_REASON="engine-kill-switch" ;;
         *"halted: plugin version mismatch"*) HALT_REASON="plugin-version-changed" ;;
         *"halted: env "*)
