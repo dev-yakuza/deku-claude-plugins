@@ -83,12 +83,22 @@ class K4(Harness):
     """A K2 Harness whose root is a real git repo (the main checkout) and whose spec store is a temp dir."""
 
     def __init__(self, case, labels=("guild:analyze",), comments=(), body="Issue body", roles=(), judges=None,
-                 unattended=True, config=None, extra_files=None, author="OWNER", issues=None, n=7, prs=()):
+                 unattended=True, config=None, extra_files=None, author="OWNER", issues=None, n=7, prs=(),
+                 foreign=()):
         root = main_repo(case, extra_files)
         fx = fixture(labels=labels, comments=comments, body=body, n=n, prs=prs, extra_issues=issues)
         fx["issues"][str(n)]["author_association"] = author
         Harness.__init__(self, case, fx, roles=roles, judges=judges, unattended=unattended, root=root,
                          config=config or CFG, n=n, test_cases=None)
+        # K4r3-B1: the engine knows its children by its journal — a real one, and the fixture's child
+        # Issues of #n are seeded as created by this engine unless listed in `foreign`
+        from guildcore.journal import Journal
+        self.common = os.path.join(tmpdir(case), "common")
+        self.journal = Journal(self.common, n, self.clock)
+        self.writer.journal = self.journal
+        self.writer.clock = self.clock
+        for k, it in sorted((issues or {}).items(), key=lambda kv: int(kv[0])):
+            self.seed_child(int(k), it, foreign)
         self.p.spec_store = os.path.join(tmpdir(case), "specs")
         self.p.git_dir = os.path.join(root, ".git")
         self.events = []
@@ -97,6 +107,14 @@ class K4(Harness):
             def emit(_s, what, at, **kw):
                 self.events.append((what, kw))
         self.p.events = Ev()
+
+    def seed_child(self, k, it, foreign=()):
+        import re as _re
+        names = [lb["name"] if isinstance(lb, dict) else lb for lb in it.get("labels", [])]
+        if k in foreign or "guild:child" not in names or ("Parent Issue: #%d" % self.n) not in (it.get("body") or ""):
+            return
+        m = _re.search(r"<!-- guild:slice-key (\S+) -->", it.get("body") or "")
+        self.journal.own_write("issue", key=m.group(1) if m else "%d-fx%d" % (self.n, k), number=k, token="fx%d" % k)
 
     def _judge(self, spec):
         """The fake transport + the group's coercions, as the real JudgeRunner applies them."""

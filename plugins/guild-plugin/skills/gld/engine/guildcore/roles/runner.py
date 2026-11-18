@@ -120,8 +120,9 @@ def lefthook_local_problem(spec, base_sha):
             except OSError:
                 same = False
         if not same:
-            out.append("lefthook overlay %s present and not <base>'s — remove it (it would run in every "
-                       "commit hook in this worktree)" % name)
+            out.append("lefthook overlay %s present and not <base>'s — the engine leaves it in place (an "
+                       "ignored file: not in the PR diff) and it runs in EVERY commit hook in this worktree, a "
+                       "person's too; delete it before committing here or resuming" % name)
     return out
 
 class BaselineContract(Exception):

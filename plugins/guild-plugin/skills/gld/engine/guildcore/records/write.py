@@ -10,8 +10,11 @@
   `write` line with the server id (comment id, timeline label event ids) so the engine's own
   writes are never read back as a human's (§2.5 신원 한계, K0-m10);
 * **idempotent** — a comment upsert with an identical body is skipped; label edits are set
-  differences (needs-human removed only when present); Issue creation lists its label for its
-  hidden key first — never the search index (A-F23, K4r2-M1);
+  differences (needs-human removed only when present); a keyed Issue create is journal-first: the
+  intent (key + a unique token in the body) before the POST, the number right after, a lost reply
+  resolved by the token through the REST issues list (database-backed) and confirmed by number —
+  never a search-backed read (`gh issue list --label` is IssueSearch), never a second POST while
+  unknown (A-F23, K4r3-B1);
 * cumulative records (loopback · auditor:execute · decisions) are re-read right before the
   PATCH; if the block count moved, the insert is recomputed and retried once; the check after
   is "MY block is present" (CR-m13), not a whole-body hash.
@@ -28,6 +31,24 @@ from guildcore.state import label_names
 
 RETRY_DELAY_S = 2
 VERIFY_READS = 3
+TOKEN_TAG = "<!-- guild:create-token %s -->"
+
+
+def _parse_iso(t):
+    import calendar
+    try:
+        return calendar.timegm(time.strptime((t or "")[:19], "%Y-%m-%dT%H:%M:%S"))
+    except (ValueError, TypeError):
+        return None
+
+
+def _iso(ts):
+    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(ts))
+
+
+def _age_s(t, now):
+    a, b = _parse_iso(t), _parse_iso(now)
+    return None if a is None or b is None else b - a
 
 
 def _final_redact(text):
@@ -46,8 +67,9 @@ def withdrawn(row):
 
 
 class GhWriter(object):
-    def __init__(self, read, write, journal=None, sleep=time.sleep, key_ctx=None):
+    def __init__(self, read, write, journal=None, sleep=time.sleep, key_ctx=None, clock=None):
         self.read = read
+        self.clock = clock
         self.write = write
         self.journal = journal
         self.sleep = sleep
@@ -141,10 +163,12 @@ class GhWriter(object):
         if op == "pr:body":
             return _sha(self.read.pr(int(tgt)).get("body") or "") == it.get("body_sha256")
         if op == "issue:create":
-            tag = it.get("key_tag")
-            if not tag:
+            # K4r3-B1: the journaled number, else the create token through the REST list (never search)
+            if not it.get("token"):
                 return False
-            return self.keyed_issue(tag, it.get("find_label")) is not None     # K4r2-M1: the listing, never search
+            if any(e.get("token") == it["token"] for e in self._ij().own_issues()):
+                return True
+            return self.find_by_token(it["token"], it.get("find_label"), it.get("since")) is not None
         return False
 
     def _records(self, issue):
@@ -325,56 +349,172 @@ class GhWriter(object):
                       reason=reason)
         return True
 
-    MEMBERS = ("OWNER", "MEMBER", "COLLABORATOR")
+    # -- keyed Issue creation (K4r3-B1: journal first, never an index) ------------------------------
+    TOKEN_READS = 4            # REST list reads for a lost reply: now, +2 s, +4 s, +8 s
+    SETTLE_S = 600             # an unresolved intent this old, absent from the REST list, never landed
+    SINCE_MARGIN_S = 600       # clock skew between this host and GitHub on the list's `since`
 
-    def keyed_issue(self, tag, label, members=None):
-        """K4r2-M1/m6: the Issue that already carries the hidden key `tag` — found by the LABEL
-        LISTING (`gh issue list --label`, the repository's issue connection: strongly consistent,
-        newest first), never by the search API (an eventually consistent index that misses an
-        Issue created seconds ago → a duplicate child). Only an Issue that carries `label` AND whose
-        author is a member counts: an outsider who opens an Issue with the public key first plants
-        nothing. An Issue closed as NOT_PLANNED is withdrawn (a person re-splitting closes the old
-        children that way) and never counts. An unreadable author association raises (unknown is never member, never outsider).
-        The lowest number wins when two carry the key (the caller fails on duplicates)."""
-        from guildcore.state import label_names as _ln
-        members = tuple(members or self.MEMBERS)
-        rows = self._call("issue:list", lambda: self.read.issue_list(state="all", label=label, limit=200))
-        hits = sorted((r for r in rows or [] if tag in (r.get("body") or "")
-                       and (label is None or label in _ln(r.get("labels"))) and not withdrawn(r)),
-                      key=lambda r: int(r["number"]))
-        for r in hits:
-            assoc = self._call("issue:author", lambda: self.read.issue_author_association(int(r["number"])))
-            assoc = (assoc or "").strip()
-            if not assoc:
-                raise GhWriteError("issue:author", "author association of #%s unreadable" % r["number"], "transient")
-            if assoc in members:
-                return {"number": int(r["number"]), "found": True}
+    def _ij(self):
+        """The journal that holds Issue-create intents and numbers (an in-memory one without a journal)."""
+        if self.journal is not None:
+            return self.journal
+        if getattr(self, "_memj", None) is None:
+            self._memj = _MemJournal(self.clock)
+        return self._memj
+
+    def own_issues(self, prefix=None):
+        """{key: number} of the Issues this engine created (journal, latest record per key), keys starting
+        with `prefix`. Identity is the journal's number — never a listing, never author association (m5)."""
+        out = {}
+        for e in self._ij().own_issues():
+            k = str(e.get("key") or "")
+            if prefix is None or k.startswith(prefix):
+                out[k] = int(e["number"])
+        return out
+
+    def _record_issue(self, it, number, recovered=False):
+        j = self._ij()
+        j.own_write("issue", key=it.get("key"), number=int(number), token=it.get("token"),
+                    recovered=bool(recovered))
+        j.done(it, number=int(number))
+
+    def _since(self, t):
+        ts = _parse_iso(t)
+        if ts is None:
+            return None
+        return _iso(ts - self.SINCE_MARGIN_S)
+
+    def find_by_token(self, token, label, since, reads=None):
+        """The Issue whose body carries the create token — the REST issues LIST (database-backed:
+        `GET /repos/{o}/{r}/issues?labels=…&since=…`, all pages), each candidate confirmed by number;
+        bounded re-reads with backoff. The lowest confirmed number wins (a copy of a public token can
+        only be made after the original exists). None after the last read."""
+        reads = self.TOKEN_READS if reads is None else reads
+        for i in range(reads):
+            rows = self._call("issue:find", lambda: self.read.issue_rows(label=label, state="all", since=since))
+            for r in sorted((r for r in rows or [] if token in (r.get("body") or "")), key=lambda r: int(r["number"])):
+                row = self._call("issue:row", lambda: self.read.issue_row(int(r["number"])))
+                if token in (row.get("body") or ""):
+                    return int(row["number"])
+            if i + 1 < reads:
+                self.sleep(RETRY_DELAY_S * (2 ** i))
         return None
 
-    def issue_create(self, title, body, labels=(), key=None, key_kind="slice-key", members=None):
-        """Create once: the body carries `<!-- guild:<key_kind> <key> -->`; an existing member Issue
-        with that key and the first label is returned instead (A-F23). The intent is journaled
-        BEFORE the POST (with the key tag and the listing label), and every "did it land?" read —
-        before the create, after an ambiguous failure, on restart — is the label listing
-        (`keyed_issue`), never the search index (K4r2-M1). Returns (number, created)."""
-        tag = None
-        label = None
-        if key is not None:
-            # the listing label: guild:child for a child; an unlabelled keyed create lists every Issue
-            # (still the consistent listing, newest first — never the search index)
-            label = ("guild:child" if "guild:child" in labels else list(labels)[0]) if labels else None
-            tag = "<!-- guild:%s %s -->" % (key_kind, key)
-            if tag not in body:
-                body = body.rstrip("\n") + "\n\n" + tag + "\n"
-            hit = self.keyed_issue(tag, label, members)
-            if hit is not None:
-                return hit["number"], False
+    def resolve_creates(self, prefix=None, key=None, reads=None):
+        """Every journaled Issue create that has an intent but no number (the POST's reply was lost, or
+        the process died between the POST and the record): found by its token → its number is journaled;
+        absent and the intent older than SETTLE_S → it never landed (abandoned); absent and younger →
+        `GhWriteError(kind="ambiguous")` — the caller pauses for a person and NOTHING is created."""
+        j = self._ij()
+        known = set(e.get("token") for e in j.own_issues())
+        for it in j.intent_only():
+            if it.get("op") != "issue:create" or not it.get("token") or it.get("token") in known:
+                continue
+            k = str(it.get("key") or "")
+            if (prefix is not None and not k.startswith(prefix)) or (key is not None and k != key):
+                continue
+            n = self.find_by_token(it["token"], it.get("find_label"), it.get("since"), reads)
+            if n is not None:
+                self._record_issue(it, n, recovered=True)
+                known.add(it["token"])
+                continue
+            age = _age_s(it.get("t"), j._now())
+            if age is not None and age >= self.SETTLE_S:
+                j.done(it, abandoned=True)
+                continue
+            raise GhWriteError("issue:create", "the create of %s may have landed (its reply was lost) and is not "
+                               "in the issue list yet — nothing is re-created while that is unknown" % k,
+                               "ambiguous")
 
-        def find():
-            return self.keyed_issue(tag, label, members) if tag else None
-        res = self._perform("issue:create", key or title,
-                            lambda: self.write.create_issue(title, body, labels),
-                            lambda r: bool(r and r.get("number")) and
-                            (self.read.issue(r["number"]).get("body") or "") == body,
-                            find=find if tag else None, key_tag=tag, find_label=label, body_sha256=_sha(body))
-        return int(res["number"]), not res.get("found")
+    def issue_create(self, title, body, labels=(), key=None, key_kind="slice-key", members=None):
+        """Create once (A-F23, K4r3-B1 — journal first):
+        1. an unresolved earlier create of this key is resolved by its token (`resolve_creates`);
+        2. a number the journal holds for the key that is still live (read by number: carries the key,
+           not closed as not planned) is returned;
+        3. else intent (key, a fresh unique token embedded in the body, the list's `since`) is journaled
+           and fsynced, the POST is sent once, and the answered number is journaled IMMEDIATELY; a
+           transient failure is resolved by the token through the REST list (bounded backoff) — found →
+           that number; not found → `GhWriteError("ambiguous")`, never a second POST. Refused writes
+           (auth, rate limit, 4xx) never landed: the intent is closed and the error raised.
+        No search-backed read anywhere. `members` is accepted for old callers and ignored (m5: the
+        engine's own Issues are known by the journal, not by author association). Returns (number, created)."""
+        if key is None:
+            res = self._perform("issue:create", title, lambda: self.write.create_issue(title, body, labels),
+                                lambda r: bool(r and r.get("number")) and
+                                (self.read.issue(r["number"]).get("body") or "") == body, body_sha256=_sha(body))
+            return int(res["number"]), True
+        label = ("guild:child" if "guild:child" in labels else list(labels)[0]) if labels else None
+        tag = "<!-- guild:%s %s -->" % (key_kind, key)
+        if tag not in body:
+            body = body.rstrip("\n") + "\n\n" + tag + "\n"
+        self.resolve_creates(key=key)
+        have = self.own_issues().get(key)
+        if have is not None:
+            row = self._call("issue:row", lambda: self.read.issue_row(have))
+            if tag in (row.get("body") or "") and not withdrawn(row):
+                return have, False
+        import uuid
+        token = uuid.uuid4().hex
+        body = body.rstrip("\n") + "\n" + (TOKEN_TAG % token) + "\n"
+        j = self._ij()
+        # target carries the token: every create attempt is its own journal key (an abandoned or
+        # recorded earlier attempt of the same slice key never marks this one done)
+        it = j.intent(op="issue:create", target="%s %s" % (key, token), key=key, key_tag=tag, token=token, find_label=label,
+                      since=self._since(j._now()), body_sha256=_sha(body),
+                      **dict((k, v) for k, v in self.key_ctx.items() if k not in ("op", "target")))
+        try:
+            res = self._call("issue:create", lambda: self.write.create_issue(title, body, labels), retry=False)
+            n = int(res["number"])
+            self._record_issue(it, n)                       # the number, before anything else can fail
+        except GhWriteError as e:
+            if e.kind != "transient":
+                j.done(it, refused=e.kind)                  # the server refused it: nothing landed
+                raise
+            n = self.find_by_token(token, label, it.get("since"))
+            if n is None:
+                raise GhWriteError("issue:create", "the create of %s failed ambiguously (%s) and the issue list "
+                                   "does not show it — nothing is re-created while that is unknown"
+                                   % (key, e.message), "ambiguous")
+            self._record_issue(it, n, recovered=True)
+            return n, False
+        if not self._verify_with_backoff("issue:create", lambda _r: token in
+                                         (self._call("issue:row", lambda: self.read.issue_row(n)).get("body") or ""), n):
+            raise GhWriteError("issue:create", "#%d did not carry its create token on re-read" % n, "terminal")
+        return n, True
+
+
+class _MemJournal(object):
+    """The intent/number records of keyed creates when the writer has no journal (tests, one process)."""
+
+    def __init__(self, clock=None):
+        from guildcore.journal import JournalView
+        self.view = JournalView([], 0)
+        self.entries = self.view.entries
+        self.clock = clock
+
+    def _now(self):
+        return self.clock.now() if self.clock is not None else _iso(time.time())
+
+    def append(self, kind, **f):
+        f.setdefault("issue", None)
+        f["kind"], f["t"] = kind, self._now()
+        self.entries.append(f)
+        return f
+
+    def intent(self, op, target, **extra):
+        return self.append("intent", op=op, target=target, **extra)
+
+    def done(self, it, **extra):
+        from guildcore.journal import KEY_FIELDS
+        f = dict((k, it.get(k)) for k in KEY_FIELDS if k != "issue")
+        f.update(extra)
+        return self.append("done", **f)
+
+    def own_write(self, op, **fields):
+        return self.append("write", op=op, **fields)
+
+    def intent_only(self):
+        return self.view.intent_only()
+
+    def own_issues(self):
+        return self.view.own_issues()

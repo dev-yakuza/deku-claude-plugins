@@ -161,6 +161,15 @@ def run(p, variant):
         issue = p.gh.issue(p.issue)
         cx.net_mode = RN.mode(issue.get("body"))
         if cx.net_mode != "none":
+            # K4r3-m2: the safety-net marker is a member's control (P2, three-valued like analyze): an
+            # outsider's marker is ignored (analyze gave it no net AC); unknown trust stops the stage
+            from workflows.dev.stages import analyze as A
+            try:
+                if not A.trusted_body(p, issue)[0]:
+                    cx.net_mode = "none"
+            except A.TrustUnknown as ex:
+                return A.unknown_trust_result(p, STAGE, ex)
+        if cx.net_mode != "none":
             ev = markers.find(comments, EVIDENCE)
             cx.net_prev = RN.parse_block(V.block_text(markers.body_of(ev), V.SAFETY_NET)) if ev else None
             if cx.net_prev is None and _open_pr(p):

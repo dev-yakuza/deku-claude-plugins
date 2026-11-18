@@ -22,13 +22,11 @@ import json
 import re
 
 from guildcore import ask as ASK
-from guildcore import state as ST
 from guildcore.checks import visual as V
 from guildcore.adapters.gh import GhWriteError
 from guildcore.decisions import DecisionLog
 from guildcore.records import markers
 from guildcore.records import outputs as OUT
-from guildcore.records.write import withdrawn
 from workflows.dev import analysis as AN
 from workflows.dev import arbitration as ARB
 from workflows.dev import handoff as HO
@@ -145,8 +143,11 @@ def run(p, only=None, config_present=True):
         for m in ("<!-- guild:refactor-slot -->", "<!-- guild:safety-net -->", "<!-- guild:safety-net-only -->"):
             if m in body:
                 slot += m.replace("<!-- guild:", "").replace(" -->", "") + "\n"
+    # K4r3-B1: the engine's own children by its journal (numbers read by number — never a listing);
     # K4r2-m4: a child a person closed as not planned is withdrawn (the documented re-split path)
-    children = [c for c in ST.discover_children(p.gh, p.issue) if not withdrawn(c)]
+    children, stop = B.own_children_or_stop(p, STAGE)
+    if stop is not None:
+        return stop
     answers = {}
     for kind in ("design-block", "leaf-split", "escalation"):
         q, res = B.pending_answer(p, STAGE, kind, comments)
@@ -508,10 +509,12 @@ def resume_split(p, e, rec, children, blk, is_leaf, answers, trusted):
 
 
 def make_children(p, e, rec, plan, children, answers, trusted):
-    """Create the plan's missing children in order — idempotent by slice key (the listing first, the
-    writer's own label listing second — never the search index, K4r2-M1 — a re-listing after an
-    ambiguous failure, and two live children with one key → a person) — then design:output →
-    `guild:children` → roster (A-F38). A failure goes through `B.fail` (needs-human unattended)."""
+    """Create the plan's missing children in order — idempotent by slice key, journal first (K4r3-B1:
+    the writer journals intent + token before each POST and the number right after; a lost reply is
+    resolved by the token through the REST list, never a search-backed read; still unknown → a
+    person, nothing re-sent) — then the children read back BY NUMBER (two live children with one key
+    → a person) → design:output → `guild:children` → roster (A-F38). A failure goes through `B.fail`
+    (needs-human unattended)."""
     slices = sorted(plan["slices"], key=lambda s: s.get("order") or 0)
     ac_by_id = dict((a["id"], a) for a in rec.ac)
     have = existing_keys(children)
@@ -522,19 +525,19 @@ def make_children(p, e, rec, plan, children, answers, trusted):
         title = CHILD_PREFIX + markers.value(s.get("name") or s["key"])[:90]
         try:
             n, _created = p.writer.issue_create(title, child_body(p.issue, s, ac_by_id, trusted),
-                                                labels=["guild:child", "guild:analyze"], key=full,
-                                                members=A.members(p))
+                                                labels=["guild:child", "guild:analyze"], key=full)
         except GhWriteError as ex:
             if ex.kind in ("auth", "ratelimit"):
                 raise                                   # the FSM's exit 3 / 75
-            again = existing_keys([c for c in ST.discover_children(p.gh, p.issue) if not withdrawn(c)])
-            if full in again:                           # the write landed although the call failed
-                have[full] = again[full]
-                continue
+            # a lost reply was already looked up by its token (REST list, backoff) inside the writer;
+            # "ambiguous" = still unknown → a person, and nothing is sent again
             return B.fail(p, STAGE, "child creation failed at slice %s (%d/%d) — %s" % (
-                s["key"], i, len(slices), B.one_line(str(ex), 160)), "transient" if ex.kind == "transient" else "defect")
+                s["key"], i, len(slices), B.one_line(str(ex), 200)),
+                "transient" if ex.kind in ("transient", "ambiguous") else "defect")
         have[full] = n
-    now = [c for c in ST.discover_children(p.gh, p.issue) if not withdrawn(c)]
+    now, stop = B.own_children_or_stop(p, STAGE)
+    if stop is not None:
+        return stop
     dups = duplicate_keys(now)
     if dups:
         # K4r2-M1: two live children with one slice key would run the same AC twice — a person's

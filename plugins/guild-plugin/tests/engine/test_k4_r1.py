@@ -251,6 +251,7 @@ class M2M3(unittest.TestCase):
         self._first_run_stops_after_one(h)
         stray = dict(self.CHILD8["8"], number=20, body="y\n\nParent Issue: #7\n\n<!-- guild:slice-key 7-other -->\n")
         h.gh.fx["issues"]["20"] = stray
+        h.seed_child(20, stray)                     # K4r3-B1: the engine's own (journaled) child, outside the plan
         r = D.run(h.p)
         self.assertEqual(r.kind, StageResult.PAUSE)
         self.assertIn("outside the recorded split plan", r.line)
@@ -485,7 +486,7 @@ class Minors(unittest.TestCase):
         with mock.patch.object(CH, "fix_child", lambda p, q, *a: order.append("create")), \
                 mock.patch.object(B, "mark_applied", lambda p, s, r: order.append("applied")), \
                 mock.patch.object(B, "pending_answer", lambda *a, **k: (None, Res())), \
-                mock.patch.object(CH.ST, "discover_children", lambda gh, n: [{"number": 8, "labels": ["guild:done"]}]), \
+                mock.patch.object(CH, "_kids", lambda p: ([{"number": 8, "labels": ["guild:done"]}], None)), \
                 mock.patch.object(CH, "integrate", lambda p, kids, *a: StageResult(StageResult.DONE)):
             CH.run(h.p, lambda c: None)
         self.assertEqual(order, ["create", "applied"])

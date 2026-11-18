@@ -363,7 +363,7 @@ class Children(unittest.TestCase):
     def test_no_children_is_defect(self):
         h = K4(self, labels=("guild:children",))
         out = driver(h).run(7)
-        self.assertIn("no child Issues reference it", out.line)
+        self.assertIn("holds no live child Issue of it", out.line)
 
 
 if __name__ == "__main__":

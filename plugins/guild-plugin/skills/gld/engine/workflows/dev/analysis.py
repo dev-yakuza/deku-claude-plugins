@@ -78,8 +78,27 @@ def _block(body, open_tag, close_tag=None):
     return rest
 
 
+def unquoted(body):
+    """K4r3-m6: the body with code fences (``` / ~~~) and `>` quote lines blanked — a member quoting the
+    close grammar as an example, or pasting someone else's text, does not write a sprint decision."""
+    out, fence = [], None
+    for ln in (body or "").split("\n"):
+        st = ln.lstrip()
+        if fence is not None:
+            if st.startswith(fence):
+                fence = None
+            out.append("")
+            continue
+        if st.startswith("```") or st.startswith("~~~"):
+            fence = st[:3]
+            out.append("")
+            continue
+        out.append("" if st.startswith(">") else ln)
+    return "\n".join(out)
+
+
 def plan_decisions(body):
-    blk = _block(body, PLAN_OPEN, PLAN_CLOSE)
+    blk = _block(unquoted(body), PLAN_OPEN, PLAN_CLOSE)
     if blk is None:
         return []
     out = []

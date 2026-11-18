@@ -105,6 +105,13 @@ class JournalView(object):
         return [e.get("event_id") for e in self.entries
                 if e["kind"] == "write" and e.get("op") == "label" and e.get("event_id") is not None]
 
+    def own_issues(self):
+        """K4r3-B1/m5: the Issues this engine created — `{"kind":"write","op":"issue","key","number",
+        "token"}` journaled the moment the create answered (or the token was found after a lost reply).
+        The engine knows its own children by these numbers, never by a listing or an author association."""
+        return [e for e in self.entries
+                if e["kind"] == "write" and e.get("op") == "issue" and e.get("number") is not None]
+
     def last_checkpoint(self):
         cps = [e for e in self.entries if e["kind"] == "checkpoint"]
         return cps[-1] if cps else None

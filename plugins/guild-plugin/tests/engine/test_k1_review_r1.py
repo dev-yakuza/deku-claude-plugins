@@ -189,7 +189,11 @@ class M1Idempotence(unittest.TestCase):
                 raise G.GhError("HTTP 502: Bad Gateway")
             return r
         write.create_issue = lossy
-        n, created = GhWriter(read, write, sleep=lambda s: None).issue_create("t", "b", key="k9")
+        # K4r3-B1: the lost reply is found by its create token through the REST list filtered by `since`
+        # — the writer's clock must be the fake server's (the fake stamps 2026-11-16)
+        from guildcore.adapters.clock import FixedClock
+        n, created = GhWriter(read, write, sleep=lambda s: None,
+                              clock=FixedClock("2026-11-16T00:00:00Z")).issue_create("t", "b", key="k9")
         self.assertEqual(len([k for k in read.fx["issues"] if "k9" in (read.fx["issues"][k].get("body") or "")]), 1)
         self.assertFalse(created)
 

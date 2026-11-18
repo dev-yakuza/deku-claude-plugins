@@ -37,6 +37,9 @@ _READ_FORMS = (
     # K4 (analyze A1.0 trust gate, P2): the Issue's own REST row — `author_association` is not in
     # `gh issue view --json`; a plan-decision / safety-net block is honoured only from a member's body
     re.compile(r"^gh api repos/[^/ ]+/[^/ ]+/issues/\d+ --jq "),
+    # K4r3-B1: the REST issues LIST (database-backed, never the search index — `gh issue list --label`
+    # is GraphQL IssueSearch) and the REST row by number; both are reads (GET, no -X / -f)
+    re.compile(r"^gh api --paginate repos/[^/ ]+/[^/ ]+/issues\?[^ ]+ --jq "),
 )
 _WRITE_FLAGS = re.compile(r"(^| )(-X|--method|-f|-F|--field|--raw-field|--input|"
                           r"--add-label|--remove-label|--body|--body-file)( |=|$)")
@@ -159,6 +162,37 @@ class GhCli(object):
         return json.loads(self._gh(["gh", "pr", "view", str(int(n)), "--json", "number,state,mergedAt,url"]
                                    + self._repo_args()))
 
+    # K4r3-B1: `gh issue list --label/--search` goes through IssueSearch (GraphQL search, ISSUE_ADVANCED):
+    # an eventually consistent index. Child dedup and discovery read the REST list below instead —
+    # `GET /repos/{o}/{r}/issues` (rate-limit resource `core`, not `search`; checked with GH_DEBUG=api,
+    # gh 2.104.0) — and confirm each candidate by number.
+    _ROW_JQ = ('{number, title, body, state: (.state | ascii_upcase), '
+               'stateReason: ((.state_reason // "") | ascii_upcase), labels: [.labels[].name], '
+               'created_at, updated_at, pr: (.pull_request != null)}')
+
+    def issue_rows(self, label=None, state="all", since=None):
+        """Every Issue (PRs dropped) with `label`, newest first, all pages; `since` = ISO time (GitHub
+        filters on updated_at ≥ since — a created Issue's updated_at is ≥ its creation)."""
+        def quote(v, safe=""):         # RFC 3986 unreserved kept (no urllib: guildcore makes no network import)
+            return "".join(chr(c) if (chr(c).isalnum() and c < 128) or chr(c) in "-._~" else "%%%02X" % c
+                           for c in v.encode("utf-8"))
+        q = "state=%s&sort=created&direction=desc&per_page=100" % state
+        if label:
+            q += "&labels=%s" % quote(label, safe="")
+        if since:
+            q += "&since=%s" % quote(since, safe="")
+        out = self._gh(["gh", "api", "--paginate", "repos/%s/issues?%s" % (self.owner_repo(), q),
+                        "--jq", ".[] | " + self._ROW_JQ])
+        rows = [json.loads(ln) for ln in out.split("\n") if ln.strip()]
+        return [r for r in rows if not r.pop("pr", False)]
+
+    def issue_row(self, n):
+        """One Issue's REST row by number (`GET /repos/{o}/{r}/issues/N` — never an index)."""
+        out = self._gh(["gh", "api", "repos/%s/issues/%d" % (self.owner_repo(), int(n)), "--jq", self._ROW_JQ])
+        r = json.loads(out)
+        r.pop("pr", None)
+        return r
+
     def issue_list(self, state="open", label=None, limit=200):
         argv = ["gh", "issue", "list", "--state", state, "--limit", str(limit),
                 "--json", "number,title,body,labels,state,stateReason"]
@@ -168,6 +202,12 @@ class GhCli(object):
 
 
 class FakeGh(object):
+    """`index_lag` (K4r3-B1) models GitHub's search index: when set, an Issue created through FakeGhWrite
+    stays invisible to the SEARCH-backed reads (`issue_search`, `issue_list(label=…)` — real gh sends
+    `--label` through IssueSearch) for that many such reads; `unindexed` holds the per-Issue counters
+    (a test may set them to model a partial index). The REST reads (`issue_rows`, `issue_row`) are
+    always consistent, like GitHub's database-backed list."""
+
     def __init__(self, fixture):
         if isinstance(fixture, str):
             with open(fixture, encoding="utf-8") as fh:
@@ -175,6 +215,15 @@ class FakeGh(object):
         self.fx = fixture
         self.repo = fixture.get("repo", "o/r")
         self.calls = []
+        self.index_lag = None
+        self.unindexed = {}
+
+    def _search_visible(self):
+        """One search-backed read: the Issues the index does not know yet are hidden; time passes."""
+        hidden = set(k for k, v in self.unindexed.items() if v > 0)
+        for k in hidden:
+            self.unindexed[k] -= 1
+        return lambda k: str(k) not in hidden
 
     def _issue(self, n):
         it = self.fx.get("issues", {}).get(str(int(n)))
@@ -237,8 +286,11 @@ class FakeGh(object):
     def issue_search(self, text, limit=50):
         self.calls.append(("issue_search", text))
         out = []
+        seen = self._search_visible()
         for k in sorted(self.fx.get("issues", {}), key=int):
             it = self.fx["issues"][k]
+            if not seen(k):
+                continue
             if text in (it.get("body") or "") or text in (it.get("title") or ""):
                 out.append({"number": int(k), "title": it.get("title"), "body": it.get("body"),
                             "state": it.get("state", "OPEN"), "labels": it.get("labels", [])})
@@ -263,9 +315,10 @@ class FakeGh(object):
     def issue_list(self, state="open", label=None, limit=200):
         self.calls.append(("issue_list", state, label))
         rows = []
+        seen = self._search_visible() if label else (lambda k: True)     # gh: --label = IssueSearch
         for k in sorted(self.fx.get("issues", {}), key=int):
             it = self.fx["issues"][k]
-            if "/pull/" in (it.get("url") or ""):
+            if "/pull/" in (it.get("url") or "") or not seen(k):
                 continue
             st = (it.get("state") or "OPEN").upper()
             if state == "open" and st != "OPEN":
@@ -279,6 +332,38 @@ class FakeGh(object):
             row.setdefault("number", int(k))
             rows.append(row)
         return rows[:limit]
+
+    @staticmethod
+    def _row(k, it):
+        return {"number": int(it.get("number") or k), "title": it.get("title") or "", "body": it.get("body") or "",
+                "state": (it.get("state") or "OPEN").upper(),
+                "stateReason": (it.get("stateReason") or "").upper().replace(" ", "_"),
+                "labels": [lb["name"] if isinstance(lb, dict) else lb for lb in it.get("labels", [])],
+                "created_at": it.get("created_at"), "updated_at": it.get("updated_at") or it.get("created_at")}
+
+    def issue_rows(self, label=None, state="all", since=None):
+        self.calls.append(("issue_rows", label, state, since))
+        rows = []
+        for k in sorted(self.fx.get("issues", {}), key=int, reverse=True):     # newest first
+            it = self.fx["issues"][k]
+            if "/pull/" in (it.get("url") or ""):
+                continue
+            r = self._row(k, it)
+            if state in ("open", "closed") and r["state"] != state.upper():
+                continue
+            if label and label not in r["labels"]:
+                continue
+            if since and r["updated_at"] and r["updated_at"] < since:
+                continue
+            rows.append(r)
+        return rows
+
+    def issue_row(self, n):
+        self.calls.append(("issue_row", n))
+        it = self._issue(n)
+        if "/pull/" in (it.get("url") or ""):
+            raise GhError("HTTP 404: Not Found")
+        return self._row(n, it)
 
 
 # ---- write side (K1) ------------------------------------------------------------------------------
@@ -489,7 +574,10 @@ class FakeGhWrite(object):
             self.fake.fx.setdefault("issues", {})[str(n)] = {
                 "number": n, "title": title, "body": body, "state": "OPEN",
                 "labels": [{"name": l} for l in labels], "comments": [], "timeline": [],
+                "created_at": self._now(), "updated_at": self._now(),
                 "author_association": "OWNER"}          # the engine writes with the operator's token
+            if self.fake.index_lag is not None:
+                self.fake.unindexed[str(n)] = self.fake.index_lag     # search sees it only later (K4r3-B1)
         return {"number": n, "html_url": "https://github.com/%s/issues/%d" % (self.fake.repo, n)}
 
     def close_issue(self, n, reason):

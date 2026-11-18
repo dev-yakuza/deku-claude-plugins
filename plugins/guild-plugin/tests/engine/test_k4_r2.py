@@ -80,7 +80,10 @@ class M1(unittest.TestCase):
         self.assertEqual(n["n"], 2)                                  # never re-sent
         self.assertNotIn("issue_search", [c[0] for c in h.gh.calls])
 
-    def test_failure_before_landing_is_retried_once_from_the_listing(self):
+    def test_failure_before_landing_is_never_resent_while_unknown(self):
+        # K4r3-B1 (supersedes r2's "retried once from the listing"): a transient failure is ambiguous —
+        # the token is not in the REST list → a person, no second POST; after the settle window the
+        # resume knows it never landed and creates it
         h = design_h(self, cast="", ui="false", roles=[tester_ok(self, (1, 2)), techlead_ok(self, SPLIT)],
                      judges={"SPLIT": split_dec()})
         stale_search(h.gh)
@@ -93,14 +96,23 @@ class M1(unittest.TestCase):
                 raise GhError("HTTP 502: Bad Gateway")                # nothing created
             return orig(title, body, labels)
         h.w.create_issue = fails_then_lands
+        r = D.run(h.p)
+        self.assertEqual(r.kind, StageResult.PAUSE)
+        self.assertIn("nothing is re-created while that is unknown", r.line)
+        self.assertEqual((kids_of(h), n["n"]), ([8], 2))
+        h.p.writer.labels_apply(7, remove=["guild:needs-human"])
+        for e in h.journal.entries:                                   # ten minutes later
+            if e.get("op") == "issue:create":
+                e["t"] = "2026-11-15T00:00:00Z"
         self.assertEqual(D.run(h.p).kind, StageResult.SPLIT)
-        self.assertEqual(kids_of(h), [8, 9])
+        self.assertEqual((kids_of(h), n["n"]), ([8, 9], 3))
 
-    def test_writer_create_dedups_by_label_listing(self):
+    def test_writer_create_dedups_by_journal_and_token(self):
         gh = stale_search(FakeGh({"repo": "o/r", "issues": {"7": {"number": 7, "body": "", "labels": []}}}))
+        gh.index_lag = 10 ** 6
         clock = __import__("_k1").Clock()
         fw = FakeGhWrite(gh, clock)
-        w = GhWriter(gh, fw, sleep=lambda s: None)
+        w = GhWriter(gh, fw, sleep=lambda s: None, clock=clock)
         orig = fw.create_issue
 
         def lands_then_fails(title, body, labels=()):
@@ -112,19 +124,21 @@ class M1(unittest.TestCase):
         self.assertEqual(sorted(gh.fx["issues"]), ["7", "8"])
         fw.create_issue = orig
         self.assertEqual(w.issue_create("t", "b", labels=["guild:child"], key="7-a"), (8, False))
-        n2, _c = w.issue_create("t", "b", labels=(), key="7-b")    # unlabelled: the whole listing, still not search
+        n2, _c = w.issue_create("t", "b", labels=(), key="7-b")    # unlabelled: still the journal
         self.assertEqual(w.issue_create("t", "b", labels=(), key="7-b"), (n2, False))
+        self.assertFalse([c for c in gh.calls if c[0] in ("issue_search", "issue_list")])
 
-    def test_restart_verify_intent_uses_the_listing(self):
+    def test_restart_verify_intent_uses_the_token(self):
         gh = stale_search(FakeGh({"repo": "o/r", "issues": {}}))
+        gh.index_lag = 10 ** 6
         clock = __import__("_k1").Clock()
-        w = GhWriter(gh, FakeGhWrite(gh, clock), sleep=lambda s: None)
+        w = GhWriter(gh, FakeGhWrite(gh, clock), sleep=lambda s: None, clock=clock)
         w.issue_create("t", "b", labels=["guild:child"], key="7-a")
-        tag = "<!-- guild:slice-key 7-a -->"
-        self.assertTrue(w.verify_intent({"op": "issue:create", "key_tag": tag, "find_label": "guild:child"}))
-        self.assertFalse(w.verify_intent({"op": "issue:create", "key_tag": "<!-- guild:slice-key 7-zz -->",
-                                          "find_label": "guild:child"}))
-        self.assertNotIn("issue_search", [c[0] for c in gh.calls])
+        it = [e for e in w._ij().entries if e["kind"] == "intent"][0]
+        fresh = GhWriter(gh, FakeGhWrite(gh, clock), sleep=lambda s: None, clock=clock)   # no journal: the token
+        self.assertTrue(fresh.verify_intent(it))
+        self.assertFalse(fresh.verify_intent(dict(it, token="0" * 32)))
+        self.assertFalse([c for c in gh.calls if c[0] in ("issue_search", "issue_list")])
 
     def test_two_live_children_with_one_key_go_to_a_person(self):
         body = "x\n\nParent Issue: #7\n\n<!-- guild:slice-key 7-data -->\n"
@@ -134,6 +148,7 @@ class M1(unittest.TestCase):
                      judges={"SPLIT": split_dec()})
         self.assertEqual(D.run(h.p).kind, StageResult.SPLIT)   # records the plan, creates #8 #9
         h.gh.fx["issues"]["10"] = dict(kid, number=10)            # a duplicate of 7-data appears
+        h.seed_child(10, h.gh.fx["issues"]["10"])                  # … journaled as the engine's own
         r = D.make_children(h.p, None, _rec(h), json.loads(RO.get(h.p, D.PLAN_FILE)), [], {}, True)
         self.assertEqual(r.kind, StageResult.PAUSE)
         self.assertIn("duplicate child Issues for one slice key: 7-data → #8, #10", r.line)

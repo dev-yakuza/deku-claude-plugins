@@ -166,9 +166,16 @@ def list_snapshots(gh, state="open", label=None, limit=200):
 
 
 def discover_children(gh, parent):
-    """status.md split-parent discovery: `--label guild:child --state all --limit 200`, body
+    """status.md split-parent discovery (DISPLAY only — the engine knows its own children by its journal,
+    `stages.base.own_children`): every `guild:child` Issue through the REST issues list (database-backed,
+    all pages — K4r3-B1/m3: `gh issue list --label` is the search index and stopped at 200), body
     `Parent Issue: #<parent>([^0-9]|$)`, sorted by number."""
     rx = re.compile(r"Parent Issue: #%d(?:[^0-9]|$)" % int(parent))
-    rows = [r for r in list_snapshots(gh, state="all", label="guild:child", limit=200)
-            if rx.search(r["body"])]
+    rows = []
+    for it in gh.issue_rows(label="guild:child", state="all"):
+        if not rx.search(it.get("body") or ""):
+            continue
+        rows.append({"number": it.get("number"), "title": it.get("title") or "", "state": it.get("state") or "",
+                     "stateReason": it.get("stateReason") or "", "body": it.get("body") or "",
+                     "labels": label_names(it.get("labels")), "derived": derive(it.get("labels"))})
     return sorted(rows, key=lambda r: r["number"])

@@ -66,10 +66,29 @@ def cleanup(p, kids):
     return done
 
 
+def _kids(p):
+    """K4r3-B1/m1/m5: the parent's own children (journal numbers, read by number), withdrawn (closed as
+    not planned — a re-split) left out; two live children with one slice key → a person (never drive the
+    same AC twice). (kids, None) or (None, StageResult)."""
+    from workflows.dev.stages import design as D
+    kids, stop = B.own_children_or_stop(p, STAGE)
+    if stop is not None:
+        return None, stop
+    dups = D.duplicate_keys(kids)
+    if dups:
+        return None, B.fail(p, STAGE, "duplicate child Issues for one slice key: %s — close the extra one as not "
+                            "planned, then /gld resume %d" % ("; ".join("%s → %s" % (k, ", ".join("#%d" % n for n in v))
+                                                                       for k, v in sorted(dups.items())), p.issue))
+    return kids, None
+
+
 def run(p, drive, only=None):
-    kids = ST.discover_children(p.gh, p.issue)
+    kids, stop = _kids(p)
+    if stop is not None:
+        return stop
     if not kids:
-        return B.fail(p, STAGE, "parent #%d is at guild:children but no child Issues reference it" % p.issue)
+        return B.fail(p, STAGE, "parent #%d is at guild:children but this engine's journal holds no live child "
+                      "Issue of it (another host or a fresh clone — K5 moves the split record to GitHub)" % p.issue)
     B.note_untrusted(p, STAGE)
     B.register_exact(p)
     from workflows.dev.stages import analyze as A
@@ -81,7 +100,9 @@ def run(p, drive, only=None):
     if res is not None:
         if res.get("choice") == "yes":
             fix_child(p, q, trusted)                              # K4r1-m7: create (idempotent by key) BEFORE the
-            kids = ST.discover_children(p.gh, p.issue)    # answer is consumed — a crash re-creates nothing
+            kids, stop = _kids(p)                                 # answer is consumed — a crash re-creates nothing
+            if stop is not None:
+                return stop
         B.mark_applied(p, STAGE, res)
     cleaned = cleanup(p, kids)
     pending = [c for c in kids if "guild:done" not in _labels(c) and c["number"] not in cleaned]
@@ -99,7 +120,10 @@ def run(p, drive, only=None):
         note = "자식 #%d 에서 멈춤 (%s) — 남은 자식: %s. %s" % (c["number"], r.token(), rest, STOP_LINE)
         r.notes = list(r.notes) + [note]
         return r
-    return integrate(p, ST.discover_children(p.gh, p.issue), trusted)
+    kids, stop = _kids(p)
+    if stop is not None:
+        return stop
+    return integrate(p, kids, trusted)
 
 
 def _child_facts(p, c):

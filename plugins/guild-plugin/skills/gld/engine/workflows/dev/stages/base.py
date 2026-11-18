@@ -403,6 +403,17 @@ def role_outcome(p, stage, role, res):
         return ask(p, stage, q, "%s was refused a command — %s" % (role, cmd), {
             "cause_kind": "env", "env_key": "other", "line": line, "token_cause": line,
             "prose": 'config.engine.role_allow.%s 에 "<pattern>" 을 추가하면 다음부터 허용' % role})
+    if st == "DRIFT" and "not run" in (res.notes or []):
+        # K4r3-m4(a): the role never started — the worktree was already wrong; the line names the
+        # worktree, not the role (no scope violation in the role's ledger). An overlay left there is env.
+        paths = ", ".join(str(v) for v in res.violations[:5]) or (res.line or "")
+        overlay = all(str(v).startswith("lefthook overlay ") for v in res.violations or [])
+        line = "%s not started — the worktree needs a person first: %s" % (role, paths)
+        if overlay and res.violations:
+            return pause(p, stage, "env", line, "env: other — %s" % line, env_key="other") if p.unattended else \
+                StageResult(StageResult.FAIL, line=line, fail_class="defect")
+        return pause(p, stage, "defect", line, line) if p.unattended else \
+            StageResult(StageResult.FAIL, line=line, fail_class="defect")
     if st in ("SCOPE", "DRIFT"):
         paths = ", ".join(str(v) for v in res.violations[:5]) or (res.line or "")
         line = "%s wrote outside its scope — %s" % (role, paths)
@@ -433,3 +444,45 @@ def one_line(text, cap=300):
 
 def neutral(text):
     return markers.value(text)
+
+
+# ---- a split parent's own children (K4r3-B1 / m1 / m5) -------------------------------------------------
+
+def own_children(p, include_withdrawn=False):
+    """The child Issues THIS engine created for `p.issue`: the numbers its journal holds (keys
+    `<parent>-…`), each read by number (`GET /repos/{o}/{r}/issues/N`) — never a listing, never the
+    search index, never author association. An unresolved create (lost reply / crash between POST and
+    record) is resolved first by its token through the REST list (`GhWriter.resolve_creates`; still
+    unknown → `GhWriteError("ambiguous")`). A child a person closed as not planned is withdrawn and
+    left out unless `include_withdrawn`. Rows: {number, title, body, state, stateReason, labels, key},
+    ascending."""
+    from guildcore.records.write import withdrawn
+    prefix = "%d-" % int(p.issue)
+    p.writer.resolve_creates(prefix=prefix)
+    j = p.writer._ij()
+    seen, rows = set(), []
+    for e in j.own_issues():
+        k, n = str(e.get("key") or ""), int(e["number"])
+        if not k.startswith(prefix) or n in seen:
+            continue
+        seen.add(n)
+        r = dict(p.gh.issue_row(n))
+        if withdrawn(r) and not include_withdrawn:
+            continue
+        r["key"] = k
+        rows.append(r)
+    return sorted(rows, key=lambda r: int(r["number"]))
+
+
+def own_children_or_stop(p, stage, include_withdrawn=False):
+    """(rows, None) or (None, StageResult): an unknown create stops for a person (`env: service`
+    unattended, FAIL attended) — nothing is created or driven while it is unknown; auth / rate limit
+    re-raise (exit 3 / 75)."""
+    from guildcore.adapters.gh import GhWriteError
+    try:
+        return own_children(p, include_withdrawn), None
+    except GhWriteError as ex:
+        if ex.kind in ("auth", "ratelimit"):
+            raise
+        cls = "transient" if ex.kind in ("transient", "ambiguous") else "defect"
+        return None, fail(p, stage, "child Issues of #%d — %s" % (p.issue, one_line(str(ex), 220)), cls)

@@ -28,6 +28,12 @@
 #     for partial OR unclear ∧ stakes ≥ medium, the lefthook-local overlay closed + LEFTHOOK=0 without a
 #     base + one lefthook name list, the fallback push branch, superseded/stale split plans, planted keys,
 #     the outsider mark on fix children and the 2c inputs.
+#   • review r3 (test_k4_r3.py): no search-backed read decides anything about child Issues (the fake's
+#     labelled listing AND search are stale) — journal-first creates with a token, a lost reply / crash
+#     resolved through the paginated REST list and confirmed by number, an unknown create pauses and is
+#     never re-sent, 2b's duplicate-key check, withdrawn / foreign children never driven, children known by
+#     the journal (not author association), execute's net marker only from a member body, a role that
+#     never started is not blamed, plan blocks in fences / quotes not read.
 # No test calls `claude`, a model or GitHub (a failing `gh` is first on PATH).
 #
 # Usage: bash plugins/guild-plugin/tests/engine_k4_test.sh
@@ -57,7 +63,7 @@ if [ "$RC" -ne 0 ]; then
 fi
 echo "engine K4: $PASS passed, $FAIL failed"
 # ⚠ Keep equal to the measured PASS count; raise it only when tests are added on purpose.
-ENGINE_K4_MIN_TESTS=167
+ENGINE_K4_MIN_TESTS=187
 if [ "$((PASS + FAIL))" -lt "$ENGINE_K4_MIN_TESTS" ]; then
   echo "FAIL  실행된 검사가 $((PASS + FAIL))건뿐입니다 (최소 ${ENGINE_K4_MIN_TESTS}건)."
   exit 1
