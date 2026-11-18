@@ -34,6 +34,12 @@
 #     never re-sent, 2b's duplicate-key check, withdrawn / foreign children never driven, children known by
 #     the journal (not author association), execute's net marker only from a member body, a role that
 #     never started is not blamed, plan blocks in fences / quotes not read.
+#   • review r4 (test_k4_r4.py): a create is "refused" only on a definite non-landing signal (HTTP 4xx, rate
+#     limit, not logged in) — unknown text / empty stderr / stream error / 5xx / signal take the ambiguous
+#     path for Issue, comment and PR creates; the restart check records a found create's number; an abandoned
+#     create that landed later is surfaced; deleted / transferred children stop clearly then count as
+#     withdrawn; the duplicate check by journal key; closed-as-duplicate only when verified; an unclosed fence
+#     does not hide a later plan-decision block.
 # No test calls `claude`, a model or GitHub (a failing `gh` is first on PATH).
 #
 # Usage: bash plugins/guild-plugin/tests/engine_k4_test.sh
@@ -63,7 +69,7 @@ if [ "$RC" -ne 0 ]; then
 fi
 echo "engine K4: $PASS passed, $FAIL failed"
 # ⚠ Keep equal to the measured PASS count; raise it only when tests are added on purpose.
-ENGINE_K4_MIN_TESTS=187
+ENGINE_K4_MIN_TESTS=211
 if [ "$((PASS + FAIL))" -lt "$ENGINE_K4_MIN_TESTS" ]; then
   echo "FAIL  실행된 검사가 $((PASS + FAIL))건뿐입니다 (최소 ${ENGINE_K4_MIN_TESTS}건)."
   exit 1

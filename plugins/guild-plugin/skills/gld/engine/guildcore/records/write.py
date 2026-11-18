@@ -6,6 +6,10 @@
   0 but did not land is a failure (`GhWriteError(kind="terminal")` after the one retry);
 * **transient** (429, 5xx, network) → ONE retry after 2 s, then verify again; **terminal**
   (404/422) and **auth** (401/403) → no retry, `GhWriteError` (auth → the caller exits 3);
+  an error text no rule recognises is **unknown** (K4r4-M1) — never retried, and for a create never
+  read as "refused": only `refused_before_accept` (HTTP 4xx, rate limit, gh not logged in) means
+  nothing landed; any other failed create is looked up (comment / PR by content, Issue by token) and,
+  when not found, never re-sent while unknown;
 * **journaled** — `intent` (fsync) before the call, `done` after the verified re-read, and a
   `write` line with the server id (comment id, timeline label event ids) so the engine's own
   writes are never read back as a human's (§2.5 신원 한계, K0-m10);
@@ -25,7 +29,7 @@ module asserts line 1 is a Guild marker for every comment it creates (CR-m2).
 import hashlib
 import time
 
-from guildcore.adapters.gh import GhError, GhWriteError, classify_error
+from guildcore.adapters.gh import GhError, GhWriteError, classify_error, refused_before_accept
 from guildcore.records import markers
 from guildcore.state import label_names
 
@@ -51,6 +55,17 @@ def _age_s(t, now):
     return None if a is None or b is None else b - a
 
 
+def key_of_done(e):
+    """The journal key of an intent / its done line (the issue field is the journal's own)."""
+    from guildcore.journal import KEY_FIELDS
+    return tuple(e.get(k) for k in KEY_FIELDS if k != "issue")
+
+
+def _one_line(text, cap=160):
+    t = " ".join((text or "").split()) or "no error text"
+    return t if len(t) <= cap else t[:cap - 1] + "…"
+
+
 def _final_redact(text):
     from guildcore.records.redact import redact
     return "\n".join(redact(ln) for ln in (text or "").split("\n"))
@@ -60,10 +75,20 @@ def _sha(text):
     return hashlib.sha256((text or "").encode("utf-8")).hexdigest()
 
 
+def _reason(row):
+    return (row.get("stateReason") or "").upper().replace(" ", "_")
+
+
 def withdrawn(row):
-    """An Issue a person closed as not planned — no longer the holder of its hidden key (K4r2-m4)."""
-    return ((row.get("state") or "").upper() == "CLOSED"
-            and (row.get("stateReason") or "").upper().replace(" ", "_") == "NOT_PLANNED")
+    """An Issue a person closed as not planned — no longer the holder of its hidden key (K4r2-m4).
+    Closed as DUPLICATE is withdrawn only where a caller verified a live sibling (`closed_duplicate`,
+    K4r4-m5) — on its own it is not."""
+    return (row.get("state") or "").upper() == "CLOSED" and _reason(row) == "NOT_PLANNED"
+
+
+def closed_duplicate(row):
+    """K4r4-m5: closed with GitHub's `duplicate` reason."""
+    return (row.get("state") or "").upper() == "CLOSED" and _reason(row) == "DUPLICATE"
 
 
 class GhWriter(object):
@@ -101,37 +126,40 @@ class GhWriter(object):
                 self.sleep(RETRY_DELAY_S * (2 ** i))
         return False
 
-    def _perform(self, op, target, do, verify, find=None, before_done=None, **extra):
+    def _perform(self, op, target, do, verify, find=None, before_done=None, resend=True, **extra):
         """intent (with content identifiers) → do() → verify (re-read with backoff) → done.
         A non-idempotent create is never simply re-sent: before any retry `find()` looks for
         the write having landed after all (K1-M1); `do` must RECOMPUTE from a fresh read so a
         retried PATCH never writes a stale body. `before_done()` runs between the verified
-        re-read and `done` (own-write ids land in the journal first, K1-m5)."""
+        re-read and `done` (own-write ids land in the journal first, K1-m5).
+        K4r4-M1: a failed create is looked up by `find` unless the failure is a definite refusal
+        (`refused_before_accept`); only a recognised `transient` failure that the (consistent) lookup
+        shows absent gets the one bounded re-send — an `unknown` failure is never re-sent (raised, the
+        intent left open for the restart check). `resend=False` (a create with no lookup) never re-sends."""
         it = None
         if self.journal is not None:
             it = self.journal.intent(op=op, target=str(target), **dict(self.key_ctx, **extra))
         try:
-            res = self._call(op, do, retry=find is None)
+            res = self._call(op, do, retry=find is None and resend)
         except GhWriteError as e:
-            hit = find() if (find and e.kind == "transient") else None
+            if find is None or refused_before_accept(e.message):
+                raise
+            hit = find()
             if hit is None:
-                if find and e.kind == "transient":
-                    self.sleep(RETRY_DELAY_S)
-                    hit = find()
-                if hit is None and find and e.kind == "transient":
-                    res = self._call(op, do, retry=False)        # the ONE bounded retry
-                elif hit is None:
-                    raise
-                else:
-                    res = hit
-            else:
+                self.sleep(RETRY_DELAY_S)
+                hit = find()
+            if hit is not None:
                 res = hit
+            elif e.kind == "transient" and resend:
+                res = self._call(op, do, retry=False)        # the ONE bounded retry
+            else:
+                raise
         ok = self._verify_with_backoff(op, verify, res)
         if not ok:
             hit = find() if find else None
             if hit is not None:
                 res, ok = hit, True
-            else:
+            elif resend:
                 res = self._call(op, do)
                 ok = self._verify_with_backoff(op, verify, res)
             if not ok:
@@ -163,12 +191,17 @@ class GhWriter(object):
         if op == "pr:body":
             return _sha(self.read.pr(int(tgt)).get("body") or "") == it.get("body_sha256")
         if op == "issue:create":
-            # K4r3-B1: the journaled number, else the create token through the REST list (never search)
+            # K4r3-B1: the journaled number, else the create token through the REST list (never search).
+            # K4r4-m1: a found create is RECORDED with its number here (else the closed intent would hide
+            # it from `resolve_creates` and the next `issue_create` would POST again); a settled absent one
+            # is closed `abandoned`; a young absent one raises `ambiguous` — never False, because the
+            # restart protocol's "redo" would be a second POST while the outcome is unknown.
             if not it.get("token"):
                 return False
             if any(e.get("token") == it["token"] for e in self._ij().own_issues()):
                 return True
-            return self.find_by_token(it["token"], it.get("find_label"), it.get("since")) is not None
+            self._resolve_one(it)
+            return True
         return False
 
     def _records(self, issue):
@@ -333,7 +366,7 @@ class GhWriter(object):
                 return {"number": int(res["number"]), "url": res.get("url"), "created": not res.get("found"),
                         "draft": d}
             except (GhError, GhWriteError) as e:
-                if d and "draft" in str(e).lower():
+                if d and "draft" in str(e).lower() and refused_before_accept(str(e)):  # a 422 naming draft
                     continue
                 raise
         raise GhWriteError("pr:create", "unreachable", "terminal")
@@ -413,18 +446,56 @@ class GhWriter(object):
             k = str(it.get("key") or "")
             if (prefix is not None and not k.startswith(prefix)) or (key is not None and k != key):
                 continue
-            n = self.find_by_token(it["token"], it.get("find_label"), it.get("since"), reads)
-            if n is not None:
-                self._record_issue(it, n, recovered=True)
+            if self._resolve_one(it, reads) == "found":
                 known.add(it["token"])
-                continue
-            age = _age_s(it.get("t"), j._now())
-            if age is not None and age >= self.SETTLE_S:
-                j.done(it, abandoned=True)
-                continue
-            raise GhWriteError("issue:create", "the create of %s may have landed (its reply was lost) and is not "
-                               "in the issue list yet — nothing is re-created while that is unknown" % k,
-                               "ambiguous")
+
+    def settle_at(self, it):
+        """The ISO time after which an unresolved create counts as never landed (intent + SETTLE_S)."""
+        ts = _parse_iso(it.get("t"))
+        return _iso(ts + self.SETTLE_S) if ts is not None else "?"
+
+    def _resolve_one(self, it, reads=None):
+        """One unresolved create: "found" (number journaled) | "abandoned" (absent, older than SETTLE_S) |
+        raises `GhWriteError("ambiguous")` naming the time a resume can settle it (K4r4-m3)."""
+        j = self._ij()
+        n = self.find_by_token(it["token"], it.get("find_label"), it.get("since"), reads)
+        if n is not None:
+            self._record_issue(it, n, recovered=True)
+            return "found"
+        age = _age_s(it.get("t"), j._now())
+        if age is not None and age >= self.SETTLE_S:
+            j.done(it, abandoned=True)
+            return "abandoned"
+        raise GhWriteError("issue:create", "the create of %s may have landed (its reply was lost) and is not in "
+                           "the issue list yet — nothing is re-created while that is unknown; resume after %s "
+                           "(an absent create is settled as never landed %d minutes after it was sent)"
+                           % (it.get("key"), self.settle_at(it), self.SETTLE_S // 60), "ambiguous")
+
+    def orphan_creates(self, prefix):
+        """K4r4-m2: a create the engine gave up on (`abandoned` after SETTLE_S) that landed after all — a late
+        server-side completion, a `guild:child` label a person removed during the pause, a host clock far
+        ahead. Its token is looked up in ONE unfiltered REST list read (no label: a removed label must not
+        hide it) since the oldest such intent; each hit is confirmed by number. Returns [(key, number)] of
+        those still OPEN (a person closed it → settled) and not journaled as this engine's child. No read at
+        all when there is no abandoned create under `prefix`."""
+        j = self._ij()
+        known = set(e.get("token") for e in j.own_issues())
+        closed = dict((key_of_done(e), e) for e in j.entries if e.get("kind") == "done" and e.get("abandoned"))
+        aband = [it for it in j.entries if it.get("kind") == "intent" and it.get("op") == "issue:create"
+                 and it.get("token") and it.get("token") not in known
+                 and str(it.get("key") or "").startswith(prefix) and key_of_done(it) in closed]
+        if not aband:
+            return []
+        since = min((it.get("since") or "") for it in aband) or None
+        rows = self._call("issue:find", lambda: self.read.issue_rows(label=None, state="open", since=since))
+        out = []
+        for it in aband:
+            for r in sorted((r for r in rows or [] if it["token"] in (r.get("body") or "")), key=lambda r: int(r["number"])):
+                row = self._call("issue:row", lambda: self.read.issue_row(int(r["number"])))
+                if it["token"] in (row.get("body") or "") and (row.get("state") or "").upper() != "CLOSED":
+                    out.append((str(it.get("key")), int(row["number"])))
+                    break
+        return sorted(set(out), key=lambda x: x[1])
 
     def issue_create(self, title, body, labels=(), key=None, key_kind="slice-key", members=None):
         """Create once (A-F23, K4r3-B1 — journal first):
@@ -433,15 +504,18 @@ class GhWriter(object):
            not closed as not planned) is returned;
         3. else intent (key, a fresh unique token embedded in the body, the list's `since`) is journaled
            and fsynced, the POST is sent once, and the answered number is journaled IMMEDIATELY; a
-           transient failure is resolved by the token through the REST list (bounded backoff) — found →
-           that number; not found → `GhWriteError("ambiguous")`, never a second POST. Refused writes
-           (auth, rate limit, 4xx) never landed: the intent is closed and the error raised.
+           failure that is not a definite refusal (K4r4-M1: 5xx, timeout, stream error, empty stderr,
+           unknown text) is resolved by the token through the REST list (bounded backoff) — found → that
+           number; not found → `GhWriteError("ambiguous")`, never a second POST. Only a definite refusal
+           (`refused_before_accept`: HTTP 4xx, rate limit, gh not logged in) closes the intent as refused.
         No search-backed read anywhere. `members` is accepted for old callers and ignored (m5: the
         engine's own Issues are known by the journal, not by author association). Returns (number, created)."""
         if key is None:
+            # no lookup for an unkeyed create → never re-sent (K4r4-M1: a failure may have landed)
             res = self._perform("issue:create", title, lambda: self.write.create_issue(title, body, labels),
                                 lambda r: bool(r and r.get("number")) and
-                                (self.read.issue(r["number"]).get("body") or "") == body, body_sha256=_sha(body))
+                                (self.read.issue(r["number"]).get("body") or "") == body, resend=False,
+                                body_sha256=_sha(body))
             return int(res["number"]), True
         label = ("guild:child" if "guild:child" in labels else list(labels)[0]) if labels else None
         tag = "<!-- guild:%s %s -->" % (key_kind, key)
@@ -467,14 +541,18 @@ class GhWriter(object):
             n = int(res["number"])
             self._record_issue(it, n)                       # the number, before anything else can fail
         except GhWriteError as e:
-            if e.kind != "transient":
-                j.done(it, refused=e.kind)                  # the server refused it: nothing landed
+            if refused_before_accept(e.message):
+                # K4r4-M1: ONLY a definite refusal (HTTP 4xx, rate limit, not logged in) closes the intent
+                j.done(it, refused=e.kind)
                 raise
+            # anything else (5xx, timeout, stream error, empty stderr, a signal, an unknown text) may have
+            # landed: the token through the REST list, else a person — never a second POST
             n = self.find_by_token(token, label, it.get("since"))
             if n is None:
                 raise GhWriteError("issue:create", "the create of %s failed ambiguously (%s) and the issue list "
-                                   "does not show it — nothing is re-created while that is unknown"
-                                   % (key, e.message), "ambiguous")
+                                   "does not show it — nothing is re-created while that is unknown; resume after %s "
+                                   "(an absent create is settled as never landed %d minutes after it was sent)"
+                                   % (key, _one_line(e.message), self.settle_at(it), self.SETTLE_S // 60), "ambiguous")
             self._record_issue(it, n, recovered=True)
             return n, False
         if not self._verify_with_backoff("issue:create", lambda _r: token in

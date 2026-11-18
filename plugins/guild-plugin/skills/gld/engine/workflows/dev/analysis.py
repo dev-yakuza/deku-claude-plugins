@@ -80,20 +80,25 @@ def _block(body, open_tag, close_tag=None):
 
 def unquoted(body):
     """K4r3-m6: the body with code fences (``` / ~~~) and `>` quote lines blanked — a member quoting the
-    close grammar as an example, or pasting someone else's text, does not write a sprint decision."""
-    out, fence = [], None
-    for ln in (body or "").split("\n"):
-        st = ln.lstrip()
-        if fence is not None:
-            if st.startswith(fence):
-                fence = None
-            out.append("")
-            continue
+    close grammar as an example, or pasting someone else's text, does not write a sprint decision.
+    K4r4-m6: a block is ignored only when its OPENING line sits inside a fence. A fence that never closes
+    (a pasted log cut short) ends at the next line that opens a plan-decision block — sprint plan appends
+    its block at the end of the body, after whatever the member pasted — or at EOF."""
+    lines = (body or "").split("\n")
+    out, i = [], 0
+    while i < len(lines):
+        st = lines[i].lstrip()
         if st.startswith("```") or st.startswith("~~~"):
             fence = st[:3]
-            out.append("")
+            close = next((j for j in range(i + 1, len(lines)) if lines[j].lstrip().startswith(fence)), None)
+            if close is None:
+                close = next((j - 1 for j in range(i + 1, len(lines)) if lines[j].lstrip().startswith(PLAN_OPEN)),
+                             len(lines) - 1)
+            out.extend([""] * (close - i + 1))
+            i = close + 1
             continue
-        out.append("" if st.startswith(">") else ln)
+        out.append("" if st.startswith(">") else lines[i])
+        i += 1
     return "\n".join(out)
 
 

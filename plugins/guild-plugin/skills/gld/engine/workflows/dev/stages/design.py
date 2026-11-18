@@ -92,21 +92,31 @@ def specialist_file(role):
     return "ux.md" if role == "designer" else "%s.md" % role
 
 
+def child_key(c):
+    """K4r4-m4: a child's slice key is its JOURNAL key (`own_children` rows carry it) — a body comment a
+    person edited away must not hide a child from the duplicate check. The body tag only for rows that are
+    not the engine's own (none reach the stages since r3)."""
+    if c.get("key"):
+        return c["key"]
+    m = SLICE_KEY_RE.search(c.get("body") or "")
+    return m.group(1) if m else None
+
+
 def duplicate_keys(children):
     seen = {}
     for c in children:
-        m = SLICE_KEY_RE.search(c.get("body") or "")
-        if m:
-            seen.setdefault(m.group(1), []).append(c["number"])
+        k = child_key(c)
+        if k:
+            seen.setdefault(k, []).append(c["number"])
     return dict((k, sorted(v)) for k, v in seen.items() if len(v) > 1)
 
 
 def existing_keys(children):
     out = {}
     for c in children:
-        m = SLICE_KEY_RE.search(c.get("body") or "")
-        if m:
-            out[m.group(1)] = c["number"]
+        k = child_key(c)
+        if k:
+            out[k] = c["number"]
     return out
 
 
@@ -531,8 +541,9 @@ def make_children(p, e, rec, plan, children, answers, trusted):
                 raise                                   # the FSM's exit 3 / 75
             # a lost reply was already looked up by its token (REST list, backoff) inside the writer;
             # "ambiguous" = still unknown → a person, and nothing is sent again
+            # K4r4-m3: 1-based slice counter; the message names when a resume can settle an unknown create
             return B.fail(p, STAGE, "child creation failed at slice %s (%d/%d) — %s" % (
-                s["key"], i, len(slices), B.one_line(str(ex), 200)),
+                s["key"], i + 1, len(slices), B.one_line(str(ex), 320)),
                 "transient" if ex.kind in ("transient", "ambiguous") else "defect")
         have[full] = n
     now, stop = B.own_children_or_stop(p, STAGE)
@@ -541,7 +552,7 @@ def make_children(p, e, rec, plan, children, answers, trusted):
     dups = duplicate_keys(now)
     if dups:
         # K4r2-M1: two live children with one slice key would run the same AC twice — a person's
-        return B.fail(p, STAGE, "duplicate child Issues for one slice key: %s — close the extra one as not planned, "
+        return B.fail(p, STAGE, "duplicate child Issues for one slice key: %s — close the extra one as not planned (or duplicate), "
                       "then /gld resume %d" % ("; ".join("%s → %s" % (k, ", ".join("#%d" % n for n in v))
                                                           for k, v in sorted(dups.items())), p.issue))
     got = existing_keys(now)

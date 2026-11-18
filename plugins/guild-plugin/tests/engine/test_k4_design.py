@@ -247,7 +247,7 @@ class Split(unittest.TestCase):
         h.w.create_issue = flaky
         r = D.run(h.p)
         self.assertEqual(r.kind, StageResult.PAUSE)                         # K4r1-M3: through B.fail
-        self.assertIn("child creation failed at slice ui (1/2)", r.line)
+        self.assertIn("child creation failed at slice ui (2/2)", r.line)      # K4r4-m3: 1-based
         self.assertIn("guild:design", h.labels())
         self.assertIn("guild:needs-human", h.labels())
         self.assertIn("defect: engine FAIL — child creation failed", h.body_with("needs-human"))

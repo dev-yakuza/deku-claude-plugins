@@ -448,6 +448,19 @@ def neutral(text):
 
 # ---- a split parent's own children (K4r3-B1 / m1 / m5) -------------------------------------------------
 
+class ChildrenStop(Exception):
+    """K4r4-m2/m4: the engine's child set needs a person (an orphan create, a deleted/transferred child)."""
+
+    def __init__(self, line, cls="defect"):
+        Exception.__init__(self, line)
+        self.line, self.cls = line, cls
+
+
+def _gone_error(text):
+    import re
+    return bool(re.search(r"\b(404|410)\b|Not Found|Could not resolve to|was deleted|does not exist", text or "", re.I))
+
+
 def own_children(p, include_withdrawn=False):
     """The child Issues THIS engine created for `p.issue`: the numbers its journal holds (keys
     `<parent>-…`), each read by number (`GET /repos/{o}/{r}/issues/N`) — never a listing, never the
@@ -455,34 +468,89 @@ def own_children(p, include_withdrawn=False):
     record) is resolved first by its token through the REST list (`GhWriter.resolve_creates`; still
     unknown → `GhWriteError("ambiguous")`). A child a person closed as not planned is withdrawn and
     left out unless `include_withdrawn`. Rows: {number, title, body, state, stateReason, labels, key},
-    ascending."""
-    from guildcore.records.write import withdrawn
+    ascending.
+    K4r4: a create the engine had abandoned that landed after all (`GhWriter.orphan_creates`) → a person
+    (`ChildrenStop`), never silently ignored (m2). A child read that fails as gone (404/410) or answers a
+    different number / repository (deleted or transferred, m4) → recorded and a person; on the resume that
+    follows it counts as withdrawn — no journal hand-edit, no crash loop. Closed as DUPLICATE is withdrawn
+    only when a live child holds the same journal key (m5); otherwise the row carries `closed_as`."""
+    from guildcore.adapters.gh import GhError, GhWriteError, classify_error
+    from guildcore.records.write import closed_duplicate, withdrawn
     prefix = "%d-" % int(p.issue)
     p.writer.resolve_creates(prefix=prefix)
+    orphans = p.writer.orphan_creates(prefix)
+    if orphans:
+        raise ChildrenStop("child Issue(s) of #%d outside the engine's journal: %s — a create the engine had given up "
+                           "on (absent %d minutes after it was sent) landed after all; the engine does not drive it. "
+                           "Close the extra one as not planned, then /gld resume %d" % (
+                               p.issue, ", ".join("%s → #%d" % (k, n) for k, n in orphans),
+                               p.writer.SETTLE_S // 60, p.issue))
     j = p.writer._ij()
-    seen, rows = set(), []
+    gone_seen = set(int(e["number"]) for e in j.entries
+                    if e.get("kind") == "write" and e.get("op") == "issue-gone" and e.get("number") is not None)
+    repo = (p.gh.owner_repo() or "").lower() if hasattr(p.gh, "owner_repo") else ""
+    seen, rows, gone_now = set(), [], []
     for e in j.own_issues():
         k, n = str(e.get("key") or ""), int(e["number"])
         if not k.startswith(prefix) or n in seen:
             continue
         seen.add(n)
-        r = dict(p.gh.issue_row(n))
-        if withdrawn(r) and not include_withdrawn:
-            continue
+        why = None
+        try:
+            r = dict(p.gh.issue_row(n))
+        except GhError as ex:
+            kind = classify_error(str(ex))
+            if kind in ("auth", "ratelimit"):
+                raise
+            if not _gone_error(str(ex)):
+                raise GhWriteError("issue:row", "child #%d: %s" % (n, one_line(str(ex), 160)), kind)
+            r, why = {"number": n}, "not found (deleted?)"
+        if why is None and int(r.get("number") or -1) != n:
+            why = "answered as #%s (transferred?)" % r.get("number")
+        if why is None and r.get("repo") and repo and str(r["repo"]).lower() != repo:
+            why = "now in %s (transferred)" % r["repo"]
+        if why is not None:
+            if n not in gone_seen:
+                gone_now.append((k, n, why))
+                continue
+            r = {"number": n, "title": "", "body": "", "state": "CLOSED", "stateReason": "NOT_PLANNED",
+                 "labels": [], "gone": True}
         r["key"] = k
         rows.append(r)
-    return sorted(rows, key=lambda r: int(r["number"]))
+    if gone_now:
+        for k, n, why in gone_now:
+            j.own_write("issue-gone", key=k, number=n, why=why)
+        raise ChildrenStop("child Issue(s) of #%d gone from this repository: %s — recorded; /gld resume %d counts "
+                           "%s as withdrawn (the same as closing it as not planned). Restore the Issue first if "
+                           "it must still be driven" % (
+                               p.issue, "; ".join("#%d (%s) %s" % (n, k, why) for k, n, why in gone_now),
+                               p.issue, "it" if len(gone_now) == 1 else "them"))
+    live_keys = set(r["key"] for r in rows if not withdrawn(r) and not closed_duplicate(r))
+    out = []
+    for r in rows:
+        if closed_duplicate(r):
+            if r["key"] in live_keys:
+                r["stateReason"] = "NOT_PLANNED"          # verified: a live child holds its key
+                r["closed_as"] = "duplicate (verified)"
+            else:
+                r["closed_as"] = "duplicate (no live child holds %s)" % r["key"]
+        if withdrawn(r) and not include_withdrawn:
+            continue
+        out.append(r)
+    return sorted(out, key=lambda r: int(r["number"]))
 
 
 def own_children_or_stop(p, stage, include_withdrawn=False):
     """(rows, None) or (None, StageResult): an unknown create stops for a person (`env: service`
     unattended, FAIL attended) — nothing is created or driven while it is unknown; auth / rate limit
-    re-raise (exit 3 / 75)."""
+    re-raise (exit 3 / 75); an orphan / gone child (`ChildrenStop`) → a person (K4r4-m2/m4)."""
     from guildcore.adapters.gh import GhWriteError
     try:
         return own_children(p, include_withdrawn), None
+    except ChildrenStop as ex:
+        return None, fail(p, stage, ex.line, ex.cls)
     except GhWriteError as ex:
         if ex.kind in ("auth", "ratelimit"):
             raise
         cls = "transient" if ex.kind in ("transient", "ambiguous") else "defect"
-        return None, fail(p, stage, "child Issues of #%d — %s" % (p.issue, one_line(str(ex), 220)), cls)
+        return None, fail(p, stage, "child Issues of #%d — %s" % (p.issue, one_line(str(ex), 260)), cls)

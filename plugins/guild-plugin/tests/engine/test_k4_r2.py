@@ -137,7 +137,11 @@ class M1(unittest.TestCase):
         it = [e for e in w._ij().entries if e["kind"] == "intent"][0]
         fresh = GhWriter(gh, FakeGhWrite(gh, clock), sleep=lambda s: None, clock=clock)   # no journal: the token
         self.assertTrue(fresh.verify_intent(it))
-        self.assertFalse(fresh.verify_intent(dict(it, token="0" * 32)))
+        # K4r4-m1: an absent young create is never "redo" (a second POST) — it raises ambiguous
+        from guildcore.adapters.gh import GhWriteError
+        with self.assertRaises(GhWriteError) as cm:
+            fresh.verify_intent(dict(it, token="0" * 32))
+        self.assertEqual(cm.exception.kind, "ambiguous")
         self.assertFalse([c for c in gh.calls if c[0] in ("issue_search", "issue_list")])
 
     def test_two_live_children_with_one_key_go_to_a_person(self):

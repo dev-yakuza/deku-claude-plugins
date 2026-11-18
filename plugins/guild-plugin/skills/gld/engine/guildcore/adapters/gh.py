@@ -168,7 +168,8 @@ class GhCli(object):
     # gh 2.104.0) — and confirm each candidate by number.
     _ROW_JQ = ('{number, title, body, state: (.state | ascii_upcase), '
                'stateReason: ((.state_reason // "") | ascii_upcase), labels: [.labels[].name], '
-               'created_at, updated_at, pr: (.pull_request != null)}')
+               'created_at, updated_at, pr: (.pull_request != null), '
+               'repo: ((.repository_url // "") | sub("^.*/repos/"; ""))}')     # K4r4-m4: a transferred Issue
 
     def issue_rows(self, label=None, state="all", since=None):
         """Every Issue (PRs dropped) with `label`, newest first, all pages; `since` = ISO time (GitHub
@@ -339,7 +340,8 @@ class FakeGh(object):
                 "state": (it.get("state") or "OPEN").upper(),
                 "stateReason": (it.get("stateReason") or "").upper().replace(" ", "_"),
                 "labels": [lb["name"] if isinstance(lb, dict) else lb for lb in it.get("labels", [])],
-                "created_at": it.get("created_at"), "updated_at": it.get("updated_at") or it.get("created_at")}
+                "created_at": it.get("created_at"), "updated_at": it.get("updated_at") or it.get("created_at"),
+                "repo": it.get("repo")}
 
     def issue_rows(self, label=None, state="all", since=None):
         self.calls.append(("issue_rows", label, state, since))
@@ -369,7 +371,8 @@ class FakeGh(object):
 # ---- write side (K1) ------------------------------------------------------------------------------
 
 class GhWriteError(Exception):
-    """A failed state mutation (Section F). `kind` = auth | terminal | transient."""
+    """A failed state mutation (Section F). `kind` = auth | ratelimit | terminal | transient | unknown
+    (an error text no rule recognises, K4r4-M1) | ambiguous (a create whose landing is unknown)."""
 
     def __init__(self, op, message, kind):
         Exception.__init__(self, "gh %s failed — %s" % (op, message))
@@ -393,8 +396,11 @@ _RATELIMIT = re.compile(r"rate limit|secondary rate|abuse detection|\b429\b|Retr
 
 
 def classify_error(text):
-    """auth | ratelimit | terminal | transient. Rate limits are checked FIRST: GitHub answers a
-    secondary limit with 403, which must not read as an auth failure (K1-B6)."""
+    """auth | ratelimit | terminal | transient | unknown. Rate limits are checked FIRST: GitHub answers a
+    secondary limit with 403, which must not read as an auth failure (K1-B6). An error text no rule
+    recognises (HTTP/2 stream error, empty stderr, a signal, an unmapped 5xx …) is `unknown` — never
+    "terminal" (K4r4-M1): callers that only retry `transient` are unchanged, but a non-idempotent write
+    must not read it as "the server refused it" (`refused_before_accept`)."""
     t = text or ""
     if _RATELIMIT.search(t):
         return "ratelimit"
@@ -406,7 +412,20 @@ def classify_error(text):
         return "terminal"
     if _TRANSIENT.search(t):
         return "transient"
-    return "terminal"
+    return "unknown"
+
+
+_HTTP_4XX = re.compile(r"\bHTTP 4\d\d\b")
+_NOT_SENT = re.compile(r"gh auth login|not logged in|Bad credentials", re.I)
+
+
+def refused_before_accept(text):
+    """K4r4-M1: True ONLY for a definite "the server did not accept this request" signal — an HTTP 4xx
+    status line (401/403/404/422 validation …), a rate limit, or gh refusing before sending (not logged
+    in / bad credentials). Everything else — unknown text, empty stderr, a stream error, 5xx, a timeout,
+    a signal — may have landed: a non-idempotent write takes the ambiguous path (find it → else stop)."""
+    t = text or ""
+    return bool(_RATELIMIT.search(t) or _HTTP_4XX.search(t) or _NOT_SENT.search(t))
 
 
 _WRITE_FORMS = (

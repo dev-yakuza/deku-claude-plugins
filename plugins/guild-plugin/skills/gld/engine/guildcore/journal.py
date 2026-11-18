@@ -224,7 +224,10 @@ class Journal(JournalView):
         redo = []
         for it in self.intent_only():
             if verify(it):
-                self.done(it, recovered=True)
+                # K4r4-m1: a verifier may close the intent itself (an Issue create records its number, or
+                # `abandoned`) — never a second, contradicting done
+                if not any(e["kind"] == "done" and key_of(e) == key_of(it) for e in self.entries):
+                    self.done(it, recovered=True)
             else:
                 redo.append(it)
         return redo

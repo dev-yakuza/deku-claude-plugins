@@ -77,7 +77,7 @@ def _kids(p):
     dups = D.duplicate_keys(kids)
     if dups:
         return None, B.fail(p, STAGE, "duplicate child Issues for one slice key: %s — close the extra one as not "
-                            "planned, then /gld resume %d" % ("; ".join("%s → %s" % (k, ", ".join("#%d" % n for n in v))
+                            "planned (or duplicate), then /gld resume %d" % ("; ".join("%s → %s" % (k, ", ".join("#%d" % n for n in v))
                                                                        for k, v in sorted(dups.items())), p.issue))
     return kids, None
 
@@ -99,8 +99,10 @@ def run(p, drive, only=None):
     q, res = B.pending_answer(p, STAGE, "integration-fix-child")
     if res is not None:
         if res.get("choice") == "yes":
-            fix_child(p, q, trusted)                              # K4r1-m7: create (idempotent by key) BEFORE the
-            kids, stop = _kids(p)                                 # answer is consumed — a crash re-creates nothing
+            stop = fix_child(p, q, trusted)                       # K4r1-m7: create (idempotent by key) BEFORE the
+            if stop is not None:                                  # answer is consumed — a crash re-creates nothing
+                return stop
+            kids, stop = _kids(p)
             if stop is not None:
                 return stop
         B.mark_applied(p, STAGE, res)
@@ -109,6 +111,8 @@ def run(p, drive, only=None):
     for i, c in enumerate(pending):
         if (c.get("state") or "").upper() == "CLOSED":
             line = "자식 #%d 가 done 없이 닫힘 (머지된 PR 없음)" % c["number"]
+            if c.get("closed_as"):                         # K4r4-m5: closed as duplicate, not verified
+                line += " — closed as %s: reopen it, or close it as not planned to withdraw the slice" % c["closed_as"]
             return B.pause(p, STAGE, "defect", line, line) if p.unattended else \
                 B.StageResult(B.StageResult.FAIL, line=line, fail_class="defect")
         if p.events is not None:
@@ -225,5 +229,14 @@ def fix_child(p, q, trusted=True):
         from workflows.dev.stages import analyze as A
         body += "\n\n" + A.UNTRUSTED_ORIGIN                # K4r2-m8: inherits the outsider parent's untrust
     body = "%s\n\nParent Issue: #%d" % (body, p.issue)
-    p.writer.issue_create("[Guild子] 통합 수정 — %s" % markers.value(line)[:80], body,
-                          labels=["guild:child", "guild:analyze"], key=key)
+    from guildcore.adapters.gh import GhWriteError
+    try:
+        p.writer.issue_create("[Guild子] 통합 수정 — %s" % markers.value(line)[:80], body,
+                              labels=["guild:child", "guild:analyze"], key=key)
+    except GhWriteError as ex:
+        # K4r4-m3: the same classes as make_children — an unknown create is `env: service`, not an engine defect
+        if ex.kind in ("auth", "ratelimit"):
+            raise
+        return B.fail(p, STAGE, "integration fix child creation failed — %s" % B.one_line(str(ex), 320),
+                      "transient" if ex.kind in ("transient", "ambiguous") else "defect")
+    return None
