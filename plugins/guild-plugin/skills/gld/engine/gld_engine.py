@@ -44,6 +44,23 @@ def main(argv=None):
         return 0 if argv else 64
     wf, rest = argv[0], argv[1:]
     if wf == "version":
+        if rest[:1] == ["--active"]:
+            # §10.3: the ACTIVE plugin version for the supervisor's per-pass check — one line:
+            # `<version>` | `count:<n>` (not exactly one enabled guild-plugin) | `unavailable`
+            from guildcore import version as V
+            cwd = rest[rest.index("--cwd") + 1] if "--cwd" in rest[:-1] else os.getcwd()
+            try:
+                vers = V.active(cwd)
+            except Exception:                                   # noqa: BLE001 — a check that cannot run
+                try:
+                    import time
+                    time.sleep(5)
+                    vers = V.active(cwd)
+                except Exception:                               # noqa: BLE001
+                    sys.stdout.write("unavailable\n")
+                    return 0
+            sys.stdout.write((vers[0] if len(vers) == 1 else "count:%d" % len(vers)) + "\n")
+            return 0
         from guildcore import ENGINE_MILESTONE
         sys.stdout.write("guild engine %s\n" % ENGINE_MILESTONE)
         return 0

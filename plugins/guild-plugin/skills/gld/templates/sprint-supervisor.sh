@@ -48,6 +48,11 @@ DRAFT_STACKED=<DRAFT_STACKED>
 # (analyze+design | execute | test+qa — dev.md "Grouped sessions") instead of one session for
 # the whole spine, so a later group does not carry an earlier one's context. Literal 0/1.
 STAGE_GROUPS=<STAGE_GROUPS>
+# K5 (design §2.4, §10.3): each member is ONE engine run — this plugin's own `gld_engine.py`, by absolute
+# path (no `claude -p "/gld dev N"` leader session). SUPERVISOR_VERSION is the plugin version that generated
+# this file; every pass compares it with the ACTIVE version (`engine_gate`).
+ENGINE=<ENGINE_PATH>
+SUPERVISOR_VERSION=<SUPERVISOR_VERSION>
 
 # ── Board projection config (03-sprint-board.md §7.2) ────────────────────────
 # ⚠ THESE TEN VALUES NEVER TOUCH SHELL SOURCE. They come from `config.sprint.board`, i.e. from
@@ -929,6 +934,28 @@ MARKER_FAILS=0
 # 18 x ~10 min is roughly three hours. It absorbs outages that RECOVER; it cannot absorb a
 # permanently expired `GH_TOKEN`, which is why that is a Phase 0 question in run.md (§4.2).
 MARKER_MAX=3
+# engine_gate — K5 (§10.3 R3C-M1/R4C-M2, §10.5 runbook ①): 0 = go on; 1 = stop the sprint with HALT_REASON
+# set. The engine kill switch (`<git-common-dir>/guild/engine/HALT`, written only by `dev valve halt`) →
+# engine-kill-switch. The ACTIVE plugin version — the engine asks `claude plugin list --json` (absolute
+# `claude`, cwd = the human checkout, this CLAUDE_CONFIG_DIR, 10 s) — differs from SUPERVISOR_VERSION, or
+# not exactly one guild-plugin is enabled → plugin-version-changed. A check that cannot run is a warning
+# line, never a stop: the kill switch is the primary stop, and a transient CLI error must not end a sprint.
+engine_gate() {
+  local common v
+  common="$(git -C "$HUMAN_REPO" rev-parse --path-format=absolute --git-common-dir 2>/dev/null || true)"
+  if [ -n "$common" ] && [ -f "$common/guild/engine/HALT" ]; then
+    HALT_REASON="engine-kill-switch"; return 1
+  fi
+  v="$("$PY" "$ENGINE" version --active --cwd "$HUMAN_REPO" 2>/dev/null | tail -1 || true)"
+  case "$v" in
+    ''|unavailable*) echo "  ⚠ version-check-unavailable — the run goes on (the kill switch is the primary stop)"; return 0 ;;
+  esac
+  if [ "$v" != "$SUPERVISOR_VERSION" ]; then
+    HALT_REASON="plugin-version-changed"; return 1
+  fi
+  return 0
+}
+
 heartbeat() {
   # Board counters ride along here (03-sprint-board.md §7.2). This is the only position that
   # satisfies all three requirements at once: the human sees them WHILE the run is going
@@ -1946,6 +1973,14 @@ while [ ${#QUEUE[@]} -gt 0 ]; do
   # that number. `refresh_base`/`refresh_dag_input` running AFTER the wait is a bonus — a
   # dependency a human merged during the day lands in that night's run.
   wait_for_window
+  # K5: the kill switch and the active plugin version, every pass, BEFORE the pop (ISSUE still names
+  # the previous, finished member — cleared so cleanup's P7 leaves its card alone).
+  if ! engine_gate; then
+    ISSUE=""
+    echo "  ⛔ the sprint stops before the next member: halted:$HALT_REASON"
+    marker_write "halted:$HALT_REASON" 2>/dev/null || true
+    exit 1
+  fi
   ISSUE=${QUEUE[0]}; QUEUE=("${QUEUE[@]:1}")
   PROCESSED=$((PROCESSED + 1))
 
@@ -2074,7 +2109,7 @@ while [ ${#QUEUE[@]} -gt 0 ]; do
   fi
   heartbeat "running"
 
-  RESUME_TRIES=0; RL_TRIES=0; RL_ZEROWAIT=0; ATTEMPT=0
+  RESUME_TRIES=0; RL_TRIES=0; RL_ZEROWAIT=0; ATTEMPT=0; BUSY_TRIES=0
   # A value no child count can equal, so the first pass always reads as progress without
   # SPLIT_PREV having to double as a sentinel (that dual role was BLOCKER B1).
   SPLIT_PREV=999999; SPLIT_STALL=0; SPLIT_PASSES=0
@@ -2143,8 +2178,46 @@ while [ ${#QUEUE[@]} -gt 0 ]; do
         GLD_STAGE_SCOPE="$STAGE_SCOPE" \
         CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS=0 CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1 \
         BASH_DEFAULT_TIMEOUT_MS=600000 BASH_MAX_TIMEOUT_MS=3600000 \
-        claude -p --verbose --output-format stream-json --dangerously-skip-permissions \
-        "/gld dev $ISSUE" ) > "$LOG" 2>&1 || EXIT_CODE=$?
+        GLD_SUPERVISOR_VERSION="$SUPERVISOR_VERSION" \
+        "$PY" "$ENGINE" dev run --issue "$ISSUE" --unattended ) > "$LOG" 2>&1 || EXIT_CODE=$?
+
+    # <!-- guild:supervisor-core:engineexit -->
+    # K5 (§2.4 R4C-m1): the engine's own exit codes are read FIRST — right after the child, before the
+    # rate-limit fence and before any record_failure arm; none of them writes failed.txt.
+    #   4 busy — another engine run holds this Issue: wait IN PLACE (5 min, same WT and base, at most
+    #     twice — never a requeue, RESUME_TRIES untouched), then `busy-skipped`: the member stays
+    #     unprocessed (not failed) and its dependants wait as usual.
+    #   6 halted / 126·127 (the interpreter cannot run) — stop the sprint: kill switch →
+    #     engine-kill-switch, version mismatch → plugin-version-changed, `halted: env <r>` →
+    #     engine-env-<r>, 126·127 → engine-env-python. The other members are not recorded as failed.
+    if [ "$EXIT_CODE" -eq 4 ]; then
+      BUSY_TRIES=$((BUSY_TRIES + 1))
+      if [ "$BUSY_TRIES" -le 2 ]; then
+        echo "  ⏳ Issue #$ISSUE — another engine run holds it; waiting 5 min in place ($BUSY_TRIES/2)"
+        record_event "$ISSUE" busy "another engine run holds #$ISSUE — waited in place ($BUSY_TRIES/2)"
+        sleep 300
+        continue
+      fi
+      echo "  ⏭ Issue #$ISSUE — still held by another engine run; left unprocessed"
+      record_event "$ISSUE" busy-skipped "another engine run still holds #$ISSUE — unprocessed, the next run picks it up"
+      break
+    fi
+    if [ "$EXIT_CODE" -eq 6 ] || [ "$EXIT_CODE" -eq 126 ] || [ "$EXIT_CODE" -eq 127 ]; then
+      ENGINE_HALT="$(grep -ao 'halted: [a-z][a-z -]*' "$LOG" 2>/dev/null | tail -1 || true)"
+      case "$EXIT_CODE:$ENGINE_HALT" in
+        126:*|127:*)                         HALT_REASON="engine-env-python" ;;
+        *"halted: kill-switch"*)             HALT_REASON="engine-kill-switch" ;;
+        *"halted: plugin version mismatch"*) HALT_REASON="plugin-version-changed" ;;
+        *"halted: env "*)
+          ENV_R="${ENGINE_HALT#*halted: env }"; ENV_R="${ENV_R%% *}"
+          HALT_REASON="engine-env-$(printf '%s' "$ENV_R" | tr -cd 'a-z0-9-')" ;;
+        *)                                   HALT_REASON="engine-env-unknown" ;;
+      esac
+      echo "  ⛔ Issue #$ISSUE — the engine stopped the sprint: halted:$HALT_REASON"
+      marker_write "halted:$HALT_REASON" 2>/dev/null || true
+      exit 1
+    fi
+    # <!-- /guild:supervisor-core:engineexit -->
 
     # <!-- guild:supervisor-core:ratelimit -->
     # Rate-limit DETECTION + SANITISATION + WAIT — VERBATIM-shared with batch.md's supervisor

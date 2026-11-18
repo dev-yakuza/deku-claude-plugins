@@ -30,7 +30,8 @@ src = open(sys.argv[1]).read()
 m = re.search(r'```bash\n(#!/usr/bin/env bash.*?)\n```', src, re.S)
 if not m:
     sys.exit("could not extract the supervisor script from batch.md")
-body = m.group(1).replace('<ISSUE_NUMBERS>', '1 2').replace('<PLUGIN_VERSION>', 'test')
+body = m.group(1).replace('<ISSUE_NUMBERS>', '1 2').replace('<PLUGIN_VERSION>', 'test') \
+    .replace('<ENGINE_PATH>', "'/nonexistent/gld_engine.py'")
 open(sys.argv[2], 'w').write(body)
 PY
 [ -s "$WORK/batch.sh" ] || { echo "extraction failed" >&2; exit 1; }

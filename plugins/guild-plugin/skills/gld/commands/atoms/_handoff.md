@@ -629,7 +629,13 @@ Every **human-readable string Guild emits is written in the repo's `config.langu
 
 ⚠ **`halted:<reason>` is a wildcard and the reasons are enumerated**: `interrupted` ·
 **`window-invalid`** · **`marker-unwritable`** · **`container-lost`** · **`sigTERM`** ·
-**`sigHUP`** · `plan-hash-mismatch`. `interrupted` used to be the single destination of every
+**`sigHUP`** · `plan-hash-mismatch` · **`plugin-version-changed`** · **`engine-kill-switch`** ·
+**`engine-env-<reason>`** (`endpoint` · `python` · `uninitialized` · `plugin-not-listed` · `ignored-missing` ·
+`build-inputs-changed` · `unknown`) — the engine's exit 6 / 126·127 (0.102, design §2.4): fix the environment
+(for `ignored-missing` list the path in `engine.effective.copy_ignored`; for `build-inputs-changed` run the
+suite by hand first), then `/gld sprint run` regenerates the supervisor and continues. The event classes
+`busy` · `busy-skipped` (exit 4 — another engine run holds the Issue) mean an unprocessed member, picked up by
+the next run — never a failure. `interrupted` used to be the single destination of every
 abnormal exit, which on a run that lasts days is the only diagnostic channel there is.
 ⚠ **`window`** (the literal `HH:MM-HH:MM`) and **`completion`** (one object, written just
 before `state: finished`) are the two ledger keys that **cannot be re-derived** — a writer that

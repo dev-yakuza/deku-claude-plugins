@@ -123,6 +123,10 @@ argv = [
     "--human-repo", human,
     "--dag-path", dag,
     "--out", "-",
+    # K5: the supervisor runs the engine directly; the suite's stand-in translates `dev run --issue N` back
+    # into the `claude -p "/gld dev N"` stub every scenario below already defines on PATH
+    "--engine-path", os.environ.get("FAKE_ENGINE") or os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                                                   "engine_shim.py"),
 ]
 for n in order.split():
     argv += ["--order", n]
@@ -136,6 +140,21 @@ r = subprocess.run(argv, stdout=subprocess.PIPE)
 sys.stdout.buffer.write(r.stdout)
 sys.stdout.buffer.flush()
 sys.exit(r.returncode)
+PY
+cat > "$WORK/engine_shim.py" <<'PY'
+# K5 stand-in for skills/gld/engine/gld_engine.py: `version --active` answers $FAKE_ACTIVE_VERSION (unset →
+# "unavailable", the supervisor's warning path); `dev run --issue N --unattended` becomes the scenario's
+# `claude` stub with the old prompt, so every scenario's fake spine keeps working unchanged.
+import os, sys
+a = sys.argv[1:]
+if a[:1] == ["version"]:
+    print(os.environ.get("FAKE_ACTIVE_VERSION", "unavailable"))
+    sys.exit(0)
+if a[:2] == ["dev", "run"] and "--issue" in a:
+    n = a[a.index("--issue") + 1]
+    os.execvp("claude", ["claude", "-p", "--verbose", "--output-format", "stream-json",
+                         "--dangerously-skip-permissions", "/gld dev %s" % n])
+sys.exit(64)
 PY
 
 # ⚠ --human-repo 는 실재하는 절대 디렉터리여야 한다(렌더러가 검증한다). 예전 값
@@ -1350,6 +1369,108 @@ if [ "$R2_SPAWNS" = 1 ] && case "$R2_OUT" in *dag-input-failed*) false ;; *) tru
 else
   bad "R2g: missing paused.txt" "normal run" "spawns=$R2_SPAWNS out=[$(printf '%s' "$R2_OUT" | grep -E 'dag-input|#102' | head -2 | tr '\n' ' ')]"
 fi
+
+# ── K5. the engine's exit codes and the per-pass gate (design §2.4 R4C-m1, §10.3, §10.5) ──────────
+# The supervisor runs `gld_engine.py dev run` directly. 4 busy waits in place (twice) and then leaves the
+# member unprocessed; 6 / 127 stop the sprint with halted:<reason>; no path writes failed.txt; the kill
+# switch and an active-version change stop it BEFORE the next member's engine start.
+cat > "$H/k5engine.py" <<'K5ENG'
+import os, sys
+a = sys.argv[1:]
+if a[:1] == ["version"]:
+    print(os.environ.get("K5_ACTIVE", "unavailable")); sys.exit(0)
+n = a[a.index("--issue") + 1]
+open(os.environ["K5_SPAWN"], "a").write("S %s\n" % n)
+mode = os.environ.get("K5_MODE", "done")
+if mode == "halt":
+    print('{"type":"rate_limit_event","rate_limit_info":{"status":"allowed"}}')
+    print('{"type":"result","is_error":true,"result":"halted: kill-switch","total_cost_usd":0,"usage":{}}')
+    sys.exit(6)
+if mode == "envnet":
+    print('{"type":"result","is_error":true,"result":"halted: env endpoint — no route","total_cost_usd":0,"usage":{}}')
+    sys.exit(6)
+if mode == "py":
+    sys.exit(127)
+if mode == "busy" or (mode == "busy101" and n == "101"):
+    print('{"type":"result","is_error":true,"result":"busy: #%s is held by an unattended run","total_cost_usd":0,"usage":{}}' % n)
+    sys.exit(4)
+print('{"type":"rate_limit_event","rate_limit_info":{"status":"allowed"}}')
+print('{"type":"result","is_error":false,"result":"OK DONE","total_cost_usd":0,"usage":{}}')
+K5ENG
+cat > "$H/bin/gh" <<'GHK5'
+#!/bin/bash
+case "$*" in
+  *"issues/99/comments"*) echo '[]' ;;
+  "issue comment"*|*"-X PATCH"*) exit 0 ;;
+  "pr list"*) echo '[]' ;;
+  "issue list"*guild:child*) : ;;
+  "issue list"*) echo '[{"number":101,"labels":[]},{"number":102,"labels":[]}]' ;;
+  "issue view"*) echo 'guild:done' ;;
+  "issue edit"*) exit 0 ;;
+  *) echo '[]' ;;
+esac
+GHK5
+printf '#!/bin/bash\nexit 0\n' > "$H/bin/sleep"          # the 5-min busy wait, made instant
+chmod +x "$H/bin/gh" "$H/bin/sleep"
+K5M='[{"number":101,"base_deps":[],"split":false},{"number":102,"base_deps":[],"split":false}]'
+# k5_run <name> <mode> [active-version] [halt-file] → K5_OUT K5_RC K5_N (engine starts) K5_D
+k5_run() {
+  hrepo "$1"
+  K5_D="$H/$1/.claude/guild/.sprint-logs/99"
+  printf '%s\n' "$K5M" > "$K5_D/dag/members.json"
+  [ -n "${4:-}" ] && { mkdir -p "$H/$1/.git/guild/engine"; : > "$H/$1/.git/guild/engine/HALT"; }
+  FAKE_ENGINE="$H/k5engine.py" hrender "$H/$1" "101 102" "$H/${1}_c" > "$H/$1.sh"
+  : > "$H/$1.spawn"
+  K5_OUT="$(cd "$H/neutral" && PATH="$H/bin:$PATH" K5_MODE="$2" K5_ACTIVE="${3:-unavailable}" \
+            K5_SPAWN="$H/$1.spawn" timeout 90 "$SH" "$H/$1.sh" 2>&1)"; K5_RC=$?
+  K5_N="$(grep -c '^S ' "$H/$1.spawn" 2>/dev/null || true)"; K5_N="${K5_N:-0}"
+}
+k5_nofail() { [ ! -s "$K5_D/dag/failed.txt" ] && ! grep -q 'child-session-failed' "$K5_D/failures.jsonl" 2>/dev/null; }
+
+k5_run k5halt halt
+if [ "$K5_RC" -ne 0 ] && [ "$K5_N" = 1 ] && _has "halted:engine-kill-switch" "$K5_OUT" && k5_nofail; then
+  ok "K5a: engine exit 6 (kill switch) stops the sprint after ONE engine start, nothing recorded failed"
+else
+  bad "K5a: exit 6 kill switch" "rc=$K5_RC starts=$K5_N failed=[$(cat "$K5_D/dag/failed.txt" 2>/dev/null)] out=[$(printf '%s' "$K5_OUT" | grep -E '⛔|✗' | head -2 | tr '\n' ' ')]"
+fi
+k5_run k5env envnet
+if [ "$K5_RC" -ne 0 ] && [ "$K5_N" = 1 ] && _has "halted:engine-env-endpoint" "$K5_OUT" && k5_nofail; then
+  ok "K5b: engine exit 6 (env endpoint) → halted:engine-env-endpoint"
+else
+  bad "K5b: exit 6 env" "rc=$K5_RC starts=$K5_N out=[$(printf '%s' "$K5_OUT" | grep -E '⛔|✗' | head -2 | tr '\n' ' ')]"
+fi
+k5_run k5py py
+if [ "$K5_RC" -ne 0 ] && [ "$K5_N" = 1 ] && _has "halted:engine-env-python" "$K5_OUT" && k5_nofail; then
+  ok "K5c: exit 127 → halted:engine-env-python, nothing recorded failed"
+else
+  bad "K5c: exit 127" "rc=$K5_RC starts=$K5_N out=[$(printf '%s' "$K5_OUT" | grep -E '⛔|✗' | head -2 | tr '\n' ' ')]"
+fi
+k5_run k5busy busy101
+if [ "$K5_N" = 4 ] && grep -q '"busy-skipped"' "$K5_D/failures.jsonl" 2>/dev/null \
+   && [ "$(grep -c '"busy"' "$K5_D/failures.jsonl" 2>/dev/null)" = 2 ] && k5_nofail && _has "Done: 1" "$K5_OUT"; then
+  ok "K5d: exit 4 waits in place twice, then busy-skipped — not failed, the next member still runs"
+else
+  bad "K5d: exit 4 busy" "starts=$K5_N events=[$(grep -o '"class": *"[a-z-]*"' "$K5_D/failures.jsonl" 2>/dev/null | tr '\n' ' ')] out=[$(printf '%s' "$K5_OUT" | grep -E 'Total:|Done:|⏭' | head -3 | tr '\n' ' ')]"
+fi
+k5_run k5ver done "0.0.1-other"
+if [ "$K5_RC" -ne 0 ] && [ "$K5_N" = 0 ] && _has "halted:plugin-version-changed" "$K5_OUT"; then
+  ok "K5e: an active plugin version ≠ SUPERVISOR_VERSION stops the sprint before any engine start"
+else
+  bad "K5e: version gate" "rc=$K5_RC starts=$K5_N out=[$(printf '%s' "$K5_OUT" | grep -E '⛔' | head -2 | tr '\n' ' ')]"
+fi
+k5_run k5kill done unavailable halt
+if [ "$K5_RC" -ne 0 ] && [ "$K5_N" = 0 ] && _has "halted:engine-kill-switch" "$K5_OUT"; then
+  ok "K5f: the HALT file stops the sprint before any engine start (version check unavailable = a warning only)"
+else
+  bad "K5f: kill switch gate" "rc=$K5_RC starts=$K5_N out=[$(printf '%s' "$K5_OUT" | grep -E '⛔|⚠' | head -2 | tr '\n' ' ')]"
+fi
+k5_run k5ok done unavailable
+if [ "$K5_RC" -eq 0 ] && [ "$K5_N" = 2 ] && _has "version-check-unavailable" "$K5_OUT" && _has "Done: 2" "$K5_OUT"; then
+  ok "K5g: an unavailable version check warns and the sprint goes on"
+else
+  bad "K5g: unavailable check" "rc=$K5_RC starts=$K5_N out=[$(printf '%s' "$K5_OUT" | grep -E 'Total:|Done:|⚠' | head -3 | tr '\n' ' ')]"
+fi
+rm -f "$H/bin/sleep"
 fi
 
 
@@ -1399,13 +1520,14 @@ hasline "I: P1 writes in_progress"                'board_col "$ISSUE" in_progres
 # STOPS, so the two timeout variables are part of the same guard. All three must be on the
 # child launch itself: the code lines of the `\`-continued command that ends in `claude -p`.
 # (Checking "somewhere in the file" let a refactor move them onto another command — round 1.)
-launch_has_guard() {  # launch_has_guard <file> — 0 when EVERY `claude -p --verbose` launch block carries all three
+launch_has_guard() {  # launch_has_guard <file> — 0 when EVERY child launch block (`claude -p --verbose` | engine `dev run --issue`) carries all three
   awk '{ i=index($0,"#"); pre=(i?substr($0,1,i-1):$0);
          # A blank or comment-only line ENDS a bash continuation — the variables above it never
          # reach the command below it — so it must end the block here too (round 2).
          if (pre ~ /^[ \t]*$/) { cont = 0; blk = ""; next }
          blk = (cont ? blk " " : "") pre
-         if (index(pre,"claude -p --verbose")) { n++
+         # K5: the supervisor launches the engine (`dev run --issue`) — the same three guards ride on it
+         if (index(pre,"claude -p --verbose") || index(pre,"dev run --issue")) { n++
              if (index(blk,"CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1") &&
                  index(blk,"BASH_DEFAULT_TIMEOUT_MS=600000") &&
                  index(blk,"BASH_MAX_TIMEOUT_MS=3600000")) g++ }
@@ -5025,7 +5147,7 @@ mw_case "T12f 깨진 JSON 은 실패" "[{\"id\": 1,\n" FAIL
 # ⚠ 이 파일은 긴 `hasline`/`case` 목록이고, 한 곳의 인용이 닫히지 않으면 이후 검사가 문자열로
 #   삼켜져 **FAIL=0 인 채로** 조용히 사라진다. 6라운드가 이 바닥 자체를 변이로 검증했다 —
 #   검사 4개를 지우면 FAIL=0 인 채 바닥만으로 잡혔다(3/3). 의도적으로 늘릴 때만 올린다.
-SUP_MIN_CHECKS=443
+SUP_MIN_CHECKS=450
 if [ "$((PASS + FAIL))" -lt "$SUP_MIN_CHECKS" ]; then
   printf '\nFAIL  ran only %d checks (floor %d) — a quote probably swallowed the rest.\n' \
     "$((PASS + FAIL))" "$SUP_MIN_CHECKS"

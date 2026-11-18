@@ -53,10 +53,10 @@ member**; see Phase 0 and Phase 3 step 2c.
 > `_sprint_dag.md`. Base injection into the spine: `_execute_spine.md` (`<base>` resolution). **Checkout**: never move the human's branch or history — `_checkout.md` (a pull/sync/switch request: show the commands and which commits change hash, then ask).
 > **Output language**: `config.language`; machine tokens stay ASCII.
 
-> ⚠️ **Security**: each child runs `claude -p --dangerously-skip-permissions` — all permission
-> prompts and the sandbox are bypassed in the child so test runners, hooks, `git push` and
-> `gh pr create` work unattended. Every tool call is logged. Use only if you accept unattended
-> tool execution. Nothing merges (INV1).
+> ⚠️ **Security**: each member is one engine run (`gld_engine.py dev run --unattended`, 0.102). The
+> engine starts every role in its own rendered permission set and sandbox and does every GitHub write
+> itself; roles never push to the default branch and never touch GitHub. Every tool call is logged.
+> Nothing merges (INV1).
 
 ---
 
@@ -651,7 +651,11 @@ file is readable on its own):
 3. refresh base             git fetch origin <d>:refs/remotes/origin/<d>
 4. decide base              sprint_dag.py --mode base      → DEFAULT | <branch> | BLOCKED:<why>
 5. acquire the worktree     four states (below) + memory symlink + dependency install
-6. run the child            (cd <worktree> && GLD_UNATTENDED=1 GLD_SPRINT_BASE=<base> GLD_SPRINT_DRAFT=<0|1> claude -p "/gld dev <n>")
+6. run the engine           (cd <worktree> && GLD_UNATTENDED=1 GLD_SPRINT_BASE=<base> GLD_SPRINT_DRAFT=<0|1> python3 <engine>/gld_engine.py dev run --issue <n> --unattended)
+   — exit 4 busy waits in place (twice) then `busy-skipped`; exit 6 / 126·127 stop the sprint as
+     `halted:<reason>`; both before the rate-limit fence, neither writes failed.txt (design §2.4).
+     Every pass first checks the engine kill switch and the ACTIVE plugin version (`halted:engine-kill-switch` /
+     `halted:plugin-version-changed`).
 7. judge by label           5 outcomes (below)
 8. release the worktree     only at guild:done, never --force
 9. update the marker        heartbeat · retries · discovered children
