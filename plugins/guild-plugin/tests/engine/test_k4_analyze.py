@@ -188,11 +188,11 @@ class Premises(unittest.TestCase):
 
 
 class CloseAsDecided(unittest.TestCase):
-    BODY = ("x\n<!-- guild:plan-decision -->\n- Goal: 할까요? → 현행 유지, 닫는다 (2026-10-28, sprint plan)\n"
+    BODY = ("x\n<!-- guild:plan-decision -->\n- Goal: 할까요? → close: not_planned — 현행 유지 (2026-10-28, sprint plan)\n"
             "<!-- /guild:plan-decision -->\n")
 
     def test_close_from_plan_line_in_order(self):
-        line = "- Goal: 할까요? → 현행 유지, 닫는다 (2026-10-28, sprint plan)"
+        line = "- Goal: 할까요? → close: not_planned — 현행 유지 (2026-10-28, sprint plan)"
         h = K4(self, body=self.BODY, roles=[evidence(self)], judges={"KICKOFF": kickoff(
             close={"decide": "not_planned", "source": "plan_line", "line": line})})
         r = A.run(h.p)
@@ -213,7 +213,7 @@ class CloseAsDecided(unittest.TestCase):
         self.assertEqual(h.issue()["state"], "OPEN")
 
     def test_outsider_plan_line_cannot_close(self):
-        line = "- Goal: 할까요? → 현행 유지, 닫는다 (2026-10-28, sprint plan)"
+        line = "- Goal: 할까요? → close: not_planned — 현행 유지 (2026-10-28, sprint plan)"
         h = K4(self, body=self.BODY, author="NONE", roles=[evidence(self)], judges={"KICKOFF": kickoff(
             close={"decide": "not_planned", "source": "plan_line", "line": line})})
         r = A.run(h.p)

@@ -662,12 +662,15 @@ def live_execute(issue, main, variant, config, clock, gh, writer, decisions, run
 
     def base_checks():
         from workflows.dev import local_checks as LC
+        from guildcore.roles import scope as _SC
         lh = None
-        for name in ("lefthook.yml", "lefthook.yaml", ".lefthook.yml", ".lefthook.yaml"):     # K3r3-m4
-            if p.base and G.ok(worktree, "cat-file", "-e", "%s:%s" % (p.base, name)):
-                lh = G.run(worktree, "show", "%s:%s" % (p.base, name)).decode("utf-8", "replace")
-                break
         skipped = []
+        for name in _SC.LEFTHOOK_NAMES:      # K3r3-m4, K4r2-m9: the SAME list the role's commit hook uses
+            if p.base and G.ok(worktree, "cat-file", "-e", "%s:%s" % (p.base, name)):
+                lh = LC.load_config(name, G.run(worktree, "show", "%s:%s" % (p.base, name)).decode("utf-8", "replace"))
+                if lh is None:
+                    skipped.append((name, "base lefthook config unreadable by the engine — commands.lint/typecheck"))
+                break
         return LC.derive(lh, raw, skipped), skipped
 
     state = {"deps": None}
@@ -1174,16 +1177,40 @@ def config_at_base(main, base, cfg):
     return CF.Config(raw, cfg.root, list(cfg.warnings)), "commands/engine/visual from %s" % base
 
 
-def fill_handoff(p, wt):
-    """K4r1-B1: base/branch for test/qa — execute's durable hand-over block first; without one (an
-    Issue execute ran before the engine) the engine worktree's own branch. Read before any role or
-    push runs."""
+def fill_handoff(p, wt, base=None, default_branch=None):
+    """K4r1-B1: base/branch for test/qa — execute's durable hand-over block first. Without one (an
+    Issue execute ran before the engine) the FALLBACK: base = the base the factory resolved
+    (K4r2-m2 — never None, so the role's commit hook is <base>'s), branch = the engine worktree's
+    current branch ONLY when it is not the default/base branch and is the head of an OPEN PR of this
+    Issue (K4r2-m3 — a person's `git switch main` in that worktree must never become the push
+    target); otherwise `p.unavailable` (the FSM's env pause). Read before any role or push runs."""
     from workflows.dev import handoff as HO
-    HO.fill_from_execute(p)
-    if not p.branch:
-        ref = G.run(wt, "symbolic-ref", "-q", "HEAD", check=False).decode().strip()
-        if ref.startswith("refs/heads/"):
-            p.branch = ref[len("refs/heads/"):]
+    blk = HO.fill_from_execute(p)
+    if not p.base and base:
+        p.base = base
+    if blk is not None and p.branch:
+        return p
+    ref = G.run(wt, "symbolic-ref", "-q", "HEAD", check=False).decode().strip()
+    cand = ref[len("refs/heads/"):] if ref.startswith("refs/heads/") else None
+    why = None
+    bases = set(x for x in (default_branch, base, base[len("origin/"):] if (base or "").startswith("origin/") else None)
+                if x)
+    if cand is None:
+        why = "the engine worktree is on a detached HEAD"
+    elif cand in bases:
+        why = "the engine worktree is on the base branch %s" % cand
+    else:
+        rx = re.compile(r"#%d(?![0-9])" % int(p.issue))
+        prs = [x for x in (p.gh.pr_for_head(cand) or []) if (x.get("state") or "OPEN").upper() == "OPEN"
+               and not x.get("isCrossRepository") and rx.search(x.get("body") or "")]
+        if not prs:
+            why = "branch %s is not the head of an open PR of #%d" % (cand, p.issue)
+    if why:
+        p.branch = None
+        p.unavailable = ("no execute hand-over for #%d and %s — test/qa will not push from a guessed branch; "
+                         "check out the Issue's PR branch in %s or continue by hand" % (p.issue, why, wt))
+    else:
+        p.branch = cand
     return p
 
 
@@ -1201,9 +1228,12 @@ def fsm_factory(main, config, clock, gh, gh_write, runner, judge_runner, unatten
     env = dict(env if env is not None else os.environ)
     common = G.run(main, "rev-parse", "--path-format=absolute", "--git-common-dir").decode().strip()
 
+    resolved = {}
+
     def base_cfg():
         default = BR.default_branch(main)
         base = BR.resolve_base(main, env.get("GLD_SPRINT_BASE"), "origin/%s" % default if default else None)
+        resolved.update(base=base, default=default)
         return config_at_base(main, base, config)
 
     def ports_for(n, stage, variant=None):
@@ -1229,7 +1259,7 @@ def fsm_factory(main, config, clock, gh, gh_write, runner, judge_runner, unatten
             else:
                 p = live(n, wt, None, None, cfg, clock, gh, writer, decisions, runner, judge_runner,
                          journal=journal, unattended=unattended, push_url=push_url, host=host, plugin=plugin)
-                fill_handoff(p, wt)
+                fill_handoff(p, wt, resolved.get("base"), resolved.get("default"))
         else:
             p = live(n, main, None, None, config, clock, gh, writer, decisions, runner, judge_runner, journal=journal,
                      unattended=unattended, push_url=push_url, host=host, plugin=plugin)

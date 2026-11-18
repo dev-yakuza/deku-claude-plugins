@@ -25,8 +25,24 @@ import subprocess
 
 from guildcore.adapters import git as G
 
+# lefthook's config search (v1/v2): root `lefthook.*` / `.lefthook.*`, then `.config/lefthook.*` — ONE list
+# for the role's commit hook (settings.base_lefthook_env) and the engine's 1L checks (K4r2-m9)
+LEFTHOOK_EXTS = ("yml", "yaml", "json", "toml")
+LEFTHOOK_NAMES = tuple("%s%s.%s" % (d, n, e) for d in ("", ".config/") for n in ("lefthook", ".lefthook")
+                       for e in LEFTHOOK_EXTS if not (d and n.startswith(".")))
+# the per-checkout overlay lefthook MERGES on top of any config (LEFTHOOK_CONFIG included — measured,
+# 2.2.2): no role may create or change one (K4r2-m1 — a role-planted `run:` would later run outside the
+# sandbox with a person's credentials when someone commits in that worktree)
+LEFTHOOK_LOCAL_NAMES = tuple("%s%s.%s" % (d, n, e) for d in ("", ".config/") for n in ("lefthook-local", ".lefthook-local")
+                             for e in LEFTHOOK_EXTS if not (d and n.startswith(".")))
 PROTECTED = (".claude/settings.json", ".claude/settings.local.json", ".claude/settings*.json",
-             ".claude/guild/gates/**")
+             ".claude/guild/gates/**") + LEFTHOOK_LOCAL_NAMES
+
+
+def lefthook_local_files(worktree):
+    """The lefthook-local overlay paths of `worktree` (absolute; existing or not) — watched by the
+    integrity snapshot and denyWrite in every role sandbox."""
+    return [os.path.join(os.path.abspath(worktree), n) for n in LEFTHOOK_LOCAL_NAMES] if worktree else []
 TEST_DIRS = ("test/**", "tests/**", "integration_test/**", "e2e/**", "__tests__/**",
              "spec/**")
 
@@ -128,6 +144,8 @@ def integrity(worktree, watch_files=()):
         out["info " + k] = _tree_hash(os.path.join(k, "info"))
         out["config file " + k] = _hash(os.path.join(k, "config"))
     for f in watch_files or ():
+        out["file " + f] = _hash(f)
+    for f in lefthook_local_files(worktree):           # K4r2-m1: gitignored → porcelain never shows it
         out["file " + f] = _hash(f)
     return out
 

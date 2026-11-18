@@ -488,7 +488,8 @@ class FakeGhWrite(object):
         if self._gate(("create_issue", title)):
             self.fake.fx.setdefault("issues", {})[str(n)] = {
                 "number": n, "title": title, "body": body, "state": "OPEN",
-                "labels": [{"name": l} for l in labels], "comments": [], "timeline": []}
+                "labels": [{"name": l} for l in labels], "comments": [], "timeline": [],
+                "author_association": "OWNER"}          # the engine writes with the operator's token
         return {"number": n, "html_url": "https://github.com/%s/issues/%d" % (self.fake.repo, n)}
 
     def close_issue(self, n, reason):

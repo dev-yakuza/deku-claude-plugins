@@ -15,8 +15,10 @@ citations, candidate areas). You decide; the explorer only gathered.
 - `plan_decisions`: for each decision line, the dimension it settles and `fit` — `requires_reinterpretation`
   when applying it needs its words read in another sense (measured failure #555). A line settles ITS
   question, not every gap in the dimension.
-- `close`: `completed` / `not_planned` only when a decision line decides to close without a code
-  change (`source: plan_line`, quote the line in `line`). Your own "no work is needed" is `leader`.
+- `close`: `completed` / `not_planned` only when a `Goal` decision line's answer IS the close form
+  (`close: completed` / `close: not_planned` [` — <why>`]) — `source: plan_line`, quote the whole line
+  in `line`. An answer that merely mentions closing, cancelling or not doing something is a
+  requirement, not a close. Your own "no work is needed" is `leader`.
 - `ac`: verifiable acceptance criteria (what + observable result). Every safety-net line in the brief
   is its own AC with `tag: "safety net"`, kept verbatim in meaning.
 - `work_type`: `refactor` only while observable behaviour stays the same; new capability → `feature`.

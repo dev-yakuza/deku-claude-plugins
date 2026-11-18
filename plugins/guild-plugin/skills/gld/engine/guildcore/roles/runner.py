@@ -100,6 +100,30 @@ def git_identity(worktree):
     return out
 
 
+def lefthook_local_problem(spec, base_sha):
+    """K4r2-m1: a writer role does not start while the worktree holds a lefthook-local overlay that
+    <base> does not carry byte-for-byte (lefthook merges it over the base config into the role's —
+    and later a person's — commit hook)."""
+    if not spec.worktree or P.role_key(spec.role, spec.task) not in S.WRITER_ROLES:
+        return []
+    out = []
+    for name in SC.LEFTHOOK_LOCAL_NAMES:
+        path = os.path.join(spec.worktree, name)
+        if not os.path.lexists(path):
+            continue
+        same = False
+        if base_sha and not os.path.islink(path):
+            rc, blob = S._git(spec.worktree, "show", "%s:%s" % (base_sha, name))
+            try:
+                with open(path, "rb") as fh:
+                    same = rc == 0 and fh.read() == blob
+            except OSError:
+                same = False
+        if not same:
+            out.append("lefthook overlay %s present and not <base>'s — remove it (it would run in every "
+                       "commit hook in this worktree)" % name)
+    return out
+
 class BaselineContract(Exception):
     """A step was taken without a scope check and without a rebaseline — an engine bug."""
 
@@ -448,11 +472,12 @@ class Runner(object):
         if tools:
             # non-setuid ps first on PATH — setuid binaries cannot run in the sandbox (K1r5)
             gitenv["PATH"] = tools + os.pathsep + env.get("PATH", "")
-        if spec.base and rendered.meta.get("project_base_sha"):
-            # user decision (2026-11-18): the role's commit hook reads <base>'s lefthook config
-            lh = S.base_lefthook_env(spec.worktree, rendered.meta["project_base_sha"], os.path.join(run_dir, "in"))
-            gitenv.update(lh)
-            env.update(lh)
+        # user decision (2026-11-18): the role's commit hook reads <base>'s lefthook config; <base>
+        # unknown → LEFTHOOK=0 (fail closed, K4r2-m2 — never the branch's config)
+        lh = S.base_lefthook_env(spec.worktree, rendered.meta.get("project_base_sha") if spec.base else None,
+                                 os.path.join(run_dir, "in"))
+        gitenv.update(lh)
+        env.update(lh)
         if rendered.meta.get("gates_dir"):
             # K3: a hook manager's gate (lefthook `guild-gate`) reads the BASE config too
             gitenv["GUILD_GATE_CONFIG"] = S.gate_config_path(rendered.meta["gates_dir"])
@@ -479,9 +504,10 @@ class Runner(object):
         gates_ok = (rendered.meta.get("gates_dir") is None or S.verify_gates(
             rendered.meta["gates_dir"], rendered.meta.get("gates_digest"))) and all(
             S.verify_gates(d, h) for d, h in rendered.meta.get("hook_files") or [])
-        if late or not gates_ok:
+        lh_local = lefthook_local_problem(spec, rendered.meta.get("project_base_sha") if spec.base else None)
+        if late or not gates_ok or lh_local:
             v = (["late change after the previous step: %s" % x for x in late] +
-                 ([] if gates_ok else ["gate scripts changed since export"]))
+                 ([] if gates_ok else ["gate scripts changed since export"]) + lh_local)
             self._last = RoleResult("DRIFT", "worktree changed between steps — %s" % "; ".join(v)[:300],
                                     violations=v, run_dir=run_dir, notes=["not run"])
             return None

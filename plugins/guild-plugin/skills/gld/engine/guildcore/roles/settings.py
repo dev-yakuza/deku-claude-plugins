@@ -28,6 +28,7 @@ import re
 import subprocess
 
 from guildcore.roles import permissions
+from guildcore.roles import scope as SC
 
 GATES_REL = ".claude/guild/gates"
 PROJECT_REL = ".claude/settings.json"
@@ -115,9 +116,8 @@ def export_gates(worktree, base_sha, dest):
 
 GATE_CONFIG_NAME = ".config.json"
 
-# lefthook's own config search order (v1/v2: root `lefthook.*` / `.lefthook.*`, then `.config/lefthook.*`)
-LEFTHOOK_NAMES = tuple("%s%s.%s" % (d, n, e) for d in ("", ".config/") for n in ("lefthook", ".lefthook")
-                       for e in ("yml", "yaml", "json", "toml") if not (d and n.startswith(".")))
+# lefthook's own config search order — the one list in `scope` (K4r2-m9: the 1L checks read the same)
+LEFTHOOK_NAMES = SC.LEFTHOOK_NAMES
 
 
 def base_lefthook_env(worktree, base_sha, dest_dir):
@@ -126,10 +126,13 @@ def base_lefthook_env(worktree, base_sha, dest_dir):
     (editing lefthook.yml on the branch stays allowed; it just does not gate the branch's own
     commits). The base copy goes into the run dir's `in/` (roles denyWrite) and lefthook reads it via
     `LEFTHOOK_CONFIG`; a base without any lefthook config → `LEFTHOOK=0` (a config the branch added
-    never runs as the hook). Known limit: lefthook still merges an untracked `lefthook-local.yml`
-    from the worktree root (a role-created one is a new untracked file the scope check sees)."""
+    never runs as the hook); no base (or no worktree) → `LEFTHOOK=0` too — fail closed (K4r2-m2).
+    lefthook still merges a `lefthook-local.*` overlay on top of `LEFTHOOK_CONFIG`; no role can
+    create or change one (K4r2-m1: `scope.PROTECTED`, denyWrite in every role sandbox, watched by the
+    integrity snapshot even when gitignored), and a writer role does not start while one exists that
+    <base> does not carry (`runner.lefthook_local_problem`)."""
     if not worktree or not base_sha or not dest_dir:
-        return {}
+        return {"LEFTHOOK": "0"}
     for name in LEFTHOOK_NAMES:
         rc, out = _git(worktree, "show", "%s:%s" % (base_sha, name))
         if rc == 0:
@@ -323,6 +326,9 @@ def role_sandbox(role_key, worktree, run_dir, issue=None, homes=(), config_dir=N
             deny_w += [g + "/hooks/**", g + "/config", g + "/config.worktree", g + "/info/**"]
         deny_w += [engine_home(common) + "/**", common + "/guild/**",
                    wt + "/.claude/**", os.path.join(main_checkout(worktree), ".claude") + "/**"]
+        # K4r2-m1: the lefthook-local overlay (gitignored, merged over LEFTHOOK_CONFIG) — path literals,
+        # existing or not, in this worktree and the main checkout
+        deny_w += SC.lefthook_local_files(wt) + SC.lefthook_local_files(main_checkout(worktree))
     # other Claude Code sessions' TMPDIR subtrees (scratchpads, tasks/*.output): denyWrite —
     # except the one holding this worktree/run (a harness; production keeps worktrees outside)
     tmp = claude_tmp_root()

@@ -10,8 +10,8 @@
   `write` line with the server id (comment id, timeline label event ids) so the engine's own
   writes are never read back as a human's (§2.5 신원 한계, K0-m10);
 * **idempotent** — a comment upsert with an identical body is skipped; label edits are set
-  differences (needs-human removed only when present); Issue creation searches for its hidden
-  key first (A-F23);
+  differences (needs-human removed only when present); Issue creation lists its label for its
+  hidden key first — never the search index (A-F23, K4r2-M1);
 * cumulative records (loopback · auditor:execute · decisions) are re-read right before the
   PATCH; if the block count moved, the insert is recomputed and retried once; the check after
   is "MY block is present" (CR-m13), not a whole-body hash.
@@ -37,6 +37,12 @@ def _final_redact(text):
 
 def _sha(text):
     return hashlib.sha256((text or "").encode("utf-8")).hexdigest()
+
+
+def withdrawn(row):
+    """An Issue a person closed as not planned — no longer the holder of its hidden key (K4r2-m4)."""
+    return ((row.get("state") or "").upper() == "CLOSED"
+            and (row.get("stateReason") or "").upper().replace(" ", "_") == "NOT_PLANNED")
 
 
 class GhWriter(object):
@@ -136,7 +142,9 @@ class GhWriter(object):
             return _sha(self.read.pr(int(tgt)).get("body") or "") == it.get("body_sha256")
         if op == "issue:create":
             tag = it.get("key_tag")
-            return bool(tag) and any(tag in (x.get("body") or "") for x in self.read.issue_search(tag))
+            if not tag:
+                return False
+            return self.keyed_issue(tag, it.get("find_label")) is not None     # K4r2-M1: the listing, never search
         return False
 
     def _records(self, issue):
@@ -317,28 +325,56 @@ class GhWriter(object):
                       reason=reason)
         return True
 
-    def issue_create(self, title, body, labels=(), key=None, key_kind="slice-key"):
-        """Create once: the body carries `<!-- guild:<key_kind> <key> -->`; an existing Issue
-        with that key is returned instead (A-F23). Returns (number, created)."""
+    MEMBERS = ("OWNER", "MEMBER", "COLLABORATOR")
+
+    def keyed_issue(self, tag, label, members=None):
+        """K4r2-M1/m6: the Issue that already carries the hidden key `tag` — found by the LABEL
+        LISTING (`gh issue list --label`, the repository's issue connection: strongly consistent,
+        newest first), never by the search API (an eventually consistent index that misses an
+        Issue created seconds ago → a duplicate child). Only an Issue that carries `label` AND whose
+        author is a member counts: an outsider who opens an Issue with the public key first plants
+        nothing. An Issue closed as NOT_PLANNED is withdrawn (a person re-splitting closes the old
+        children that way) and never counts. An unreadable author association raises (unknown is never member, never outsider).
+        The lowest number wins when two carry the key (the caller fails on duplicates)."""
+        from guildcore.state import label_names as _ln
+        members = tuple(members or self.MEMBERS)
+        rows = self._call("issue:list", lambda: self.read.issue_list(state="all", label=label, limit=200))
+        hits = sorted((r for r in rows or [] if tag in (r.get("body") or "")
+                       and (label is None or label in _ln(r.get("labels"))) and not withdrawn(r)),
+                      key=lambda r: int(r["number"]))
+        for r in hits:
+            assoc = self._call("issue:author", lambda: self.read.issue_author_association(int(r["number"])))
+            assoc = (assoc or "").strip()
+            if not assoc:
+                raise GhWriteError("issue:author", "author association of #%s unreadable" % r["number"], "transient")
+            if assoc in members:
+                return {"number": int(r["number"]), "found": True}
+        return None
+
+    def issue_create(self, title, body, labels=(), key=None, key_kind="slice-key", members=None):
+        """Create once: the body carries `<!-- guild:<key_kind> <key> -->`; an existing member Issue
+        with that key and the first label is returned instead (A-F23). The intent is journaled
+        BEFORE the POST (with the key tag and the listing label), and every "did it land?" read —
+        before the create, after an ambiguous failure, on restart — is the label listing
+        (`keyed_issue`), never the search index (K4r2-M1). Returns (number, created)."""
+        tag = None
+        label = None
         if key is not None:
+            # the listing label: guild:child for a child; an unlabelled keyed create lists every Issue
+            # (still the consistent listing, newest first — never the search index)
+            label = ("guild:child" if "guild:child" in labels else list(labels)[0]) if labels else None
             tag = "<!-- guild:%s %s -->" % (key_kind, key)
             if tag not in body:
                 body = body.rstrip("\n") + "\n\n" + tag + "\n"
-            for it in self._call("issue:search", lambda: self.read.issue_search(tag)):
-                if tag in (it.get("body") or ""):
-                    return int(it["number"]), False
-        tag = "<!-- guild:%s %s -->" % (key_kind, key) if key is not None else None
+            hit = self.keyed_issue(tag, label, members)
+            if hit is not None:
+                return hit["number"], False
 
         def find():
-            if not tag:
-                return None
-            for it in self.read.issue_search(tag):
-                if tag in (it.get("body") or ""):
-                    return {"number": it["number"], "found": True}
-            return None
+            return self.keyed_issue(tag, label, members) if tag else None
         res = self._perform("issue:create", key or title,
                             lambda: self.write.create_issue(title, body, labels),
                             lambda r: bool(r and r.get("number")) and
                             (self.read.issue(r["number"]).get("body") or "") == body,
-                            find=find if tag else None, key_tag=tag, body_sha256=_sha(body))
+                            find=find if tag else None, key_tag=tag, find_label=label, body_sha256=_sha(body))
         return int(res["number"]), not res.get("found")

@@ -28,6 +28,7 @@ from guildcore.adapters.gh import GhWriteError
 from guildcore.decisions import DecisionLog
 from guildcore.records import markers
 from guildcore.records import outputs as OUT
+from guildcore.records.write import withdrawn
 from workflows.dev import analysis as AN
 from workflows.dev import arbitration as ARB
 from workflows.dev import handoff as HO
@@ -93,6 +94,15 @@ def specialist_file(role):
     return "ux.md" if role == "designer" else "%s.md" % role
 
 
+def duplicate_keys(children):
+    seen = {}
+    for c in children:
+        m = SLICE_KEY_RE.search(c.get("body") or "")
+        if m:
+            seen.setdefault(m.group(1), []).append(c["number"])
+    return dict((k, sorted(v)) for k, v in seen.items() if len(v) > 1)
+
+
 def existing_keys(children):
     out = {}
     for c in children:
@@ -123,7 +133,10 @@ def run(p, only=None, config_present=True):
     kick = kickoff_block(comments)
     cfg = getattr(p.config, "raw", None) or (p.config if isinstance(p.config, dict) else {})
     issue = p.gh.issue(p.issue)
-    trust, _assoc = A.trusted_body(p, issue)
+    try:
+        trust, _assoc = A.trusted_body(p, issue)
+    except A.TrustUnknown as ex:
+        return A.unknown_trust_result(p, STAGE, ex)
     body = issue.get("body") or ""
     if not trust:
         body = A.OUTSIDER_PREFACE + body                 # K4r1-m10: DE-ARB / STAKES briefs mark it untrusted
@@ -132,7 +145,8 @@ def run(p, only=None, config_present=True):
         for m in ("<!-- guild:refactor-slot -->", "<!-- guild:safety-net -->", "<!-- guild:safety-net-only -->"):
             if m in body:
                 slot += m.replace("<!-- guild:", "").replace(" -->", "") + "\n"
-    children = ST.discover_children(p.gh, p.issue)
+    # K4r2-m4: a child a person closed as not planned is withdrawn (the documented re-split path)
+    children = [c for c in ST.discover_children(p.gh, p.issue) if not withdrawn(c)]
     answers = {}
     for kind in ("design-block", "leaf-split", "escalation"):
         q, res = B.pending_answer(p, STAGE, kind, comments)
@@ -367,10 +381,13 @@ def child_body(parent, sl, ac_by_id, trusted=True):
 
 
 def split_block(comments):
-    """The recorded SPLIT decision that chose `split` (the last one), or None."""
+    """The recorded SPLIT decision that chose `split` (the last one not resolved by a later block —
+    a person's `superseded`, K4r2-m4), or None."""
+    log = DecisionLog.load(comments)
+    gone = log.resolved_ids()
     blk = None
-    for b in DecisionLog.load(comments).blocks:
-        if b.get("point") == "SPLIT" and b.get("stage") == STAGE:
+    for b in log.blocks:
+        if b.get("point") == "SPLIT" and b.get("stage") == STAGE and b.id not in gone:
             blk = b
     return blk if blk is not None and blk.get("choice") == "split" else None
 
@@ -378,6 +395,11 @@ def split_block(comments):
 def _plan_sha(text):
     import hashlib
     return hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
+
+
+def ac_sha(ac):
+    """K4r2-m4: the analysis the plan was made from — every AC id and text, in order."""
+    return _plan_sha("\n".join("%s: %s" % (a["id"], a["text"]) for a in ac))
 
 
 def load_plan(p, blk):
@@ -422,7 +444,7 @@ def do_split(p, e, rec, split, sk_text, children, is_leaf, answers, rows, assump
     if choice == "split" and not is_leaf:
         # K4r1-M2: the plan is stored BEFORE the decision is recorded and before any child exists —
         # every later run resumes from exactly this plan (sha in the block), never from a new judgment
-        plan = {"slices": [{"key": s["key"], "name": str(s.get("name") or s["key"])[:200],
+        plan = {"ac_sha": ac_sha(rec.ac), "slices": [{"key": s["key"], "name": str(s.get("name") or s["key"])[:200],
                             "scope": str(s.get("scope") or "")[:4000], "order": s.get("order") or 0,
                             "ac_ids": [x for x in s.get("ac_ids") or [] if isinstance(x, str)]} for s in slices],
                 "render": {"rows": [list(r) for r in rows], "visual": bool(visual), "specialists": list(specialists),
@@ -466,6 +488,11 @@ def resume_split(p, e, rec, children, blk, is_leaf, answers, trusted):
     plan, why = load_plan(p, blk)
     if plan is None:
         return B.fail(p, STAGE, "split resume — %s; existing children: %s — a person decides" % (why, nums))
+    if plan.get("ac_sha") != ac_sha(rec.ac):
+        # K4r2-m4: rollback → analyze re-ran → the AC changed; the old plan would leave new AC in no child
+        return B.fail(p, STAGE, "split resume — the acceptance criteria changed since the recorded split plan %s; "
+                      "a person decides (close the children as not planned and supersede the SPLIT block to "
+                      "re-split, or restore the analysis)" % blk.id)
     want = set("%d-%s" % (p.issue, s["key"]) for s in plan["slices"])
     stray = []
     for c in children:
@@ -482,7 +509,8 @@ def resume_split(p, e, rec, children, blk, is_leaf, answers, trusted):
 
 def make_children(p, e, rec, plan, children, answers, trusted):
     """Create the plan's missing children in order — idempotent by slice key (the listing first, the
-    writer's own key search second, a re-listing after an ambiguous failure) — then design:output →
+    writer's own label listing second — never the search index, K4r2-M1 — a re-listing after an
+    ambiguous failure, and two live children with one key → a person) — then design:output →
     `guild:children` → roster (A-F38). A failure goes through `B.fail` (needs-human unattended)."""
     slices = sorted(plan["slices"], key=lambda s: s.get("order") or 0)
     ac_by_id = dict((a["id"], a) for a in rec.ac)
@@ -494,18 +522,25 @@ def make_children(p, e, rec, plan, children, answers, trusted):
         title = CHILD_PREFIX + markers.value(s.get("name") or s["key"])[:90]
         try:
             n, _created = p.writer.issue_create(title, child_body(p.issue, s, ac_by_id, trusted),
-                                                labels=["guild:child", "guild:analyze"], key=full)
+                                                labels=["guild:child", "guild:analyze"], key=full,
+                                                members=A.members(p))
         except GhWriteError as ex:
             if ex.kind in ("auth", "ratelimit"):
                 raise                                   # the FSM's exit 3 / 75
-            again = existing_keys(ST.discover_children(p.gh, p.issue))
+            again = existing_keys([c for c in ST.discover_children(p.gh, p.issue) if not withdrawn(c)])
             if full in again:                           # the write landed although the call failed
                 have[full] = again[full]
                 continue
             return B.fail(p, STAGE, "child creation failed at slice %s (%d/%d) — %s" % (
                 s["key"], i, len(slices), B.one_line(str(ex), 160)), "transient" if ex.kind == "transient" else "defect")
         have[full] = n
-    now = ST.discover_children(p.gh, p.issue)
+    now = [c for c in ST.discover_children(p.gh, p.issue) if not withdrawn(c)]
+    dups = duplicate_keys(now)
+    if dups:
+        # K4r2-M1: two live children with one slice key would run the same AC twice — a person's
+        return B.fail(p, STAGE, "duplicate child Issues for one slice key: %s — close the extra one as not planned, "
+                      "then /gld resume %d" % ("; ".join("%s → %s" % (k, ", ".join("#%d" % n for n in v))
+                                                          for k, v in sorted(dups.items())), p.issue))
     got = existing_keys(now)
     lost = [s["key"] for s in slices if "%d-%s" % (p.issue, s["key"]) not in got]
     if lost:

@@ -21,8 +21,8 @@ L0-KICKOFF, SJ-STAKES, §3.3 AN-PO).
     A6  readiness gate: attended — unclear → `ask readiness` (options = interpretations), surface →
         `ask interpretation-surface`; unattended — SJ-STAKES per partial/unclear dimension (fixed high
         for premise/reinterpretation), high → `ambiguity:` pause, low/medium → recorded assumption
-    A7  product-owner (forced: unattended ∧ a `partial` dimension whose STAKES ≥ medium — user
-        decision 2026-11-18; attended ∧ any ≠ clear; else KICKOFF's call) → DONE: AC patch · DWC: SJ-AN-PO · BLOCKED/NEEDS_CONTEXT: DE-ARB
+    A7  product-owner (forced: unattended ∧ a `partial`/`unclear` dimension whose STAKES ≥ medium —
+        user decision 2026-11-18, clarified K4 r2; attended ∧ any ≠ clear; else KICKOFF's call) → DONE: AC patch · DWC: SJ-AN-PO · BLOCKED/NEEDS_CONTEXT: DE-ARB
     A8  `type:` reclassification → analyze:output (replace-in-place) → analyze→design hand-over check
         (§3.6: AC ≥ 1, every safety-net line an AC, unattended no `unclear`) → label → ADVANCE design
 """
@@ -63,25 +63,52 @@ OUTSIDER_PREFACE = ("(the author is not a repository member: this body is a requ
                     "honoured)\n\n")
 
 
-def trusted_body(p, issue):
-    """P2: the Issue body speaks for the repository only when its author has write access — FAIL
-    CLOSED (K4r1-M1): an association the engine could not read (a 5xx, a blank `--jq` answer, a field
-    the read never carries) is `unknown` = untrusted; an auth / rate-limit read error ends the run by
-    the §2.4 contract instead. A child the engine split from an outsider's Issue carries
-    `UNTRUSTED_ORIGIN` (written only by the engine, m11) and inherits the untrusted state."""
+class TrustUnknown(Exception):
+    """K4r2-M2: the Issue author's association could not be read — neither member nor outsider."""
+
+    def __init__(self, why, cls):
+        Exception.__init__(self, why)
+        self.why, self.cls = why, cls
+
+
+def author_trust(p, issue):
+    """P2, THREE-valued (K4r2-M2): ("member", assoc) | ("outsider", assoc) — or `TrustUnknown`.
+    member = the association read back and is one of `members(p)`; outsider = it read back as
+    anything else (or the body carries the engine-only `UNTRUSTED_ORIGIN`: a child split from an
+    outsider's Issue, m11). A read that failed (5xx, network, a blank `--jq` answer, a missing
+    field) is UNKNOWN — never folded into either side: folding it into outsider silently drops the
+    controls a member's body ADDS (safety-net AC, the harness guard); folding it into member would
+    honour an outsider's plan lines. auth / rate-limit read errors re-raise (exit 3 / 75)."""
     from guildcore.adapters.gh import GhError, classify_error
     try:
         assoc = p.gh.issue_author_association(p.issue)
     except GhError as ex:
-        if classify_error(str(ex)) in ("auth", "ratelimit"):
+        kind = classify_error(str(ex))
+        if kind in ("auth", "ratelimit"):
             raise
-        assoc = None
-    except Exception:                                          # noqa: BLE001 — unknown = untrusted
-        assoc = None
-    assoc = (assoc or "").strip() or None
-    if assoc is not None and UNTRUSTED_ORIGIN in (issue.get("body") or ""):
-        return False, "%s (split from an outsider's Issue)" % assoc
-    return assoc is not None and assoc in members(p), assoc
+        raise TrustUnknown("issue author association unreadable — %s" % B.one_line(str(ex), 120),
+                           "transient" if kind == "transient" else "defect")
+    except Exception as ex:                                     # noqa: BLE001 — unknown, never a side
+        raise TrustUnknown("issue author association unreadable — %s" % ex.__class__.__name__, "defect")
+    assoc = (assoc or "").strip() if isinstance(assoc, str) or assoc is None else ""
+    if not assoc:
+        raise TrustUnknown("issue author association unreadable — empty answer", "defect")
+    if UNTRUSTED_ORIGIN in (issue.get("body") or ""):
+        return "outsider", "%s (split from an outsider's Issue)" % assoc
+    return ("member" if assoc in members(p) else "outsider"), assoc
+
+
+def trusted_body(p, issue):
+    """(True | False, assoc) for a READ association; `TrustUnknown` propagates (the caller pauses —
+    `unknown_trust_result`)."""
+    t, assoc = author_trust(p, issue)
+    return t == "member", assoc
+
+
+def unknown_trust_result(p, stage, ex):
+    """K4r2-M2: unknown trust stops the stage — transient → `env: service`, else `defect` (attended:
+    FAIL). Never proceeds with either guess."""
+    return B.fail(p, stage, "%s — trust of the Issue body cannot be decided (P2)" % ex.why, ex.cls)
 
 
 def human_comments(p, comments):
@@ -142,7 +169,10 @@ def run(p, only=None, config_present=True):
     comments = B.records(p)
     issue = p.gh.issue(p.issue)
     body = issue.get("body") or ""
-    trust, assoc = trusted_body(p, issue)
+    try:
+        trust, assoc = trusted_body(p, issue)
+    except TrustUnknown as ex:
+        return unknown_trust_result(p, STAGE, ex)
     plan = AN.plan_decisions(body) if trust else []
     net = AN.safety_net_lines(body) if trust else []
     if not trust and (AN.PLAN_OPEN in body or AN.SAFETY_NET in body):
@@ -383,9 +413,11 @@ def run(p, only=None, config_present=True):
 
     # A7 — product-owner
     po_line = None
-    # user decision (2026-11-18): unattended forcing only for a `partial` requirement whose stakes are
-    # ≥ medium (a person's answer is not a stakes level); attended unchanged — a person is present
-    forced = (p.unattended and any(k.readiness[x] == "partial" and stakes.get(x) in ("medium", "high")
+    # user decision (2026-11-18, clarified in K4 r2): unattended forcing only for a requirement that is
+    # `partial` OR `unclear` (an unclear one proceeds on an assumption at stakes medium) with stakes ≥
+    # medium — narrow to cut cost, but the uncertain ones are reviewed (a person's answer is not a stakes
+    # level); attended unchanged — a person is present
+    forced = (p.unattended and any(k.readiness[x] in ("partial", "unclear") and stakes.get(x) in ("medium", "high")
                                    for x in AN.DIMS)) or \
         (not p.unattended and any(k.readiness[x] != "clear" for x in AN.DIMS))
     if (forced or k.po["convene"]) and "product-owner" in ros:

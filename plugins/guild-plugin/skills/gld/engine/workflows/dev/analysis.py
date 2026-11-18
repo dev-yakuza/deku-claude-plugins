@@ -152,18 +152,32 @@ def _norm(s):
     return " ".join((s or "").split())
 
 
-# K4r1-M5: "close as decided" needs an ENGINE-verified member plan line that itself decides the close —
-# the judgment's quote must equal one whole line (bullet optional) and that line's answer must carry a
-# close token; a reason-specific token must agree with the judged reason. A conservative rule until
-# the sprint plan prints a machine token (§7 "다음 설계").
-CLOSE_NOT_PLANNED_RE = re.compile(r"not[ _-]?planned|won'?t[ _-]?(?:fix|do)|하지 않|안 함|안 한다|하지 않기로|취소", re.I)
-CLOSE_COMPLETED_RE = re.compile(r"이미 충족|이미 구현|already (?:done|met|satisfied|implemented)|\bcompleted\b", re.I)
-CLOSE_ANY_RE = re.compile(r"\bclose[sd]?\b|닫(?:음|는다|기|자|아)|작업 불필요|no work needed", re.I)
+# K4r2-M3: "close as decided" is a STRUCTURED decision of the plan-decision grammar, never words found
+# in an ordinary answer (`… 동기화하지 않음`, `닫기 버튼 재사용`, `completed 상태에서 …`, `취소 버튼 추가`
+# are requirements, not closes). A member plan line closes the Issue only when
+#   * its dimension is `Goal`, and
+#   * its ANSWER STARTS with the close form  `close: completed` | `close: not_planned`
+#     (`not planned` / `not-planned` accepted; Korean `닫음: 이미 충족` = completed, `닫음: 하지 않기로` =
+#     not_planned), optionally followed by ` — <why>` / ` - <why>` / ` (<why>)` and the plan's own tail;
+#   * the judgment's quote equals that whole line (bullet optional) and its reason agrees.
+# Everything else is an ordinary answer: attended `ask close-decided`, unattended `ambiguity:`.
+CLOSE_FORM_RE = re.compile(r"^(?:close|닫음)\s*:\s*(completed|not[ _-]planned|이미 충족|하지 않기로)(?=\s*(?:$|[—(-]))",
+                           re.I)
+CLOSE_FORM_REASON = {"completed": "completed", "이미 충족": "completed", "하지 않기로": "not_planned"}
+
+
+def close_form(answer):
+    """`completed` | `not_planned` when `answer` IS a structured close decision, else None."""
+    m = CLOSE_FORM_RE.match((answer or "").strip())
+    if not m:
+        return None
+    tok = m.group(1).lower()
+    return CLOSE_FORM_REASON.get(tok) or ("not_planned" if tok.startswith("not") else None)
 
 
 def close_plan_line(quote, plan_lines, decide):
-    """The member plan line `quote` names EXACTLY whose answer decides a close compatible with
-    `decide` (completed | not_planned) — else None."""
+    """The member Goal plan line `quote` names EXACTLY whose answer is the structured close form
+    for `decide` (completed | not_planned) — else None."""
     q = _norm(quote)
     if not q:
         return None
@@ -171,15 +185,10 @@ def close_plan_line(quote, plan_lines, decide):
         raw = _norm(pl.raw)
         if q not in (raw, _norm(re.sub(r"^\s*[-*]\s*", "", pl.raw))):
             continue
-        ans = pl.answer or ""
-        np_, cp = bool(CLOSE_NOT_PLANNED_RE.search(ans)), bool(CLOSE_COMPLETED_RE.search(ans))
-        if np_ and cp:
-            return None                                # both reasons named — not a decision
-        if np_:
-            return pl if decide == "not_planned" else None
-        if cp:
-            return pl if decide == "completed" else None
-        return pl if CLOSE_ANY_RE.search(ans) else None
+        if pl.dim != "goal":
+            return None
+        form = close_form(pl.answer)
+        return pl if form is not None and form == decide else None
     return None
 
 

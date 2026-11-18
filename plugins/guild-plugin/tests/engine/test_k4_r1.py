@@ -132,16 +132,21 @@ class B1(unittest.TestCase):
         main, cfg = _main_with_origin(self)
         wt = os.path.join(tmpdir(self), "wt")
         git(main, "worktree", "add", "-q", "-b", "feat/7-legacy", wt)
+        gh = self._gh()
+        gh.fx.setdefault("prs", []).append({"number": 90, "state": "OPEN", "headRefName": "feat/7-legacy",
+                                            "body": "Closes #7", "title": "x"})   # K4r2-m3: its open PR head
         with mock.patch("workflows.dev.branching.worktree_path", lambda m, n: wt):
-            p = self._factory(main, cfg, self._gh())(7, "test")
+            p = self._factory(main, cfg, gh)(7, "test")
         self.assertEqual(p.branch, "feat/7-legacy")
+        self.assertEqual(p.base, "origin/main")                  # K4r2-m2: the resolved base, never None
+        self.assertIsNone(getattr(p, "unavailable", None))
 
 
 # ---- M1 — author trust fails closed ------------------------------------------------------------------
 
-CLOSE_BODY = ("x\n<!-- guild:plan-decision -->\n- Goal: 할까요? → 현행 유지, 닫는다 (2026-10-28, sprint plan)\n"
+CLOSE_BODY = ("x\n<!-- guild:plan-decision -->\n- Goal: 할까요? → close: not_planned — 현행 유지 (2026-10-28, sprint plan)\n"
               "<!-- /guild:plan-decision -->\n")
-CLOSE_LINE = "- Goal: 할까요? → 현행 유지, 닫는다 (2026-10-28, sprint plan)"
+CLOSE_LINE = "- Goal: 할까요? → close: not_planned — 현행 유지 (2026-10-28, sprint plan)"
 
 
 class M1(unittest.TestCase):
@@ -149,19 +154,25 @@ class M1(unittest.TestCase):
         return K4(self, body=CLOSE_BODY, author=author, roles=[evidence(self)], judges={"KICKOFF": kickoff(
             close={"decide": "not_planned", "source": "plan_line", "line": CLOSE_LINE})})
 
-    def test_association_read_error_is_untrusted(self):
+    def test_association_read_error_is_unknown_never_a_side(self):
+        # K4r2-M2 changed this: unknown is neither member nor outsider — the stage pauses (env: service)
         h = self._close_h()
         h.gh.issue_author_association = _raise(GhError("HTTP 502: Bad Gateway"))
-        self.assertEqual(A.trusted_body(h.p, h.gh.issue(7)), (False, None))
+        with self.assertRaises(A.TrustUnknown) as cm:
+            A.trusted_body(h.p, h.gh.issue(7))
+        self.assertEqual(cm.exception.cls, "transient")
         r = A.run(h.p)
-        self.assertEqual(r.kind, StageResult.PAUSE)              # the plan line is not honoured → no close
+        self.assertEqual(r.kind, StageResult.PAUSE)              # no close, no guess
         self.assertEqual(h.issue()["state"], "OPEN")
+        self.assertIn("env: service", h.body_with("needs-human"))
 
-    def test_blank_or_missing_association_is_untrusted(self):
+    def test_blank_or_missing_association_is_unknown(self):
         for v in ("", "  ", None):
             h = self._close_h()
             h.gh.issue_author_association = lambda n, v=v: v
-            self.assertFalse(A.trusted_body(h.p, dict(h.gh.issue(7), author_association="OWNER"))[0])
+            with self.assertRaises(A.TrustUnknown) as cm:
+                A.trusted_body(h.p, dict(h.gh.issue(7), author_association="OWNER"))
+            self.assertEqual(cm.exception.cls, "defect")
 
     def test_association_auth_error_ends_the_run_with_3(self):
         h = self._close_h()
@@ -327,7 +338,7 @@ class M4(unittest.TestCase):
 
 class M5(unittest.TestCase):
     BODY = ("x\n<!-- guild:plan-decision -->\n- Goal: 화면 범위? → 기존 위젯 재사용 (2026-10-28, sprint plan)\n"
-            "- Success: 이미 되나? → 하지 않기로 (2026-10-28, sprint plan)\n<!-- /guild:plan-decision -->\n")
+            "- Goal: 이미 되나? → 닫음: 하지 않기로 — 부채로 기록 (2026-10-28, sprint plan)\n<!-- /guild:plan-decision -->\n")
 
     def _h(self, line, decide="completed"):
         return K4(self, body=self.BODY, roles=[evidence(self)], judges={"KICKOFF": kickoff(
@@ -344,12 +355,12 @@ class M5(unittest.TestCase):
         self.assertEqual(h.issue()["state"], "OPEN")
 
     def test_reason_must_agree_with_the_line(self):
-        h = self._h("- Success: 이미 되나? → 하지 않기로 (2026-10-28, sprint plan)", "completed")
+        h = self._h("- Goal: 이미 되나? → 닫음: 하지 않기로 — 부채로 기록 (2026-10-28, sprint plan)", "completed")
         self.assertEqual(A.run(h.p).kind, StageResult.PAUSE)
-        h2 = self._h("Success: 이미 되나? → 하지 않기로 (2026-10-28, sprint plan)", "not_planned")   # bullet optional
+        h2 = self._h("Goal: 이미 되나? → 닫음: 하지 않기로 — 부채로 기록 (2026-10-28, sprint plan)", "not_planned")  # bullet optional
         self.assertEqual(A.run(h2.p).kind, StageResult.DONE)
         self.assertEqual(h2.issue()["stateReason"], "NOT_PLANNED")
-        self.assertIn("- Success: 이미 되나? → 하지 않기로", h2.body_with("closed-as-decided"))
+        self.assertIn("- Goal: 이미 되나? → 닫음: 하지 않기로", h2.body_with("closed-as-decided"))
 
 
 # ---- user decisions (2026-11-18) ---------------------------------------------------------------------
@@ -471,11 +482,11 @@ class Minors(unittest.TestCase):
             def get(self, k):
                 return "yes"
         order = []
-        with mock.patch.object(CH, "fix_child", lambda p, q: order.append("create")), \
+        with mock.patch.object(CH, "fix_child", lambda p, q, *a: order.append("create")), \
                 mock.patch.object(B, "mark_applied", lambda p, s, r: order.append("applied")), \
                 mock.patch.object(B, "pending_answer", lambda *a, **k: (None, Res())), \
                 mock.patch.object(CH.ST, "discover_children", lambda gh, n: [{"number": 8, "labels": ["guild:done"]}]), \
-                mock.patch.object(CH, "integrate", lambda p, kids: StageResult(StageResult.DONE)):
+                mock.patch.object(CH, "integrate", lambda p, kids, *a: StageResult(StageResult.DONE)):
             CH.run(h.p, lambda c: None)
         self.assertEqual(order, ["create", "applied"])
 

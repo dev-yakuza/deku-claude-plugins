@@ -23,6 +23,11 @@
 #     child creation and B.fail failures, every FSM end on the exit-code contract, close only from an exact
 #     member plan line, the minors, and the user decisions of 2026-11-18 (PO forcing, outsider text vs the
 #     harness guard, the role commit's lefthook config from <base>).
+#   • review r2 (test_k4_r2.py): child-creation dedup by the label listing under a STALE search index,
+#     three-valued author trust (unknown pauses), close only from the structured close form, PO forcing
+#     for partial OR unclear ∧ stakes ≥ medium, the lefthook-local overlay closed + LEFTHOOK=0 without a
+#     base + one lefthook name list, the fallback push branch, superseded/stale split plans, planted keys,
+#     the outsider mark on fix children and the 2c inputs.
 # No test calls `claude`, a model or GitHub (a failing `gh` is first on PATH).
 #
 # Usage: bash plugins/guild-plugin/tests/engine_k4_test.sh
@@ -52,7 +57,7 @@ if [ "$RC" -ne 0 ]; then
 fi
 echo "engine K4: $PASS passed, $FAIL failed"
 # ⚠ Keep equal to the measured PASS count; raise it only when tests are added on purpose.
-ENGINE_K4_MIN_TESTS=138
+ENGINE_K4_MIN_TESTS=167
 if [ "$((PASS + FAIL))" -lt "$ENGINE_K4_MIN_TESTS" ]; then
   echo "FAIL  실행된 검사가 $((PASS + FAIL))건뿐입니다 (최소 ${ENGINE_K4_MIN_TESTS}건)."
   exit 1

@@ -217,8 +217,27 @@ class Check(object):
         return self.run
 
 
+def load_config(name, text):
+    """K4r2-m9: a base lefthook config of any name lefthook reads → a mapping (yml/yaml by the
+    minimal reader, json by `json`, toml by `tomllib` when the host has it) — None when unreadable."""
+    import json
+    low = name.lower()
+    try:
+        if low.endswith(".json"):
+            doc = json.loads(text)
+        elif low.endswith(".toml"):
+            import tomllib
+            doc = tomllib.loads(text)
+        else:
+            doc = parse_yaml(text)
+    except (ValueError, ImportError):
+        return None
+    return doc if isinstance(doc, dict) else None
+
+
 def derive(lefthook_text, raw_config, skipped=None):
-    """[Check] for a 1L commit; `skipped` collects (name, why) for the dropped hook commands."""
+    """[Check] for a 1L commit; `skipped` collects (name, why) for the dropped hook commands.
+    `lefthook_text` is the config text (YAML) or an already-loaded mapping (`load_config`)."""
     skipped = skipped if skipped is not None else []
     eng = (raw_config or {}).get("engine") or {}
     over = eng.get("local_checks")
@@ -226,8 +245,8 @@ def derive(lefthook_text, raw_config, skipped=None):
         return [Check("config:%d" % i, c, source="config") for i, c in enumerate(over)]
     skip_names = set((over or {}).get("skip") or []) if isinstance(over, dict) else set()
     out = []
-    if lefthook_text:
-        doc = parse_yaml(lefthook_text)
+    if lefthook_text or isinstance(lefthook_text, dict):
+        doc = lefthook_text if isinstance(lefthook_text, dict) else parse_yaml(lefthook_text)
         cmds = ((doc.get("pre-commit") or {}).get("commands") or {}) if isinstance(doc, dict) else {}
         for name, c in (cmds.items() if isinstance(cmds, dict) else []):
             run = (c or {}).get("run") if isinstance(c, dict) else None

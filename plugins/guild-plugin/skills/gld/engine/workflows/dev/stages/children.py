@@ -72,10 +72,15 @@ def run(p, drive, only=None):
         return B.fail(p, STAGE, "parent #%d is at guild:children but no child Issues reference it" % p.issue)
     B.note_untrusted(p, STAGE)
     B.register_exact(p)
+    from workflows.dev.stages import analyze as A
+    try:                                                  # K4r2-m8/M2: the parent's trust, three-valued
+        trusted = A.trusted_body(p, p.gh.issue(p.issue))[0]
+    except A.TrustUnknown as ex:
+        return A.unknown_trust_result(p, STAGE, ex)
     q, res = B.pending_answer(p, STAGE, "integration-fix-child")
     if res is not None:
         if res.get("choice") == "yes":
-            fix_child(p, q)                               # K4r1-m7: create (idempotent by key) BEFORE the
+            fix_child(p, q, trusted)                              # K4r1-m7: create (idempotent by key) BEFORE the
             kids = ST.discover_children(p.gh, p.issue)    # answer is consumed — a crash re-creates nothing
         B.mark_applied(p, STAGE, res)
     cleaned = cleanup(p, kids)
@@ -94,7 +99,7 @@ def run(p, drive, only=None):
         note = "자식 #%d 에서 멈춤 (%s) — 남은 자식: %s. %s" % (c["number"], r.token(), rest, STOP_LINE)
         r.notes = list(r.notes) + [note]
         return r
-    return integrate(p, ST.discover_children(p.gh, p.issue))
+    return integrate(p, ST.discover_children(p.gh, p.issue), trusted)
 
 
 def _child_facts(p, c):
@@ -110,11 +115,17 @@ def _child_facts(p, c):
             "prs": prs, "test": test_line, "flag": flag}
 
 
-def integrate(p, kids):
+def integrate(p, kids, trusted=True):
     comments = B.records(p)
     an = OUT.find(comments, "analyze:output")
     de = OUT.find(comments, "design:output")
     facts = [_child_facts(p, c) for c in kids]
+    from workflows.dev.stages import analyze as A
+    for f in facts:
+        # K4r2-m8: a child body carrying an outsider's AC text is marked untrusted for the tech-lead
+        # and L0-INTEGRATE, exactly like the parent's body in STAKES / AN-PO / DE-ARB (r1-m10)
+        if not trusted or A.UNTRUSTED_ORIGIN in f["body"]:
+            f["body"] = A.OUTSIDER_PREFACE + f["body"]
     children_md = "\n\n".join("#%d %s\nPR: %s\ntest: %s\n%s\n%s" % (
         f["number"], f["title"], ", ".join("#%s %s" % (x["number"], x.get("state")) for x in f["prs"]) or "none",
         f["test"] or "-", f["flag"], f["body"]) for f in facts)
@@ -181,10 +192,14 @@ def integrate(p, kids):
     return B.pause(p, STAGE, kind, gap_line, "%s: %s" % (kind, gap_line), prose=path)
 
 
-def fix_child(p, q):
+def fix_child(p, q, trusted=True):
     line = (q.get("refs") or "integration fix") if q is not None else "integration fix"
     key = "%d-fix-%s" % (p.issue, hashlib.sha1(line.encode("utf-8")).hexdigest()[:8])
     import re
-    body = "%s\n\nParent Issue: #%d" % (re.sub(r"Parent Issue:\s*#", "Parent Issue #", markers.value(line)), p.issue)
+    body = re.sub(r"Parent Issue:\s*#", "Parent Issue #", markers.value(line))
+    if not trusted:
+        from workflows.dev.stages import analyze as A
+        body += "\n\n" + A.UNTRUSTED_ORIGIN                # K4r2-m8: inherits the outsider parent's untrust
+    body = "%s\n\nParent Issue: #%d" % (body, p.issue)
     p.writer.issue_create("[Guild子] 통합 수정 — %s" % markers.value(line)[:80], body,
                           labels=["guild:child", "guild:analyze"], key=key)
