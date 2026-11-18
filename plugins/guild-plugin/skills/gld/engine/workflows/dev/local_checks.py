@@ -9,24 +9,33 @@ commit, read from <base>'s `lefthook.yml` (never the branch's), minus
 `{"skip": [names], "extra": [commands]}`. No lefthook and no override → `commands.lint` +
 `commands.typecheck`.
 
+A command is a `&&`/`;` chain: the steps that RUN THE TESTS and later steps that read what such a step
+wrote (`--file-reporter json:<f>` → a step naming `<f>`) are dropped, the rest stays (word_app's
+`flutter analyze && … flutter test … && verify_test_coverage.sh <report>` keeps `flutter analyze`,
+K3r3-M1).
+
 Each check runs OFFLINE in the 1L sandbox with `{staged_files}` substituted by the staged files that
-match its `glob` (and not its `exclude`); no matching file → not run (lefthook's own rule). A check that
-fails for an ENVIRONMENT reason (tool missing, a fetch with no network) is `skipped(env: …)` — recorded,
-never a refusal; any other non-zero exit refuses the commit.
+match its `glob` (lefthook semantics incl. braces; a pattern this reader cannot expand → ALL staged
+files, never a silent skip) and not its `exclude`; no matching file → not run (lefthook's own rule).
+
+K3r3-M2 — env is decided ONLY from preconditions the ENGINE observes before the run (`prepare`):
+a script the check runs exists at <base> (and the BASE copy is what runs), an `npx` tool resolves in
+the engine-prepared node_modules (deps step), any other program resolves on PATH. A failed precondition
+→ `skipped(env: <which>)`; once they hold, ANY non-zero exit refuses the commit. Output text is never
+read to decide env.
 """
 
 import fnmatch
+import os
 import re
 import shlex
 
+BRACE_RE = re.compile(r"\{([^{}]*)\}")
+UNKNOWN_GLOB_RE = re.compile(r"[!@+]\(|\[\[:|\\")
+REPORT_RE = re.compile(r"--file-reporter[ =]json:(\S+)|--json(?:-output)?[ =](\S+)|--outputFile[ =](\S+)")
 TEST_RUN_RE = re.compile(r"\b(flutter test|dart test|npm (run )?test|yarn test|pnpm test|pytest|go test|jest|vitest|"
                          r"cargo test|python3? -m (unittest|pytest))\b")
 GATE_RE = re.compile(r"gate_precommit\.py")
-ENV_FAIL_RE = re.compile(r"command not found|not found: |No such file or directory.*(npx|dart|node|flutter)|"
-                         r"ENOTFOUND|EAI_AGAIN|ECONNREFUSED|ETIMEDOUT|network request|npm ERR! code E(NOTFOUND|AI_AGAIN|"
-                         r"CONNREFUSED|TIMEDOUT)|getaddrinfo|Could not resolve host|Failed host lookup|"
-                         r"npm error (code )?E(NOTFOUND|AI_AGAIN|CONNREFUSED)|request to https?://\S+ failed", re.I)
-
 
 # ---- a minimal YAML reader for lefthook's shape (no PyYAML on the host) ----------------------------
 
@@ -96,6 +105,68 @@ def parse_yaml(text):
 
 # ---- the check list ---------------------------------------------------------------------------------
 
+def expand_braces(pat):
+    m = BRACE_RE.search(pat)
+    if not m:
+        return [pat]
+    out = []
+    for alt in m.group(1).split(","):
+        out += expand_braces(pat[:m.start()] + alt + pat[m.end():])
+    return out
+
+
+def glob_match(path, pattern):
+    """lefthook-style: braces expanded, `*`/`**` across directories, matched on the path or the base
+    name. Returns None when the pattern uses syntax this reader does not implement."""
+    if UNKNOWN_GLOB_RE.search(pattern or ""):
+        return None
+    for p in expand_braces(pattern):
+        p2 = p.replace("**/", "*").replace("**", "*")
+        if fnmatch.fnmatch(path, p2) or fnmatch.fnmatch(path.rsplit("/", 1)[-1], p2):
+            return True
+    return False
+
+
+def split_chain(run):
+    """`a && b; c` → [a, b, c] (operators outside quotes)."""
+    steps, cur, q, i = [], "", None, 0
+    while i < len(run):
+        ch = run[i]
+        if q:
+            cur += ch
+            if ch == q:
+                q = None
+        elif ch in "'\"":
+            q, cur = ch, cur + ch
+        elif run.startswith("&&", i) or ch == ";":
+            steps.append(cur.strip())
+            cur = ""
+            i += 2 if ch == "&" else 1
+            continue
+        else:
+            cur += ch
+        i += 1
+    if cur.strip():
+        steps.append(cur.strip())
+    return [s for s in steps if s]
+
+
+def strip_test_steps(run):
+    """(kept command or None, dropped steps)."""
+    kept, dropped, outputs = [], [], []
+    for st in split_chain(run):
+        if TEST_RUN_RE.search(st):
+            dropped.append(st)
+            for m in REPORT_RE.finditer(st):
+                outputs.append(next(g for g in m.groups() if g))
+            continue
+        if any(o and o in st for o in outputs):
+            dropped.append(st)
+            continue
+        kept.append(st)
+    return (" && ".join(kept) if kept else None), dropped
+
+
 class Check(object):
     def __init__(self, name, run, glob=None, exclude=(), source="lefthook"):
         self.name, self.run, self.glob, self.exclude, self.source = name, run, glob, list(exclude or []), source
@@ -103,9 +174,9 @@ class Check(object):
     def files(self, staged):
         out = []
         for f in staged:
-            if self.glob and not (fnmatch.fnmatch(f, self.glob) or fnmatch.fnmatch(f.rsplit("/", 1)[-1], self.glob)):
+            if self.glob and glob_match(f, self.glob) is False:     # None (unknown syntax) → keep the file
                 continue
-            if any(fnmatch.fnmatch(f, x) for x in self.exclude):
+            if any(glob_match(f, x) for x in self.exclude):
                 continue
             out.append(f)
         return out
@@ -141,11 +212,15 @@ def derive(lefthook_text, raw_config, skipped=None):
                 skipped.append((name, "config skip"))
             elif GATE_RE.search(run):
                 skipped.append((name, "the engine runs <base>'s gate itself"))
-            elif TEST_RUN_RE.search(run):
-                skipped.append((name, "runs the test suite — the engine's suite covers it"))
             else:
+                kept, dropped = strip_test_steps(run)
+                if dropped:
+                    skipped.append((name, "test-run steps dropped (the engine's suite covers them): %s"
+                                    % " && ".join(dropped)))
+                if kept is None:
+                    continue
                 ex = c.get("exclude")
-                out.append(Check(name, run, c.get("glob"), ex if isinstance(ex, list) else ([ex] if ex else [])))
+                out.append(Check(name, kept, c.get("glob"), ex if isinstance(ex, list) else ([ex] if ex else [])))
     else:
         for key in ("lint", "typecheck"):
             v = ((raw_config or {}).get("commands") or {}).get(key)
@@ -157,14 +232,53 @@ def derive(lefthook_text, raw_config, skipped=None):
 
 
 def classify(result):
-    """pass | fail | env:<reason> for one check's CheckResult."""
-    if result.passed:
-        return "pass"
-    raw = result.raw or ""
-    if result.rc == 127 or ENV_FAIL_RE.search(raw):
-        m = ENV_FAIL_RE.search(raw)
-        return "env:%s" % ((m.group(0) if m else "tool missing (rc 127)")[:80])
-    return "fail"
+    """pass | fail. Env is NEVER read from the output (K3r3-M2) — see `prepare`."""
+    return "pass" if result.passed else "fail"
+
+
+SCRIPT_RUNNERS = ("bash", "sh", "zsh", "python3", "python", "node", "perl", "ruby")
+BUILTINS = ("exit", "true", "false", "test", "[", "cd", "echo", "printf", "export", "set", ":", "if", "then",
+            "fi", "for", "do", "done", "while", "case", "esac", "!", "{", "(")
+STEP_RE = re.compile(r"^(\s*(?:[A-Za-z_][A-Za-z0-9_]*=\S*\s+)*)(\S+)(\s+)?(\S+)?(.*)$", re.S)
+
+
+def prepare(command, base_has, base_export, node_bin, which):
+    """Engine-observed preconditions for one check command. Returns (command to run, None) or
+    (None, "<precondition> failed: …"). Only the head of each `&&`/`;` step is rewritten (pipes,
+    `||`, quoting stay as written).
+    base_has(path) → bool: the path is a file at <base>;  base_export(path) → abs path of the BASE copy;
+    node_bin: the engine-prepared `node_modules/.bin` (or None);  which(name) → path or None."""
+    out = command
+    for st in split_chain(command):
+        m = STEP_RE.match(st)
+        if not m:
+            continue
+        env_pre, head, sp, arg, rest = m.group(1), m.group(2), m.group(3) or "", m.group(4) or "", m.group(5) or ""
+        new = None
+        if head == "npx":
+            words = (arg + rest).split()
+            while words and words[0] in ("--yes", "-y", "--no-install", "--offline"):
+                words.pop(0)
+            tool = words[0] if words else ""
+            exe = os.path.join(node_bin, tool) if node_bin and tool else None
+            if not exe or not os.path.exists(exe):
+                return None, "npx tool `%s` not prepared by the deps step" % tool
+            new = "%s%s %s" % (env_pre, shlex.quote(exe), (arg + rest).split(tool, 1)[1].lstrip())
+        elif head in SCRIPT_RUNNERS and arg and not arg.startswith("-"):
+            if not which(head):
+                return None, "`%s` not on PATH" % head
+            if not base_has(arg):
+                return None, "script %s is not at <base>" % arg
+            new = "%s%s%s%s%s" % (env_pre, head, sp, shlex.quote(base_export(arg)), rest)
+        elif "/" in head and not head.startswith("/"):
+            if not base_has(head.lstrip("./")):
+                return None, "script %s is not at <base>" % head
+            new = "%s%s%s%s%s" % (env_pre, shlex.quote(base_export(head.lstrip("./"))), sp, arg, rest)
+        elif head not in BUILTINS and not which(head):
+            return None, "`%s` not on PATH" % head
+        if new is not None:
+            out = out.replace(st, new, 1)
+    return out, None
 
 
 def npx_tools(checks):

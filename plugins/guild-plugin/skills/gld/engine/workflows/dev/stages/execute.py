@@ -320,6 +320,8 @@ def restore_invocation_state(p, cx):
         lb = [f for f in b.findings if f.token == "looped-back"]
         if lb and all(f.severity == "MAJOR" for f in lb) and not b.role_axis:
             cx.major_spent = True
+        if b.role_axis and all(XA._is_dwc(x) for x in b.role_axis) and not lb:
+            cx.major_spent = True                                   # K3r3-m5: a DWC loop-back spent it too
     from guildcore.decisions import DecisionLog
     for blk in DecisionLog.load(B.records(p)).blocks:
         if blk.get("stage") == STAGE and blk.get("point") == "reinvoke" and blk.get("refs") == cx.stage_start:
@@ -675,11 +677,15 @@ def engine_net_run(p, cx, dev, nb):
     claim = " ".join((dev.extras or {}).get("net_run") or [])
     cx.net_engine = "unverified(net)"
     if not files or not sha or nr is None:
-        nb["run"] = ["unverified(net): %s" % ("no net files" if not files else "no sha" if not sha else "engine cannot run the net here")]
+        why = "no net files" if not files else "no sha" if not sha else "engine cannot run the net here"
+        nb["run"] = ["unverified(net): %s" % why]
+        net_unverified(p, why)
         return True, None
     old = nr(sha, files)
-    if old is None:
-        nb["run"] = ["unverified(net): no per-file command for this runner"]
+    if old is None or getattr(old, "env", None):
+        why = "no per-file command for this runner" if old is None else "env — %s" % old.env
+        nb["run"] = ["unverified(net: %s)" % why]
+        net_unverified(p, why)
         return True, None
     red_old = not old.passed or SNAP_WRITTEN_RE.search(old.raw or "")
     heads = [_head_path(p, sha, f) for f in files]
@@ -692,10 +698,20 @@ def engine_net_run(p, cx, dev, nb):
                       "run at the proof is red")
     if red_old:
         return False, "the safety net is red (or wrote a snapshot) on the unchanged code — engine run at %s" % sha[:12]
+    if new is not None and getattr(new, "env", None):
+        nb["run"][-1] = "engine@HEAD: unverified(net: env — %s)" % new.env
+        net_unverified(p, "env at HEAD — %s" % new.env)
+        return True, None
     if new is None or not new.passed:
         return False, "the safety net does not pass at HEAD (engine run)"
     cx.net_engine = "ok"
     return True, None
+
+
+def net_unverified(p, why):
+    """K3r3-m3: like K2's `unverified` — the outcome stands, the person grades it (§9.5 trigger), and the
+    C14 unattended log says so."""
+    B.record_code(p, STAGE, "net-unverified", "unverified(net)", reason=why, extra={"grade": "trigger"})
 
 
 def net_from_result(p, cx, dev):

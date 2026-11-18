@@ -75,8 +75,9 @@ LEFTHOOK = """pre-commit:
       # comment
       run: >-
         flutter analyze &&
-        flutter test --fail-fast &&
-        scripts/verify_test_coverage.sh build/x.json
+        mkdir -p build &&
+        flutter test --fail-fast --concurrency=$(nproc --all) --file-reporter json:build/lefthook-test-report.json &&
+        scripts/verify_test_coverage.sh build/lefthook-test-report.json
     remark:
       glob: '*.md'
       exclude:
@@ -101,8 +102,16 @@ class LocalChecks(unittest.TestCase):
     def test_word_app_shape(self):
         dropped = []
         cs = LC.derive(LEFTHOOK, {}, dropped)
-        self.assertEqual([c.name for c in cs], ["cspell", "pretty", "remark", "verification_doc_refs",
-                                                 "test_coverage_wiring", "release_notes_length"])
+        # K3r3-M1: the exact derived list — `flutter analyze` stays, only the test run (+ the step that
+        # reads its report) is dropped
+        self.assertEqual([(c.name, c.run) for c in cs], [
+            ("cspell", "npx cspell --no-progress --no-must-find-files {staged_files}"),
+            ("pretty", "dart format {staged_files} && git add {staged_files}"),
+            ("flutter", "flutter analyze && mkdir -p build"),
+            ("remark", "npx remark {staged_files} --quiet --frail"),
+            ("verification_doc_refs", "bash scripts/check_verification_doc_refs.sh"),
+            ("test_coverage_wiring", "bash scripts/check_test_coverage_wiring.sh"),
+            ("release_notes_length", "bash scripts/verify_release_notes_length.sh {staged_files}")])
         self.assertEqual(sorted(n for n, _w in dropped), ["flutter", "guild-gate"])
         self.assertEqual(LC.npx_tools(cs), ["cspell", "remark"])
         staged = ["lib/a.dart", "docs/x.md", ".claude/y.md", "release_notes/ko.txt"]
@@ -119,11 +128,32 @@ class LocalChecks(unittest.TestCase):
         self.assertEqual(cs[-1].run, "make x")
         self.assertEqual([c.run for c in LC.derive(None, {"commands": {"lint": ["a", "b"]}})], ["a", "b"])
 
-    def test_env_vs_real_failure(self):
+    def test_output_text_never_makes_env(self):
+        # K3r3-M2 reviewer probes: env-looking words in a failing check's OUTPUT are a failure
         mk = lambda rc, raw: CH.CheckResult(False, rc, False, raw, [], 60)   # noqa: E731
-        self.assertTrue(LC.classify(mk(127, "sh: dart: command not found")).startswith("env:"))
-        self.assertTrue(LC.classify(mk(1, "npm error code ENOTFOUND\nnpm error network request")).startswith("env:"))
-        self.assertEqual(LC.classify(mk(1, "lib/a.dart: unknown word 'teh'")), "fail")
+        for raw in ("lib/a.dart:3:5 - Unknown word (ENOTFOUND)", "docs/x.md: Could not resolve host in a doc line",
+                    "request to https://x failed", "sh: dart: command not found"):
+            self.assertEqual(LC.classify(mk(127 if "command" in raw else 1, raw)), "fail", raw)
+
+    def test_preconditions_are_engine_observed(self):
+        nb = tmpdir(self)
+        open(os.path.join(nb, "remark"), "w").close()
+        has = {"scripts/a.sh"}.__contains__
+        exp = lambda p: "/base/" + p                                    # noqa: E731
+        which = {"bash": "/bin/bash", "dart": "/x/dart", "git": "/x/git"}.get
+        ok, why = LC.prepare("npx remark a.md --quiet", has, exp, nb, which)
+        self.assertEqual((ok, why), ("%s a.md --quiet" % os.path.join(nb, "remark"), None))
+        self.assertIn("npx tool `cspell` not prepared", LC.prepare("npx cspell a", has, exp, nb, which)[1])
+        self.assertIn("not prepared", LC.prepare("npx remark a", has, exp, None, which)[1])   # deps not run
+        self.assertEqual(LC.prepare("bash scripts/a.sh x", has, exp, nb, which)[0], "bash /base/scripts/a.sh x")
+        self.assertIn("not at <base>", LC.prepare("bash scripts/gone.sh", has, exp, nb, which)[1])
+        self.assertEqual(LC.prepare("dart format a && git add a || exit 1", has, exp, nb, which)[0],
+                         "dart format a && git add a || exit 1")
+
+    def test_brace_and_unknown_globs(self):
+        c = LC.Check("x", "t {staged_files}", glob="*.{dart,md}")
+        self.assertEqual(c.command(["a.dart", "b.md", "c.txt"]), "t a.dart b.md")
+        self.assertEqual(LC.Check("y", "t {staged_files}", glob="!(foo).md").command(["a.txt"]), "t a.txt")
 
 
 class LiveChecks(_Live):
@@ -140,7 +170,8 @@ class LiveChecks(_Live):
     def test_pass_fail_and_env_skip(self):
         self.hook("pre-commit:\n  commands:\n    ok:\n      glob: '*.py'\n      run: python3 -c 'import sys; sys.exit(0)' {staged_files}\n"
                   "    missing:\n      run: definitely-not-a-tool-k3 --check\n"
-                  "    bad:\n      glob: '*.txt'\n      run: grep -L ALLOWED {staged_files} | grep . && exit 1 || exit 0\n")
+                  "    bad:\n      glob: '*.txt'\n      run: grep -L ALLOWED {staged_files} | grep . && exit 1 || exit 0\n"
+                  "    envtext:\n      glob: '*.md'\n      run: sh -c 'echo \"Could not resolve host ENOTFOUND\"; exit 1'\n")
         p = self.live([])
         with open(os.path.join(self.wt, "src", "a.py"), "a") as fh:
             fh.write("# ok\n")
@@ -152,6 +183,46 @@ class LiveChecks(_Live):
         ok2, line2 = p.commit_local(["notes.txt"], [], "implement")
         self.assertFalse(ok2)
         self.assertIn("check `bad`", line2)
+
+    def test_text_in_output_refuses_and_deleted_script_runs_the_base_copy(self):
+        self.hook("pre-commit:\n  commands:\n    envtext:\n      glob: '*.md'\n"
+                  "      run: sh -c 'echo \"Could not resolve host ENOTFOUND\"; exit 1'\n"
+                  "    wiring:\n      run: bash scripts/wiring.sh\n")
+        os.makedirs(os.path.join(self.main, "scripts"), exist_ok=True)
+        with open(os.path.join(self.main, "scripts", "wiring.sh"), "w") as fh:
+            fh.write("echo base-copy-ran; exit 3\n")
+        git(self.main, "add", "-A")
+        git(self.main, "commit", "-qm", "script")
+        git(self.main, "push", "-q", "origin", "main")
+        git(self.main, "fetch", "-q", "origin")
+        p = self.live([])
+        calls = []
+        orig = p.deps
+        p.deps = lambda: calls.append("deps") or orig()
+        with open(os.path.join(self.wt, "a.md"), "w") as fh:
+            fh.write("# x\n")
+        ok, line = p.commit_local(["a.md"], [], "implement")
+        self.assertEqual(calls, ["deps"])                           # the deps step ran first
+        self.assertFalse(ok)
+        self.assertIn("check `envtext`", line)                      # env words in OUTPUT are a failure
+        os.remove(os.path.join(self.wt, "scripts", "wiring.sh"))   # the role deletes the script …
+        with open(os.path.join(self.wt, "src", "a.py"), "a") as fh:
+            fh.write("# ok\n")
+        git(self.wt, "reset", "-q")
+        ok2, line2 = p.commit_local(["src/a.py", "scripts/wiring.sh"], [], "implement")
+        self.assertFalse(ok2)
+        self.assertIn("check `wiring`", line2)                      # … the BASE copy still runs (exit 3)
+        self.assertEqual(calls, ["deps"])                           # once per ports
+
+    def test_node_modules_is_relinked_to_the_engine_dir(self):
+        from workflows.dev import ports as PO
+        nd = tmpdir(self)
+        os.makedirs(os.path.join(nd, "node_modules", ".bin"))
+        wt = tmpdir(self)
+        os.makedirs(os.path.join(wt, "node_modules", ".bin"))
+        open(os.path.join(wt, "node_modules", ".bin", "remark"), "w").close()   # a role's own copy
+        PO.link_node_modules(wt, nd)
+        self.assertEqual(os.path.realpath(os.path.join(wt, "node_modules")), os.path.realpath(os.path.join(nd, "node_modules")))
 
     def test_only_changed_paths_are_staged(self):
         p = self.live([])
@@ -190,6 +261,16 @@ class EngineNet(unittest.TestCase):
         h.p.net_run = net_run
         return h
 
+    def test_env_failure_of_the_net_run_is_unverified_not_red(self):
+        def env_fail(rev, files):
+            r = suite("Building native assets failed.", passed=False, rc=1)
+            r.env = "dependency/build (warm-up ok)"
+            return r
+        h = self.h(env_fail)
+        h.roles += [role("DONE"), auditor()]
+        self.assertEqual(X.run(h.p, "refactor").kind, "ADVANCE")          # never a developer loop-back
+        self.assertIn("unverified(net: env", h.body_with("test-evidence:step-1"))
+
     def test_name_only_claim_with_a_red_engine_run_is_not_green(self):
         h = self.h(lambda rev, files: suite(FLUTTER_RED, passed=False, rc=1), roles_n=2)
         r = X.run(h.p, "refactor")
@@ -202,8 +283,10 @@ class EngineNet(unittest.TestCase):
         h.roles += [role("DONE"), auditor()]
         self.assertEqual(X.run(h.p, "refactor").kind, "ADVANCE")
         ev = h.body_with("test-evidence:step-1")
-        self.assertIn("unverified(net)", ev)
+        self.assertIn("unverified(net: no per-file command", ev)
         self.assertIn("verified: no", ev)
+        self.assertIn("point: net-unverified", "\n".join(h.bodies()))           # K3r3-m3
+        self.assertIn("grade: trigger", "\n".join(h.bodies()))
 
 
 class Minors(unittest.TestCase):

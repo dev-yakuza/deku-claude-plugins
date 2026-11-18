@@ -917,7 +917,7 @@ def warm_status(r):
 
 
 @contextlib.contextmanager
-def prepared_tree(root, base, files, warm=None, copy_list=(), overlay=False, build_runner=False):
+def prepared_tree(root, base, files, warm=None, copy_list=(), overlay=False, build_runner=False, target="HEAD"):
     """The ONE preparation of every temp tree that runs role-written code (K2r5-B1, K2r6-B1).
     By the change's build inputs (`build_inputs`):
       none        — a pristine <base> warmed IN PLACE under the network, then `advance(HEAD)`;
@@ -939,7 +939,11 @@ def prepared_tree(root, base, files, warm=None, copy_list=(), overlay=False, bui
             info["halt"] = "build-inputs-changed"
             info["warm"] = "skipped(build-inputs-changed: %s)" % ", ".join(bfiles[:3])
     warm_rev = {"none": base, "deps": "HEAD"}.get(kind) if warm is not None else None
-    with TempTree(root, base, files, overlay=overlay, rev=warm_rev or "HEAD", defer_ignored=bool(warm_rev)) as tt:
+    # `target` (K3r3-M3): the rev the tree ends at — HEAD for the suite/re-runs, the refactor net's proof
+    # point for the engine's net run (warm <base> in place, then move to the proof)
+    if warm_rev == "HEAD" and target != "HEAD":
+        warm_rev = None                          # a deps-class HEAD warm-up does not apply to another rev
+    with TempTree(root, base, files, overlay=overlay, rev=warm_rev or target, defer_ignored=bool(warm_rev)) as tt:
         if warm_rev:
             res = warm(warm_rev, tt.path) if warm_rev != "HEAD" else \
                 warm(warm_rev, tt.path, lambda t: resolved_check(t, root, base))
@@ -948,7 +952,7 @@ def prepared_tree(root, base, files, warm=None, copy_list=(), overlay=False, bui
                 info["halt"] = "build-inputs-changed"
                 info["build_files"] = list(info["build_files"]) + [res.halt]
             if warm_rev != "HEAD":
-                tt.advance("HEAD")
+                tt.advance(target)
             tt.finish_ignored()
         tt.copy_listed(copy_list or [])
         yield tt, info

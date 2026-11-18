@@ -33,7 +33,7 @@ def sh(cwd, *a):
 
 
 def tail(t, n=4):
-    return CH.redact_lines("\n".join((t or "").rstrip().split("\n")[-n:]))
+    return CH.redact_lines("\n".join(x[:160] for x in (t or "").rstrip().split("\n")[-n:]))
 
 
 def append(path, text):

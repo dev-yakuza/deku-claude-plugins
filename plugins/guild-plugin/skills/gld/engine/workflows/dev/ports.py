@@ -11,6 +11,7 @@ kept from K1:
   fixed URL resolved before any role ran (`adapters.git.push`, hooks off).
 """
 
+import json
 import os
 import re
 import shlex
@@ -298,12 +299,8 @@ def read_allowlist(tree, run_dir):
     if os.path.exists(os.path.join(tree, "package.json")):
         # measured (K3r2, word_app): npm is a script inside the node install (nvm puts it under the home
         # dir) — the node toolchain's prefix is an SDK, read only
-        import shutil as _sh
-        for tool in ("node", "npm", "npx"):
-            w = _sh.which(tool)
-            if w:
-                pre = os.path.dirname(os.path.dirname(os.path.realpath(w)))
-                out.append(pre + "/**")
+        for pre in node_prefixes():
+            out.append(pre + "/**")
     # git's xcrun shim reads its cache in the per-user temp dir (noise, not a failure, when denied)
     try:
         ut = subprocess.run(["getconf", "DARWIN_USER_TEMP_DIR"], stdout=subprocess.PIPE,
@@ -313,6 +310,30 @@ def read_allowlist(tree, run_dir):
     except OSError:
         pass
     return list(dict.fromkeys(out))
+
+
+def node_prefixes():
+    """K3r3-m1: the node install dir(s) — ONLY a `<prefix>/bin/<tool>` layout, never the home dir, an
+    ancestor of it or `~/.local` (a `~/bin/node` would otherwise open the whole home)."""
+    import shutil as _sh
+    home = os.path.realpath(os.path.expanduser("~"))
+    bad = {home, os.path.join(home, ".local"), "/", "/usr", "/opt", "/Users"}
+    out = []
+    for tool in ("node", "npm", "npx"):
+        w = _sh.which(tool)
+        if not w:
+            continue
+        real = os.path.realpath(w)
+        pre = os.path.dirname(os.path.dirname(real))
+        if os.path.basename(os.path.dirname(real)) != "bin" and "/lib/node_modules/" not in real:
+            continue
+        if "/lib/node_modules/" in real:
+            pre = real.split("/lib/node_modules/")[0]
+        if pre in bad or home.startswith(pre + "/"):
+            continue
+        if pre not in out:
+            out.append(pre)
+    return out
 
 
 def deps_sandbox(tree, run_dir, repo_root, copy_list=(), issue=None, extra_roots=()):
@@ -329,35 +350,88 @@ def deps_sandbox(tree, run_dir, repo_root, copy_list=(), issue=None, extra_roots
     fs["denyWrite"] = list(fs.get("denyWrite") or []) + [r + "/**" for r in others] + [tr + "/.git/**"]
     fs["allowWrite"] = [a for a in fs.get("allowWrite") or [] if not a.startswith(tr)] + [tr + "/**"]
     fs["readOnlyAllow"] = read_allowlist(tree, run_dir)
+    fs["denyRead"] = list(fs["denyRead"]) + [os.path.join(pre, "etc", "npmrc") for pre in node_prefixes()]
     return dict(sb, filesystem=fs)
 
 
+def node_dir(worktree):
+    """The ENGINE-owned node_modules home for this worktree's package manifests (K3r3-M2): outside
+    every role's allowWrite, keyed by the manifests' content. Roles see it only through the
+    `node_modules` symlink the engine (re)creates."""
+    import hashlib
+    from guildcore.roles import settings as _S
+    h = hashlib.sha256()
+    for f in ("package.json", "package-lock.json"):
+        fp = os.path.join(worktree, f)
+        if os.path.exists(fp):
+            with open(fp, "rb") as fh:
+                h.update(f.encode() + b"\0" + fh.read())
+    # beside the run root (`~/.cache/guild-engine/<repo-hash>/`): engine-owned, no role allowWrite reaches
+    # it, readable by the sandboxes (the shared git dir is not — the deps step denies it)
+    root = os.path.dirname(os.path.dirname(RR.run_root(worktree, 0)))
+    return os.path.join(root, "node", h.hexdigest()[:16])
+
+
+def link_node_modules(worktree, nd):
+    """Replace whatever `node_modules` the worktree has (a role may have changed it) by a symlink to
+    the engine's prepared dir."""
+    import shutil as _sh
+    dst = os.path.join(worktree, "node_modules")
+    if os.path.islink(dst) or os.path.isfile(dst):
+        os.remove(dst)
+    elif os.path.isdir(dst):
+        _sh.rmtree(dst, True)
+    os.symlink(os.path.join(nd, "node_modules"), dst)
+
+
 def deps_main(worktree, run_dir, env, copy_list=(), issue=None, timeout_s=1800, tools=()):
-    """Run EVERY manifest's resolve-only dependency command in the worktree under the registry-only
-    proxy (K3r2-M2: pubspec AND package.json), plus the `npx` tools the 1L checks name (prefetched
-    into the npm cache, `--version` only). The FIRST manifest's result is the step's verdict; the
-    node steps are best-effort (their failure becomes `skipped(env)` on the check that needs them).
-    Returns CheckResult (with `.proxy`, `.notes`) or None when the repo has no known manifest."""
-    first, notes = None, []
-    for manifest, cmds in DEPS_MAIN_CMDS.items():
-        if not os.path.exists(os.path.join(worktree, manifest)):
-            continue
-        if manifest == "package.json":
-            cmds = ["npm ci --ignore-scripts --no-audit --no-fund"] if os.path.exists(
-                os.path.join(worktree, "package-lock.json")) else ["npm install --ignore-scripts --no-audit --no-fund --no-package-lock"]
-            cmds += ["npx --yes %s --version" % shlex.quote(t) for t in tools]
+    """The K1 deps step for EVERY manifest, resolve/download only, under the registry-only proxy:
+    pubspec → `flutter pub get` in the worktree; package.json → `npm install --ignore-scripts` into the
+    ENGINE-owned `node_dir` (copies of the worktree's package.json/lock, no script runs, plus the tools
+    the 1L checks call through `npx`, `--no-save`), then the worktree's `node_modules` → a symlink to it.
+    The pubspec result is the step's verdict; the node step is best-effort (a 1L check that needs a tool
+    it did not prepare is then `skipped(env)` by the engine's precondition). Returns CheckResult (with
+    `.proxy`, `.notes`, `.node_bin`) or None when the repo has no known manifest."""
+    import shutil as _sh
+    first, notes, node_bin = None, [], None
+    if os.path.exists(os.path.join(worktree, "pubspec.yaml")):
         sb = deps_sandbox(worktree, run_dir, worktree, copy_list, issue)
-        r, px = CH.deps_step(cmds, worktree, sb, os.path.join(run_dir, "tmp"), env=env,
-                             hosts=REGISTRY_HOSTS[manifest], timeout_s=timeout_s)
-        r.proxy = px
-        if first is None and manifest == "pubspec.yaml":
-            first = r
-        elif not r.passed:
-            notes.append("%s step failed: %s" % (manifest, CH.redact_lines((r.raw.strip().split("\n") or ["?"])[-1])))
-        if first is None and manifest != "pubspec.yaml":
-            first = r if r.passed else CH.CheckResult(True, 0, False, r.raw, r.steps, r.ceiling_s)
+        first, px = CH.deps_step(["flutter pub get"], worktree, sb, os.path.join(run_dir, "tmp"), env=env,
+                                 hosts=REGISTRY_HOSTS["pubspec.yaml"], timeout_s=timeout_s)
+        first.proxy = px
+    if os.path.exists(os.path.join(worktree, "package.json")):
+        nd = node_dir(worktree)
+        os.makedirs(nd, exist_ok=True)
+        for f in ("package.json", "package-lock.json"):
+            if os.path.exists(os.path.join(worktree, f)):
+                _sh.copyfile(os.path.join(worktree, f), os.path.join(nd, f))
+        cmds = ["npm install --ignore-scripts --no-audit --no-fund --no-package-lock"]
+        pkg = {}
+        try:
+            with open(os.path.join(nd, "package.json")) as fh:
+                pkg = json.load(fh)
+        except (IOError, OSError, ValueError):
+            pass
+        have = set(pkg.get("dependencies") or {}) | set(pkg.get("devDependencies") or {})
+        extra = [t for t in tools if t not in have and re.match(r"^[@\w./-]+$", t)]
+        if extra:
+            cmds.append("npm install --ignore-scripts --no-audit --no-fund --no-package-lock --no-save %s"
+                        % " ".join(shlex.quote(t) for t in extra))
+        sb = deps_sandbox(worktree, run_dir, worktree, copy_list, issue)
+        sb["filesystem"]["allowWrite"] = list(sb["filesystem"]["allowWrite"]) + [nd + "/**"]
+        sb["filesystem"]["readOnlyAllow"] = list(sb["filesystem"]["readOnlyAllow"]) + [nd + "/**"]
+        r, px = CH.deps_step(cmds, nd, sb, os.path.join(run_dir, "tmp"), env=env,
+                             hosts=REGISTRY_HOSTS["package.json"], timeout_s=timeout_s)
+        if r.passed and os.path.isdir(os.path.join(nd, "node_modules")):
+            link_node_modules(worktree, nd)
+            node_bin = os.path.join(nd, "node_modules", ".bin")
+        else:
+            notes.append("package.json step failed: %s" % CH.redact_lines((r.raw.strip().split("\n") or ["?"])[-1]))
+        if first is None:
+            first = CH.CheckResult(True, 0, False, r.raw, r.steps, r.ceiling_s)
+            first.proxy = px
     if first is not None:
-        first.notes = notes
+        first.notes, first.node_bin = notes, node_bin
     return first
 
 
@@ -515,16 +589,21 @@ def live_execute(issue, main, variant, config, clock, gh, writer, decisions, run
     def base_checks():
         from workflows.dev import local_checks as LC
         lh = None
-        if p.base and G.ok(worktree, "cat-file", "-e", "%s:lefthook.yml" % p.base):
-            lh = G.run(worktree, "show", "%s:lefthook.yml" % p.base).decode("utf-8", "replace")
+        for name in ("lefthook.yml", "lefthook.yaml", ".lefthook.yml", ".lefthook.yaml"):     # K3r3-m4
+            if p.base and G.ok(worktree, "cat-file", "-e", "%s:%s" % (p.base, name)):
+                lh = G.run(worktree, "show", "%s:%s" % (p.base, name)).decode("utf-8", "replace")
+                break
         skipped = []
         return LC.derive(lh, raw, skipped), skipped
+
+    state = {"deps": None}
 
     def deps():
         from workflows.dev import local_checks as LC
         rd = run_tmp("deps")
         tools = LC.npx_tools(base_checks()[0]) if ((raw.get("local_developer") or {}).get("enabled")) else ()
         r = deps_main(worktree, rd, C.child_env(root_env, {}, role_dir=rd), copy_list, issue, tools=tools)
+        state["deps"] = r if r is not None else CH.CheckResult(True, 0, False, "", [], 0)
         runner.rebaseline(worktree, issue)
         return r
     p.deps = deps
@@ -587,6 +666,9 @@ def live_execute(issue, main, variant, config, clock, gh, writer, decisions, run
         refusal. Only paths the worktree really changed are staged (`--literal-pathspecs`, K3r2-m4)."""
         from workflows.dev import local_checks as LC
         from workflows.dev.stages import base as SB
+        import shutil as _sh
+        if state["deps"] is None:                       # K3r3-M2: a 1L commit never precedes the deps step
+            p.deps()
         changed = set(x[3:] for x in G.run(worktree, "status", "--porcelain", "-uall").decode("utf-8", "replace")
                       .split("\n") if len(x) > 3)
         paths = [x for x in dict.fromkeys(list(files) + list(tests)) if x in changed]
@@ -599,17 +681,37 @@ def live_execute(issue, main, variant, config, clock, gh, writer, decisions, run
         env.update(S.render_gitconfig(worktree, os.path.join(rd, "in", "gitconfig")))
         env["npm_config_offline"] = "true"           # measured: npx otherwise waits ~70 s for the registry
         staged = [x for x in G.run(worktree, "diff", "--cached", "--name-only").decode("utf-8", "replace").split("\n") if x]
+        node_bin = getattr(state["deps"], "node_bin", None)
+        if node_bin and os.path.isdir(node_bin):
+            link_node_modules(worktree, os.path.dirname(os.path.dirname(node_bin)))   # the engine's, re-made
+        base_dir = os.path.join(rd, "in", "base-scripts")
+        base_sha = G.run(worktree, "rev-parse", p.base).decode().strip()
+
+        def base_has(path):
+            n = os.path.normpath(path)
+            return not n.startswith("..") and not os.path.isabs(n) and G.ok(worktree, "cat-file", "-e", "%s:%s" % (base_sha, n))
+
+        def base_export(path):
+            n = os.path.normpath(path)
+            dst = os.path.join(base_dir, n)
+            os.makedirs(os.path.dirname(dst), exist_ok=True)
+            with open(dst, "wb") as fh:
+                fh.write(G.run(worktree, "show", "%s:%s" % (base_sha, n)))
+            os.chmod(dst, 0o555)
+            return dst
         checks, dropped = base_checks()
         for chk in checks:
             cmd = chk.command(staged)
             if cmd is None:
                 continue
-            r = CH.run_command([cmd], 1800, cwd=worktree, env=env, sandbox=sb, tmp=os.path.join(rd, "tmp"))
-            verdict = LC.classify(r)
-            if verdict.startswith("env:"):
-                SB.record_code(p, "execute", "local-check", "skipped(%s)" % verdict, refs=chk.name,
-                               reason="check `%s` could not run here — %s" % (chk.name, verdict[4:]))
+            run_cmd, why = LC.prepare(cmd, base_has, base_export, node_bin,
+                                      lambda name: _sh.which(name, path=env.get("PATH")))
+            if why:                                      # an ENGINE-observed precondition failed
+                SB.record_code(p, "execute", "local-check", "skipped(env: %s)" % why[:120], refs=chk.name,
+                               reason="check `%s` not run — %s" % (chk.name, why))
                 continue
+            r = CH.run_command([run_cmd], 1800, cwd=worktree, env=env, sandbox=sb, tmp=os.path.join(rd, "tmp"))
+            verdict = LC.classify(r)
             if verdict == "fail":
                 return False, "check `%s`: %s" % (chk.name, CH.redact_lines((r.raw.strip().split("\n") or ["failed"])[-1]))
         base_sha = G.run(worktree, "rev-parse", p.base).decode().strip()
@@ -630,18 +732,9 @@ def live_execute(issue, main, variant, config, clock, gh, writer, decisions, run
     p.commit_local = commit_local
 
     def net_run(rev, files):
-        """K3r2-M3 (P2): the ENGINE runs the safety-net tests itself — at `rev` (the proof commit/tree =
-        unchanged production code + the net, or HEAD) in a prepared temp tree, offline, in the tree
-        sandbox. None when the runner cannot be driven per file (then the net stays unverified)."""
-        cmd = net_command(raw, files)
-        if not cmd:
-            return None
+        """K3r2-M3 / K3r3-M3: the engine's own net run — `net_in_tree` (the suite's preparation)."""
         rd = run_tmp("net")
-        with EFF.TempTree(worktree, p.base, [], rev=rev) as tt:
-            tt.copy_listed(copy_list)
-            sb = tree_sandbox(tt.path, rd, worktree, issue)
-            r = CH.run_command([offline_cmd(cmd)], 1800, cwd=tt.path, env=C.child_env(root_env, {}, role_dir=rd),
-                               sandbox=sb, tmp=os.path.join(rd, "tmp"))
+        r = net_in_tree(worktree, p.base, rev, files, raw, copy_list, rd, C.child_env(root_env, {}, role_dir=rd), issue)
         runner.rebaseline(worktree, issue)
         return r
     p.net_run = net_run
@@ -679,3 +772,35 @@ def net_command(raw, files):
             "vitest": "npx vitest run %s", "pytest": "python3 -m pytest -q %s",
             "unittest": "python3 -m unittest -v %s"}.get(rn, "") % q if rn in (
         "flutter", "dart", "jest", "vitest", "pytest", "unittest") else None
+
+
+def net_in_tree(worktree, base, rev, files, raw, copy_list, run_dir, env, issue=None, timeout_s=1800):
+    """The refactor net's files run by the ENGINE at `rev` in a tree prepared EXACTLY like the suite
+    (K3r3-M3): pristine <base> warmed in place (native-assets hooks keep their cache paths), then moved
+    to `rev` (the proof — unchanged production + the net — or HEAD), ignored entries + `copy_ignored`,
+    then the files offline in `tree_sandbox` with the machine reporter. A dependency/build failure (the
+    safety net of the suite) marks the result `.env` — the caller records `unverified(net: env)`, never
+    RED. None when the runner cannot be driven per file."""
+    cmd = net_command(raw, files)
+    if not cmd:
+        return None
+
+    def _warm(b, tree, inspect=None):
+        r, _px = warm_in_place(worktree, tree, run_dir, env, issue, inspect=inspect)
+        return r
+    os.makedirs(os.path.join(run_dir, "tmp"), exist_ok=True)
+    rep = os.path.join(run_dir, "tmp", "net-report.jsonl")
+    with EFF.prepared_tree(worktree, base, [], _warm if base else None, copy_list, target=rev) as (tt, info):
+        if info["halt"]:
+            r = CH.CheckResult(False, None, False, "", [], int(timeout_s))
+            r.env = "build inputs: %s" % ", ".join(info["build_files"][:3])
+            r.warm = info["warm"]
+            return r
+        sb = tree_sandbox(tt.path, run_dir, worktree, issue)
+        c = with_json_report(offline_cmd(cmd), rep)
+        r = CH.run_command([c], timeout_s, cwd=tt.path, env=env, sandbox=sb, tmp=os.path.join(run_dir, "tmp"))
+        r.report = open(rep, encoding="utf-8", errors="replace").read() if os.path.exists(rep) else None
+        r.report_expected = bool(FLUTTER_TEST_RE.match(c))
+        r.warm = info["warm"]
+        r.env = ("dependency/build (warm-up %s)" % (info["warm"] or "-")) if safety_net(r, info, bool(base)) else None
+        return r
