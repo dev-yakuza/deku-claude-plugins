@@ -335,11 +335,22 @@ class Driver(object):
         timeline = p.gh.timeline(n)
         own = list(p.journal.own_label_writes()) if p.journal is not None else []
         labels = ST.label_names(p.gh.issue(n).get("labels"))
+        assoc = tuple(p.engine_cfg("answer_associations", D.DEFAULT_ASSOCIATIONS) or D.DEFAULT_ASSOCIATIONS)
         for blk in pend:
             alive, why = D.live(blk, state, timeline, own)
             if not alive:
-                p.decisions.resolve(blk.id, {"point": blk.get("point"), "kind": blk.get("kind"), "stage": blk.get("stage"),
-                                             "by": "code", "status": "superseded", "reason": why})
+                # K5r2-M1: the answer channel is READ before a supersede — a member's answer to a question that
+                # went stale is named in the superseded block (who, which comment), never silently dropped; it
+                # is not applied (the stage that asked is no longer where the Issue is)
+                f = {"point": blk.get("point"), "kind": blk.get("kind"), "stage": blk.get("stage"),
+                     "by": "code", "status": "superseded", "reason": why}
+                if self.unattended:
+                    st0, ans, _rej = D.accepted_answer(blk, comments, timeline, True, assoc)
+                    if st0 == "answered":
+                        f["reason"] = "%s — answer `%s` by %s read, not applied (the question is stale)" % (
+                            why, ans.token, ans.author)
+                        f["answer_comment"] = ans.comment_id
+                p.decisions.resolve(blk.id, f)
                 continue
             if not self.unattended:
                 opts = [{"token": t, "label": t} for t in blk.options()]
@@ -348,9 +359,7 @@ class Driver(object):
                 if p.events is not None:
                     p.events.emit("ask", p.now(), **q.event(blk.id))
                 return Outcome(B.StageResult(B.StageResult.ASK, line=blk.get("question") or "-", qid=blk.id), 0)
-            st, _x = ASK.settle(p.decisions, p.writer, n, blk, comments, timeline, True,
-                                tuple(p.engine_cfg("answer_associations", D.DEFAULT_ASSOCIATIONS) or D.DEFAULT_ASSOCIATIONS),
-                                journal=p.journal)
+            st, _x = ASK.settle(p.decisions, p.writer, n, blk, comments, timeline, True, assoc, journal=p.journal)
             if st == "answered":
                 continue
             if st == "conflict" or "guild:needs-human" in labels:

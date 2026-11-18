@@ -495,7 +495,8 @@ def _pending(p, cfg, ledger, images):
         len(images), env, paths, p.issue)
     if not p.unattended:
         p.writer.labels_apply(p.issue, add=["guild:execute", B.NEEDS_HUMAN], remove=["guild:test"])
-        q = ASK.Question("pending-regeneration", text, [{"token": "ok", "label": "ok"}])
+        # K5r2-M1: the label is already guild:execute — the question waits THERE (else a resume supersedes it)
+        q = ASK.Question("pending-regeneration", text, [{"token": "ok", "label": "ok"}], waits_at="execute")
         return B.ask(p, STAGE, q, text)
     return B.pause(p, STAGE, "env", text, "pending regeneration", env_key="other",
                    extra_labels=["guild:execute"], remove_labels=["guild:test"])

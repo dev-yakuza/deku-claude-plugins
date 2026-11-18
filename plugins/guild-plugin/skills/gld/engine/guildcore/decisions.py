@@ -85,14 +85,30 @@ def is_gate(block, kind=None):
     return kind not in ASK_KINDS or kind in GATE_KINDS or block.get("stakes") == "high"
 
 
+# K5r2-M1: the scope of an ENGINE-level question (the per-Issue budget, …) — it is about the run, not about a
+# stage, so no stage move (the derived stage, a rollback, a re-label) ever makes it stale; only an answer, a
+# `stop`, or a person removing guild:needs-human without an answer (§2.5 rule 3) resolves it.
+ENGINE_SCOPE = "engine"
+
+
+def scope_of(block):
+    """The stage a pending question WAITS at: `waits_at:` when the question was asked by one stage while the
+    Issue's label moves to another in the same write (test's pending regeneration → execute), else `stage:`.
+    `ENGINE_SCOPE` = no stage at all."""
+    return block.get("waits_at") or block.get("stage")
+
+
 def live(block, state, timeline, own_writes=()):
-    """§2.5 rule 1b: a pending block is alive iff its `stage:` equals the derived stage AND the
+    """§2.5 rule 1b: a pending block is alive iff its scope (`scope_of`) equals the derived stage AND the
     timeline has no stage-label event (labeled/unlabeled `guild:<stage>`) after its `at_server:`
     (else `at:`) other than the engine's own journaled writes. `own_writes` = timeline event ids
     the engine journaled after its own label writes (K0-m10 — server ids, never the engine's
-    clock). Returns (alive, reason)."""
-    if block.get("stage") != state.stage:
-        return False, "stage changed outside engine (%s → %s)" % (block.get("stage"), state.stage)
+    clock). An engine-scope block (`ENGINE_SCOPE`) is always alive (K5r2-M1). Returns (alive, reason)."""
+    scope = scope_of(block)
+    if scope == ENGINE_SCOPE:
+        return True, None
+    if scope != state.stage:
+        return False, "stage changed outside engine (%s → %s)" % (scope, state.stage)
     since = block.get("at_server") or block.get("at") or ""
     own = set(own_writes)
     for ev in timeline or []:

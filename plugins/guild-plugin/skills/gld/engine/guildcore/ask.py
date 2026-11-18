@@ -30,7 +30,7 @@ parse_guild_answer = answer_rec.parse
 
 class Question(object):
     def __init__(self, kind, text, options, recommended=None, recommended_by=None,
-                 context_lines=(), predict_first=False, point=None, refs=None, stakes=None):
+                 context_lines=(), predict_first=False, point=None, refs=None, stakes=None, waits_at=None):
         if kind not in ASK_KINDS:
             raise ValueError("ask kind must be one of the §2.6 set: %s" % kind)
         toks = [o["token"] for o in options]
@@ -43,6 +43,9 @@ class Question(object):
         self.context_lines = list(context_lines)
         self.predict_first = predict_first
         self.point, self.refs, self.stakes = point or "ask:%s" % kind, refs, stakes
+        # K5r2-M1: the stage the question waits at when the asking stage moves the label in the same write
+        # (decisions.scope_of / live) — absent = the asking stage
+        self.waits_at = waits_at
         self.nonce = None
 
     def commitment(self):
@@ -57,6 +60,8 @@ class Question(object):
              "status": "pending-human", "question": self.text,
              "options": [o["token"] for o in self.options], "stakes": self.stakes,
              "recommended_by": self.recommended_by}
+        if self.waits_at and self.waits_at != stage:
+            f["waits_at"] = self.waits_at
         if self.predict_first:
             f["recommended_sha"] = self.commitment()
         else:

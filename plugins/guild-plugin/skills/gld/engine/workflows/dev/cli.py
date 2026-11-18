@@ -225,7 +225,8 @@ def apply_budget_answer(p, base):
     budget) — a `point: budget` block `budget_from → budget_to` with who answered, also journaled;
     `stop` → a `point: budget` `stop` block at that ceiling (the run holds; never asked again for it)."""
     from workflows.dev.stages import base as B
-    q, res = B.pending_answer(p, "engine", "budget")
+    from guildcore.decisions import ENGINE_SCOPE
+    q, res = B.pending_answer(p, ENGINE_SCOPE, "budget")
     if res is None:
         return
     cur, _stopped = budget_ceiling(p, base)
@@ -281,7 +282,7 @@ def budget_stop(d, p, n, spent, budget, attended, stopped=False):
     ceiling (`refs: budget:<ceiling>`); an unanswered earlier question for the same ceiling is asked again
     under ITS id (attended) or left waiting (unattended), never a new D-id; a `stop` holds."""
     from guildcore import ask as ASK
-    from guildcore.decisions import DecisionLog
+    from guildcore.decisions import ENGINE_SCOPE, DecisionLog
     from workflows.dev.fsm import Outcome
     from workflows.dev.stages import base as B
     line = "Issue budget reached — $%.2f of $%.2f (config.engine.budget_usd_per_issue)" % (spent, budget)
@@ -290,11 +291,14 @@ def budget_stop(d, p, n, spent, budget, attended, stopped=False):
                                "config.engine.budget_usd_per_issue to go on" % line, attended)
     ref = "budget:%.2f" % budget
     log = DecisionLog.load(B.records(p))
+    # K5r2-M1: only an UNRESOLVED question for this ceiling is asked again under its id / waited on; one a person
+    # resolved by removing guild:needs-human without an answer (§2.5 rule 3, `superseded … re-judge`) is asked anew
+    done = log.resolved_ids()
     prior = [b for b in log.blocks if b.get("kind") == "budget" and b.get("status") == "pending-human"
-             and b.get("refs") == ref]
+             and b.get("refs") == ref and b.id not in done]
     if prior:
         blk = prior[-1]
-        if blk.id not in log.resolved_ids() and attended and p.events is not None:
+        if attended and p.events is not None:
             q = ASK.Question("budget", blk.get("question") or line, [{"token": t, "label": t} for t in blk.options()])
             p.events.emit("ask", p.now(), **q.event(blk.id))
             return Outcome(B.StageResult(B.StageResult.ASK, line=line, qid=blk.id), 0)
@@ -302,7 +306,7 @@ def budget_stop(d, p, n, spent, budget, attended, stopped=False):
                             % (line, blk.id, blk.id), attended)
     q = ASK.Question("budget", line, [{"token": "continue", "label": "raise the budget and continue"},
                                       {"token": "stop", "label": "stop"}], refs=ref)
-    r = B.ask(p, "engine", q, line, {"cause_kind": "env", "line": line, "token_cause": "budget — %s" % line,
+    r = B.ask(p, ENGINE_SCOPE, q, line, {"cause_kind": "env", "line": line, "token_cause": "budget — %s" % line,
                                      "env_key": "other"})
     return Outcome(r, 0)
 
