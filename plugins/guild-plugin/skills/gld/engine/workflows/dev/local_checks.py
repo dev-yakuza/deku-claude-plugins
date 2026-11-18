@@ -151,6 +151,31 @@ def split_chain(run):
     return [s for s in steps if s]
 
 
+def split_pipes(step):
+    """One `&&`/`;` step → its commands across `|` and `||` (outside quotes) — K3r4-m4: every command
+    is checked and rewritten, not only the first."""
+    parts, cur, q, i = [], "", None, 0
+    while i < len(step):
+        ch = step[i]
+        if q:
+            cur += ch
+            if ch == q:
+                q = None
+        elif ch in "'\"":
+            q, cur = ch, cur + ch
+        elif ch == "|":
+            parts.append(cur.strip())
+            cur = ""
+            i += 2 if step.startswith("||", i) else 1
+            continue
+        else:
+            cur += ch
+        i += 1
+    if cur.strip():
+        parts.append(cur.strip())
+    return [x for x in parts if x]
+
+
 def strip_test_steps(run):
     """(kept command or None, dropped steps)."""
     kept, dropped, outputs = [], [], []
@@ -249,7 +274,9 @@ def prepare(command, base_has, base_export, node_bin, which):
     base_has(path) → bool: the path is a file at <base>;  base_export(path) → abs path of the BASE copy;
     node_bin: the engine-prepared `node_modules/.bin` (or None);  which(name) → path or None."""
     out = command
-    for st in split_chain(command):
+    if re.search(r"\$\(|`", command):
+        return None, "precondition unverifiable: command substitution in `%s`" % command[:60]
+    for st in [c for step in split_chain(command) for c in split_pipes(step)]:
         m = STEP_RE.match(st)
         if not m:
             continue
@@ -276,6 +303,10 @@ def prepare(command, base_has, base_export, node_bin, which):
             new = "%s%s%s%s%s" % (env_pre, shlex.quote(base_export(head.lstrip("./"))), sp, arg, rest)
         elif head not in BUILTINS and not which(head):
             return None, "`%s` not on PATH" % head
+        if head in ("flutter", "fvm") and re.search(r"\b(analyze|test)\b", st) and "--no-pub" not in st:
+            # the checks run OFFLINE; flutter's implicit `pub get` would fail on pub.dev (measured, K3r3) —
+            # dependencies come from the deps step
+            new = re.sub(r"\b(flutter\s+(?:analyze|test))\b", r"\1 --no-pub", new if new is not None else st, count=1)
         if new is not None:
             out = out.replace(st, new, 1)
     return out, None

@@ -149,6 +149,9 @@ class LocalChecks(unittest.TestCase):
         self.assertIn("not at <base>", LC.prepare("bash scripts/gone.sh", has, exp, nb, which)[1])
         self.assertEqual(LC.prepare("dart format a && git add a || exit 1", has, exp, nb, which)[0],
                          "dart format a && git add a || exit 1")
+        w2 = {"flutter": "/x/flutter", "mkdir": "/bin/mkdir"}.get                 # offline: no implicit pub get
+        self.assertEqual(LC.prepare("flutter analyze && mkdir -p build", has, exp, nb, w2)[0],
+                         "flutter analyze --no-pub && mkdir -p build")
 
     def test_brace_and_unknown_globs(self):
         c = LC.Check("x", "t {staged_files}", glob="*.{dart,md}")
