@@ -457,8 +457,8 @@ class ChildrenStop(Exception):
 
 
 def _gone_error(text):
-    import re
-    return bool(re.search(r"\b(404|410)\b|Not Found|Could not resolve to|was deleted|does not exist", text or "", re.I))
+    from guildcore.records.write import gone_error
+    return gone_error(text)
 
 
 def own_children(p, include_withdrawn=False):
@@ -486,29 +486,23 @@ def own_children(p, include_withdrawn=False):
                                p.issue, ", ".join("%s → #%d" % (k, n) for k, n in orphans),
                                p.writer.SETTLE_S // 60, p.issue))
     j = p.writer._ij()
-    gone_seen = set(int(e["number"]) for e in j.entries
-                    if e.get("kind") == "write" and e.get("op") == "issue-gone" and e.get("number") is not None)
-    repo = (p.gh.owner_repo() or "").lower() if hasattr(p.gh, "owner_repo") else ""
+    gone_seen = p.writer.gone_numbers()
+    repo = p.writer.home_repo(p.issue)            # K4r5-m5: the parent's own row, not the configured name
     seen, rows, gone_now = set(), [], []
     for e in j.own_issues():
         k, n = str(e.get("key") or ""), int(e["number"])
         if not k.startswith(prefix) or n in seen:
             continue
         seen.add(n)
-        why = None
-        try:
-            r = dict(p.gh.issue_row(n))
-        except GhError as ex:
-            kind = classify_error(str(ex))
-            if kind in ("auth", "ratelimit"):
-                raise
-            if not _gone_error(str(ex)):
-                raise GhWriteError("issue:row", "child #%d: %s" % (n, one_line(str(ex), 160)), kind)
-            r, why = {"number": n}, "not found (deleted?)"
-        if why is None and int(r.get("number") or -1) != n:
-            why = "answered as #%s (transferred?)" % r.get("number")
-        if why is None and r.get("repo") and repo and str(r["repo"]).lower() != repo:
-            why = "now in %s (transferred)" % r["repo"]
+        if n in gone_seen:
+            r, why = None, "recorded gone"
+        else:
+            try:
+                r, why = p.writer.own_issue_row(n, repo)        # K4r5-m1: one judgement, shared with issue_create
+            except GhWriteError as ex:
+                if ex.kind in ("auth", "ratelimit"):
+                    raise
+                raise GhWriteError("issue:row", "child #%d: %s" % (n, one_line(ex.message, 160)), ex.kind)
         if why is not None:
             if n not in gone_seen:
                 gone_now.append((k, n, why))

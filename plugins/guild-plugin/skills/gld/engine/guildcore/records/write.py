@@ -27,6 +27,7 @@ module asserts line 1 is a Guild marker for every comment it creates (CR-m2).
 """
 
 import hashlib
+import re
 import time
 
 from guildcore.adapters.gh import GhError, GhWriteError, classify_error, refused_before_accept
@@ -89,6 +90,13 @@ def withdrawn(row):
 def closed_duplicate(row):
     """K4r4-m5: closed with GitHub's `duplicate` reason."""
     return (row.get("state") or "").upper() == "CLOSED" and _reason(row) == "DUPLICATE"
+
+
+def gone_error(text):
+    """A read of an Issue by number that failed because it is not here any more (deleted / transferred
+    without a redirect): 404, 410, GraphQL's "Could not resolve to …"."""
+    import re
+    return bool(re.search(r"\b(404|410)\b|Not Found|Could not resolve to|was deleted|does not exist", text or "", re.I))
 
 
 class GhWriter(object):
@@ -405,6 +413,43 @@ class GhWriter(object):
                 out[k] = int(e["number"])
         return out
 
+    def gone_numbers(self):
+        """Numbers of own Issues recorded as gone (deleted / transferred — `issue-gone` writes, K4r4-m4)."""
+        return set(int(e["number"]) for e in self._ij().entries
+                   if e.get("kind") == "write" and e.get("op") == "issue-gone" and e.get("number") is not None)
+
+    def home_repo(self, parent=None):
+        """K4r5-m5: the repository an own Issue must be in = the PARENT Issue's own REST row `repo` (the same
+        response path as the child's row, so a renamed repository does not read as a transfer); the
+        configured `owner/repo` only when the parent row carries none."""
+        if parent is not None:
+            try:
+                r = self.read.issue_row(int(parent))
+                if r.get("repo"):
+                    return str(r["repo"]).lower()
+            except GhError as ex:
+                if classify_error(str(ex)) in ("auth", "ratelimit"):
+                    raise GhWriteError("issue:row", str(ex), classify_error(str(ex)))
+        return (self.read.owner_repo() or "").lower() if hasattr(self.read, "owner_repo") else ""
+
+    def own_issue_row(self, n, repo=""):
+        """One own Issue read BY NUMBER, judged the same way everywhere (K4r5-m1 — `own_children` and
+        `issue_create` share it): (row, None) when it is here; (None | row, why) when it is gone — a 404/410
+        (deleted), a different number (moved) or a different repository than `repo` (transferred). auth /
+        rate limit / any other read failure → `GhWriteError` (never read as gone)."""
+        try:
+            r = dict(self.read.issue_row(int(n)))
+        except GhError as ex:
+            kind = classify_error(str(ex))
+            if kind in ("auth", "ratelimit") or not gone_error(str(ex)):
+                raise GhWriteError("issue:row", "#%d: %s" % (int(n), _one_line(str(ex))), kind)
+            return None, "not found (deleted?)"
+        if int(r.get("number") or -1) != int(n):
+            return r, "answered as #%s (transferred?)" % r.get("number")
+        if r.get("repo") and repo and str(r["repo"]).lower() != repo:
+            return r, "now in %s (transferred)" % r["repo"]
+        return r, None
+
     def _record_issue(self, it, number, recovered=False):
         j = self._ij()
         j.own_write("issue", key=it.get("key"), number=int(number), token=it.get("token"),
@@ -523,9 +568,14 @@ class GhWriter(object):
             body = body.rstrip("\n") + "\n\n" + tag + "\n"
         self.resolve_creates(key=key)
         have = self.own_issues().get(key)
-        if have is not None:
-            row = self._call("issue:row", lambda: self.read.issue_row(have))
-            if tag in (row.get("body") or "") and not withdrawn(row):
+        if have is not None and have not in self.gone_numbers():
+            # K4r5-m1: judged like `own_children` — a deleted / transferred holder is recorded gone (= withdrawn,
+            # no journal hand-edit) and the slice is created anew; it is never "returned" as this repo's child
+            m = re.match(r"(\d+)-", key)
+            row, why = self.own_issue_row(have, self.home_repo(int(m.group(1)) if m else None))
+            if why is not None:
+                self._ij().own_write("issue-gone", key=key, number=int(have), why=why)
+            elif tag in (row.get("body") or "") and not withdrawn(row):
                 return have, False
         import uuid
         token = uuid.uuid4().hex

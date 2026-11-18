@@ -588,8 +588,10 @@ class FakeGhWrite(object):
 
     def create_issue(self, title, body, labels=()):
         nums = [int(k) for k in self.fake.fx.get("issues", {})] or [0]
-        n = max(nums) + 1
+        # GitHub never reuses a number (a deleted Issue's number stays taken — K4r5-m1 probe)
+        n = max(max(nums), getattr(self.fake, "_hiwater", 0)) + 1
         if self._gate(("create_issue", title)):
+            self.fake._hiwater = n
             self.fake.fx.setdefault("issues", {})[str(n)] = {
                 "number": n, "title": title, "body": body, "state": "OPEN",
                 "labels": [{"name": l} for l in labels], "comments": [], "timeline": [],
