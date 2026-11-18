@@ -285,11 +285,42 @@ class ProcResult(object):
         self.killed_by = killed_by
 
 
+class TestIsolation(RuntimeError):
+    """K5r1-m6: under GLD_ENGINE_TEST=1 a `claude` child may only run against an isolated config dir AND a
+    local endpoint — a test can never reach the default (paid) endpoint or a real ~/.claude*."""
+
+
+_LOCAL_HOSTS = ("127.0.0.1", "localhost", "[::1]", "::1")
+
+
+def isolated_config_dir(cfg):
+    """True when `cfg` is set and is not $HOME or a ~/.claude* directory."""
+    if not cfg:
+        return False
+    home = os.path.realpath(os.path.expanduser("~"))
+    real = os.path.realpath(cfg)
+    return not (real == home or (os.path.basename(real).startswith(".claude") and os.path.dirname(real) == home))
+
+
+def test_isolation_guard(argv, env):
+    if (env or {}).get("GLD_ENGINE_TEST") != "1" and os.environ.get("GLD_ENGINE_TEST") != "1":
+        return
+    if not argv or os.path.basename(str(argv[0])) != "claude":
+        return
+    e = env or {}
+    base = _norm_url(e.get("ANTHROPIC_BASE_URL"))
+    m = re.match(r"^https?://([^/:]+|\[[^\]]+\])(:\d+)?(/|$)", base)
+    if not isolated_config_dir(e.get("CLAUDE_CONFIG_DIR")) or not m or m.group(1) not in _LOCAL_HOSTS:
+        raise TestIsolation("GLD_ENGINE_TEST=1: a claude child needs an isolated CLAUDE_CONFIG_DIR and a local "
+                            "ANTHROPIC_BASE_URL (never the default endpoint)")
+
+
 def run_process(argv, env, cwd, stdin_text, stdout_path, stderr_path, timeout_s, on_start=None,
                 halt_check=None, poll_s=0.5):
     """Run one child in its own process group; stdout → stdout_path (stream-json), stderr → side
     file. `on_start({pid,pgid,start_time})` journals the group before we wait (§2.7). On
     timeout or `halt_check()` truthy the group is killed (TERM → 10 s → KILL)."""
+    test_isolation_guard(argv, env)
     t0 = time.time()
     with open(stdout_path, "wb") as out, open(stderr_path, "wb") as err:  # fs-ok: stdout/stderr files the engine creates before the session
         p = subprocess.Popen(argv, cwd=cwd, env=env, stdin=subprocess.PIPE, stdout=out, stderr=err,

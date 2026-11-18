@@ -104,21 +104,34 @@ def load(common_dir):
     return data
 
 
+def _ok(key, value):
+    try:
+        check_value(key, value)
+        return True
+    except ValueError:
+        return False
+
+
 def effective(common_dir, env=None):
-    """{valve: value} in force (human.set > auto unless released > env GLD_ENGINE_<KEY>)."""
+    """{valve: value} in force (human.set > auto unless released > env GLD_ENGINE_VALVE_<KEY>).
+    K5r1-m2: every source passes `check_value` (the §9.5 grading floor included) — a value that fails is
+    ignored, never applied; the grading rates (HUMAN_ONLY) are honoured from `human.set` only, never from env."""
     env = os.environ if env is None else env
     data = load(common_dir)
     out = {}
     for k, v in env.items():
         if k.startswith("GLD_ENGINE_VALVE_"):
             key = k[len("GLD_ENGINE_VALVE_"):].lower().replace("__", ".")
-            if valid_key(key):
-                out[key] = parse_value(v)
+            val = parse_value(v)
+            if valid_key(key) and key not in HUMAN_ONLY and _ok(key, val):
+                out[key] = val
     released = set(data["human"]["release"])
     for k, v in data["auto"].items():
-        if k not in released:
+        if k not in released and k not in HUMAN_ONLY and valid_key(k) and _ok(k, v):
             out[k] = v
-    out.update(data["human"]["set"])
+    for k, v in data["human"]["set"].items():
+        if valid_key(k) and _ok(k, v):
+            out[k] = v
     return out
 
 

@@ -192,29 +192,116 @@ def make_boundary(d, common, main, attended, events, budget, issue_top):
             return Outcome(None, stop.code, stop.line, halted=stop.halted)
         if attended and events is not None and events.hold_requested():
             events.clear_hold()
-            return Outcome(B.StageResult(B.StageResult.DONE, line="held at a step boundary — /gld resume %d" % n),
-                           0, "held at a step boundary")
+            # K5r1-M2: a hold is never DONE — a parent driving children stops here (no next child, no integration)
+            line = "held at a step boundary — /gld resume %d" % issue_top
+            return Outcome(B.StageResult(B.StageResult.HOLD, line=line), 0, line)
         if budget:
-            from guildcore import cost as COST
-            st, spent = COST.budget_guard(common, issue_top, budget)
-            if st == "warn" and not state["warned"]:
-                state["warned"] = True
-                _progress(common, issue_top, "budget: $%.2f of $%.2f spent on #%d (80%%)" % (spent, budget, issue_top))
-            if st == "over":
-                return budget_stop(d, n, spent, budget, attended)
+            return budget_boundary(d, common, issue_top, float(budget), attended, state)
         return None
     return boundary
 
 
-def budget_stop(d, n, spent, budget, attended):
-    """§4.2: the per-Issue budget reached → attended `ask budget`, unattended pause `budget`."""
-    from guildcore import ask as ASK
+def _f(v, default=None):
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return default
+
+
+def budget_ceiling(p, base):
+    """(ceiling, stopped) from the decision log: the committed budget raised by every recorded `continue`
+    (`point: budget`, `choice: raise`, `budget_to`), and whether a `stop` was recorded AT that ceiling."""
+    from guildcore.decisions import DecisionLog
+    from workflows.dev.stages import base as B
+    blocks = [b for b in DecisionLog.load(B.records(p)).blocks if b.get("point") == "budget" and b.get("by") == "code"]
+    ceiling = max([base] + [_f(b.get("budget_to"), base) for b in blocks if b.get("choice") == "raise"])
+    stopped = any(b.get("choice") == "stop" and abs(_f(b.get("budget_at"), -1) - ceiling) < 0.005 for b in blocks)
+    return ceiling, stopped
+
+
+def apply_budget_answer(p, base):
+    """K5r1-M3: a member's answer to the `budget` question is ACTED on, once (`point: applied`):
+    `continue` → the ceiling is raised by `config.engine.budget_increment_usd` (default: the committed
+    budget) — a `point: budget` block `budget_from → budget_to` with who answered, also journaled;
+    `stop` → a `point: budget` `stop` block at that ceiling (the run holds; never asked again for it)."""
+    from workflows.dev.stages import base as B
+    q, res = B.pending_answer(p, "engine", "budget")
+    if res is None:
+        return
+    cur, _stopped = budget_ceiling(p, base)
+    who = res.get("answered_by") or "human"
+    if res.get("choice") == "continue":
+        inc = _f(p.engine_cfg("budget_increment_usd", None), None) or base
+        to = round(cur + inc, 2)
+        B.record_code(p, "engine", "budget", "raise", reason="budget raised by %s's answer" % who, refs=res.id,
+                      extra={"budget_from": "%.2f" % cur, "budget_to": "%.2f" % to, "answered_by": who})
+        if p.journal is not None:
+            p.journal.append("event", what="budget-raise", budget_from=cur, budget_to=to, answer=res.id, by=who)
+    elif res.get("choice") == "stop":
+        B.record_code(p, "engine", "budget", "stop", reason="budget stop answered by %s" % who, refs=res.id,
+                      extra={"budget_at": "%.2f" % cur, "answered_by": who})
+    B.mark_applied(p, "engine", res)
+
+
+def budget_boundary(d, common, top, base, attended, state):
+    """§4.2 per-Issue budget at a step boundary: 80% → one progress line; ≥ the ceiling → the `budget`
+    question ONCE per ceiling (attended ask / unattended pause). The ceiling is the committed budget plus
+    every answered `continue`; a `stop` answer holds at that ceiling (K5r1-M3)."""
+    from guildcore import cost as COST
+    st, spent = COST.budget_guard(common, top, base)
+    if st == "ok":
+        return None                         # under 80% of the committed budget: no raise can matter
+    p = d._ports(top, None)
+    apply_budget_answer(p, base)
+    ceiling, stopped = budget_ceiling(p, base)
+    st, spent = COST.budget_guard(common, top, ceiling)
+    if st == "warn" and not state["warned"]:
+        state["warned"] = True
+        _progress(common, top, "budget: $%.2f of $%.2f spent on #%d (80%%)" % (spent, ceiling, top))
+    if st != "over":
+        return None
+    return budget_stop(d, p, top, spent, ceiling, attended, stopped)
+
+
+def _budget_hold(p, line, attended):
+    """Stop without a new question: attended → HOLD; unattended → `guild:needs-human` stays (a pause comment
+    only when the label is not on yet), so the supervisor counts the member paused."""
     from workflows.dev.fsm import Outcome
     from workflows.dev.stages import base as B
-    p = d._ports(n, None)
+    if attended:
+        return Outcome(B.StageResult(B.StageResult.HOLD, line=line), 0, line)
+    from guildcore import state as ST
+    if B.NEEDS_HUMAN in ST.label_names(p.gh.issue(p.issue).get("labels")):
+        return Outcome(B.StageResult(B.StageResult.PAUSE, cause="env: other — %s" % line), 0)
+    return Outcome(B.pause(p, "engine", "env", line, "env: other — %s" % line, env_key="other"), 0)
+
+
+def budget_stop(d, p, n, spent, budget, attended, stopped=False):
+    """§4.2: the per-Issue budget reached → attended `ask budget`, unattended pause `budget` — once per
+    ceiling (`refs: budget:<ceiling>`); an unanswered earlier question for the same ceiling is asked again
+    under ITS id (attended) or left waiting (unattended), never a new D-id; a `stop` holds."""
+    from guildcore import ask as ASK
+    from guildcore.decisions import DecisionLog
+    from workflows.dev.fsm import Outcome
+    from workflows.dev.stages import base as B
     line = "Issue budget reached — $%.2f of $%.2f (config.engine.budget_usd_per_issue)" % (spent, budget)
+    if stopped:
+        return _budget_hold(p, "%s — a person answered stop at this ceiling; raise "
+                               "config.engine.budget_usd_per_issue to go on" % line, attended)
+    ref = "budget:%.2f" % budget
+    log = DecisionLog.load(B.records(p))
+    prior = [b for b in log.blocks if b.get("kind") == "budget" and b.get("status") == "pending-human"
+             and b.get("refs") == ref]
+    if prior:
+        blk = prior[-1]
+        if blk.id not in log.resolved_ids() and attended and p.events is not None:
+            q = ASK.Question("budget", blk.get("question") or line, [{"token": t, "label": t} for t in blk.options()])
+            p.events.emit("ask", p.now(), **q.event(blk.id))
+            return Outcome(B.StageResult(B.StageResult.ASK, line=line, qid=blk.id), 0)
+        return _budget_hold(p, "%s — question %s for this ceiling is still unanswered (guild-answer: %s continue|stop)"
+                            % (line, blk.id, blk.id), attended)
     q = ASK.Question("budget", line, [{"token": "continue", "label": "raise the budget and continue"},
-                                      {"token": "stop", "label": "stop"}])
+                                      {"token": "stop", "label": "stop"}], refs=ref)
     r = B.ask(p, "engine", q, line, {"cause_kind": "env", "line": line, "token_cause": "budget — %s" % line,
                                      "env_key": "other"})
     return Outcome(r, 0)
@@ -222,33 +309,53 @@ def budget_stop(d, n, spent, budget, attended):
 
 # ---- the restart check (§2.7) ------------------------------------------------------------------------------
 
-def restart_check(d, p, n, reap=True):
-    """Reap the journal's live process groups, then verify every intent-only write of #n (and of the children
-    its journal created). Returns None or a StageResult (an unknown create → `env: service`, attended FAIL).
-    A write that did not land is closed `redo` — the stage that made it re-derives it from GitHub; nothing is
-    re-sent from the journal (K4r4-m1, K4r5-m4)."""
-    from guildcore.adapters.gh import GhWriteError
+def restart_check(d, p, n, reap=True, lock_child=None, common=None):
+    """Reap the journal's process groups of a CRASHED run, then verify every intent-only write of #n (and of
+    the children its journal created). Returns None or a StageResult (an unknown create → `env: service`,
+    attended FAIL). A write that did not land is closed `redo` — the stage that made it re-derives it from
+    GitHub; nothing is re-sent from the journal (K4r4-m1, K4r5-m4).
+    K5r1-M1: the caller holds #n's lock; a child's journal is touched only while `lock_child(m)` holds THAT
+    child's lock — a child another run holds is skipped (its own run verifies it), and its processes are never
+    killed. `reap_journaled(crashed_only)` also requires the group's journaled owner to be dead.
+    K5r1-M4: a GitHub read/write error here is classified like the FSM's: auth / rate limit re-raise (exit 3 /
+    75), transient / unknown → `env: service`, else `defect:`."""
+    from guildcore.adapters.gh import GhError, GhWriteError, classify_error
     from guildcore.journal import Journal
     from workflows.dev.stages import base as B
     nums = [n] + sorted(set(int(e["number"]) for e in p.writer._ij().own_issues() if e.get("number") is not None))
     for m in nums:
-        j = (getattr(p.writer, "journal", None) or p.journal) if m == n else None
-        j = j if j is not None else Journal(p.git_dir, m, p.clock)
-        if reap and j is not None:
-            try:
-                W.reap_journaled(j)
-            except Exception:                                    # noqa: BLE001 — a reap never blocks the run
-                pass
-        w = p.writer if m == n else _writer_for(p, j)
+        lock = None
+        if m != n and lock_child is not None:
+            lock, holder = lock_child(m)
+            if lock is None:
+                if common is not None:
+                    _progress(common, n, "restart check: child #%d is held by an %s run — left to that run"
+                              % (m, (holder or {}).get("mode") or "unknown"))
+                continue
         try:
-            redo = j.verify_pending(w.verify_intent)
-        except GhWriteError as ex:
-            if ex.kind in ("auth", "ratelimit"):
-                raise
-            return B.fail(p, "engine", "restart check #%d — %s" % (m, B.one_line(str(ex), 260)),
-                          "transient" if ex.kind in ("transient", "ambiguous") else "defect")
-        for it in redo:
-            j.done(it, redo=True)
+            j = (getattr(p.writer, "journal", None) or p.journal) if m == n else None
+            j = j if j is not None else Journal(p.git_dir, m, p.clock)
+            if reap and j is not None:
+                try:
+                    W.reap_journaled(j, crashed_only=True)
+                except Exception:                                    # noqa: BLE001 — a reap never blocks the run
+                    pass
+            w = p.writer if m == n else _writer_for(p, j)
+            try:
+                redo = j.verify_pending(w.verify_intent)
+            except (GhWriteError, GhError) as ex:
+                kind = ex.kind if isinstance(ex, GhWriteError) else classify_error(str(ex))
+                if kind in ("auth", "ratelimit"):
+                    raise
+                line = "restart check #%d — %s" % (m, B.one_line(str(ex), 260))
+                if kind == "ambiguous":
+                    return B.unknown_create(p, "engine", line, ex)
+                return B.fail(p, "engine", line, "transient" if kind in ("transient", "unknown") else "defect")
+            for it in redo:
+                j.done(it, redo=True)
+        finally:
+            if lock is not None:
+                lock.release()
     return None
 
 
@@ -269,21 +376,22 @@ class Run(object):
         self.events = W.Events(self.common, self.n)
 
     def finish(self, outcome, cost0=0.0):
-        """Unattended: the §2.4 stdout contract. Attended worker: a terminal event (none after an ask — the
-        ask event is the driver's cue)."""
+        """Unattended: the §2.4 stdout contract, and (K5r1-M5) a `terminal` event too, so `dev wait` and an
+        attach see how a detached or foreground unattended run ended. Attended worker: a terminal event (none
+        after an ask — the ask event is the driver's cue)."""
         from guildcore import cost as COST
         from workflows.dev.fsm import final_events
         usd = max(0.0, COST.spent(self.common, self.n, kind=None) - cost0)
         self.d.save()
         _progress(self.common, self.n, "end: exit %d — %s" % (outcome.exit_code, outcome.line))
-        if self.attended:
-            res = outcome.result
-            if res is None or res.kind != "ASK":
-                self.events.emit("terminal", time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-                                 exit_code=outcome.exit_code, line=emit.one_line(outcome.line),
-                                 token=res.token() if res is not None else None, cost_usd=round(usd, 6),
-                                 halted=outcome.halted)
-        else:
+        res = outcome.result
+        if not self.attended or res is None or res.kind != "ASK":
+            self.events.emit("terminal", time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                             exit_code=outcome.exit_code, line=emit.one_line(outcome.line),
+                             token=res.token() if res is not None else None, cost_usd=round(usd, 6),
+                             halted=outcome.halted, mode="attended" if self.attended else "unattended",
+                             notes=[emit.one_line(x) for x in (res.notes if res is not None else [])][:4])
+        if not self.attended:
             final_events(outcome, usd, out=self.d.out)
         return outcome.exit_code
 
@@ -295,6 +403,8 @@ class Run(object):
         a, d = self.a, self.d
         if self.attended and not a.worker:
             return self.start_attended()
+        if not self.attended and a.detach and not a.worker:
+            return self.start_unattended_detached()
         k = kill_switch(self.common)
         if k is not None:
             return self.stop(k)
@@ -306,7 +416,7 @@ class Run(object):
         VALVES.register(self.common, d.env)
         lk = W.IssueLock(self.common, self.n)
         try:
-            lk.acquire("attended" if self.attended else "unattended")
+            lk.acquire(self.mode())
         except W.Busy as b:
             return self.busy(b.holder)
         try:
@@ -314,26 +424,68 @@ class Run(object):
         finally:
             lk.release()
 
+    def mode(self):
+        return "attended" if self.attended else "unattended"
+
+    def child_lock(self, c):
+        """K5r1-M1: the lock a parent takes on a child before driving it or touching its journal."""
+        lk = W.IssueLock(self.common, c)
+        try:
+            lk.acquire(self.mode())
+        except W.Busy as b:
+            return None, b.holder
+        return lk, None
+
     def busy(self, holder):
         from workflows.dev.fsm import Outcome
         mode = (holder or {}).get("mode")
-        if not self.attended and self.a.detach:
-            if mode == "unattended":
-                return self.attach_wait()
-            # R5C-m5: never attach a driver to a person's attended run — one progress line, exit 0
-            _progress(self.common, self.n, "attended run in progress — the driver does not attach")
-            return self.finish(Outcome(None, 0, "#%d is running attended — not attached" % self.n))
         return self.finish(Outcome(None, EXIT_BUSY, "busy: #%d is held by an %s run" % (self.n, mode or "unknown")))
 
-    def attach_wait(self):
-        """`--unattended --detach` (an old supervisor's driver) on an unattended owner: wait for its end."""
-        from workflows.dev.fsm import Outcome
+    def _pass_args(self):
+        return (["--only", self.a.only] if self.a.only else []) + \
+            (["--expect-type", self.a.expect_type] if getattr(self.a, "expect_type", None) else [])
+
+    def _fresh_cursor(self):
+        """m7: a new driver never takes an earlier run's unconsumed `terminal` for its own."""
+        evs = self.events.read()
+        self.events.set_cursor(evs[-1]["seq"] if evs else 0)
+
+    def _await_lock(self, lk):
+        """The spawned worker takes the lock itself; wait (≤ ~10 s) until it holds it, so a `dev wait` right
+        after this call never mistakes a worker that is still starting for a dead one."""
+        for _ in range(40):
+            if lk.held_by_other():
+                return True
+            self.d.sleep(0.25)
+        return lk.held_by_other()
+
+    def start_unattended_detached(self):
+        """K5r1-M5 — `--unattended --detach` (an old 0.101.x supervisor's `/gld dev` session): start a DETACHED
+        unattended worker and return at once with the §2.4 lines; the driver then waits with `dev wait` (the
+        worker writes a `terminal` event). The lock is the worker's: a second `--detach` (e.g. after the session's
+        60-min Bash timeout) finds it held and only reports it — it never starts a second writer, and no restart
+        check runs against a live run."""
+        from workflows.dev.fsm import Outcome, final_events
         lk = W.IssueLock(self.common, self.n)
-        while lk.held_by_other():
-            self.d.sleep(5)
-        evs = [e for e in self.events.read() if e.get("type") == "terminal"]
-        last = evs[-1] if evs else {}
-        return self.finish(Outcome(None, int(last.get("exit_code") or 0), last.get("line") or "attached run ended"))
+        if lk.held_by_other():
+            info = lk.holder() or {}
+            mode = info.get("mode") or "unknown"
+            line = ("#%d is running %s (pid %s) — not started again; wait with `dev wait --issue %d`"
+                    % (self.n, mode, info.get("pid"), self.n))
+            _progress(self.common, self.n, line)
+            final_events(Outcome(None, 0, line), 0.0, out=self.d.out)
+            return 0
+        self._fresh_cursor()
+        argv = [W.python(), os.path.join(_engine_dir(), "gld_engine.py"), "dev", "run", "--issue", str(self.n),
+                "--unattended", "--worker"] + self._pass_args()
+        log = os.path.join(J.issue_dir(self.common, self.n), "worker.log")
+        pid = self.d.spawn(argv, self.main, self.d.env, log)
+        held = self._await_lock(lk)
+        line = "started a detached unattended run of #%d (pid %s%s) — wait with `dev wait --issue %d`" % (
+            self.n, pid, "" if held else ", lock not seen yet", self.n)
+        _progress(self.common, self.n, line)
+        final_events(Outcome(None, 0, line), 0.0, out=self.d.out)
+        return 0
 
     def start_attended(self):
         lk = W.IssueLock(self.common, self.n)
@@ -344,10 +496,12 @@ class Run(object):
                 return 0
             except LookupError:
                 pass
+        self._fresh_cursor()
         argv = [W.python(), os.path.join(_engine_dir(), "gld_engine.py"), "dev", "run", "--issue", str(self.n),
-                "--attended", "--worker"] + (["--only", self.a.only] if self.a.only else [])
+                "--attended", "--worker"] + self._pass_args()
         log = os.path.join(J.issue_dir(self.common, self.n), "worker.log")
         pid = self.d.spawn(argv, self.main, self.d.env, log)
+        self._await_lock(lk)
         _sent(self.d, {"started": True, "pid": pid, "issue": self.n, "log": log})
         return 0
 
@@ -368,24 +522,84 @@ class Run(object):
                               env=d.env, events=self.events if self.attended else None,
                               valves=VALVES.effective(self.common, d.env))
 
+    def pending_retry(self):
+        """Decision 2: an earlier unattended run ended on an unknown create with `retry_at` still ahead → the
+        same exit 75 again without touching GitHub (a supervisor that woke early never doubles the pause)."""
+        if self.attended:
+            return None
+        j = J.Journal(self.common, self.n)
+        at = [e.get("at") for e in j.entries if e.get("kind") == "event" and e.get("what") == "retry-after"]
+        if at and int(at[-1] or 0) > int(time.time()):
+            from workflows.dev.fsm import retry_outcome
+            return retry_outcome(None, int(at[-1]))
+        return None
+
     def drive(self, vlabel):
+        """K5r1-M4: setup (`ports_for` — `gh repo view` …) and the restart check run under the SAME §2.4 end
+        mapping as the FSM (`fsm.end_of`): auth → 3, rate limit → 75, transient / unknown → `env: service`
+        pause, anything else → `defect:` pause; exit 1 only when even that pause cannot be written."""
         from guildcore import cost as COST
-        from workflows.dev.fsm import Outcome
+        from workflows.dev import fsm as F
         d = self.d
         cost0 = COST.spent(self.common, self.n, kind=None)
-        ports_for = self.ports_for(vlabel)
-        d._ports = ports_for
-        _progress(self.common, self.n, "start: %s run #%d (plugin %s)" % (
-            "attended" if self.attended else "unattended", self.n, vlabel))
-        p0 = ports_for(self.n, None)
-        stop = restart_check(d, p0, self.n)
-        if stop is not None:
-            return self.finish(Outcome(stop, 0))
-        budget = p0.engine_cfg("budget_usd_per_issue", None)
+        early = self.pending_retry()
+        if early is not None:
+            return self.finish(early, cost0)
+        holder = {"ports_for": None}
+        try:
+            ports_for = self.ports_for(vlabel)
+            holder["ports_for"] = ports_for
+            d._ports = ports_for
+            _progress(self.common, self.n, "start: %s run #%d (plugin %s)" % (self.mode(), self.n, vlabel))
+            p0 = ports_for(self.n, None)
+            want = getattr(self.a, "expect_type", None)
+            if want:
+                from guildcore import state as ST
+                from workflows.dev.stages import base as B
+                if "type:%s" % want not in ST.label_names(p0.gh.issue(self.n).get("labels")):
+                    line = ("#%d has no `type:%s` label — /gld %s runs only on it (add the label, or use /gld implement)"
+                            % (self.n, want, "debug" if want == "bug" else "refactor"))
+                    return self.finish(F.Outcome(B.StageResult(B.StageResult.FAIL, line=line, fail_class="prevalidate"), 0), cost0)
+            stop = restart_check(d, p0, self.n, lock_child=self.child_lock, common=self.common)
+            if stop is not None:
+                out = F.Outcome(stop, 0)
+                if not self.attended and getattr(stop, "retry_at", None):
+                    out = F.retry_outcome(stop, stop.retry_at)
+                return self.finish(self._note_retry(out), cost0)
+            self.clear_retry(p0)
+            budget = p0.engine_cfg("budget_usd_per_issue", None)
+        except Exception as ex:                                   # noqa: BLE001 — §2.4: every end has a result line
+            drv0 = F.Driver(holder["ports_for"], unattended=not self.attended)
+            out = drv0.retry_after(F.end_of(ex, lambda reason, cls: drv0._defect(self.n, reason, cls)))
+            return self.finish(self._note_retry(out), cost0)
         boundary = make_boundary(d, self.common, self.main, self.attended, self.events, budget, self.n)
         drv = d.driver(ports_for, not self.attended, vlabel, self.events if self.attended else None, boundary)
+        drv.child_lock = self.child_lock
         out = drv.run(self.n, self.a.only)
-        return self.finish(out, cost0)
+        return self.finish(self._note_retry(out), cost0)
+
+    def clear_retry(self, p0):
+        """Decision 2: the supervisor's own resume after `retry_at` — the restart check has just settled the
+        unknown create (found → recorded, absent → never landed, created again by its stage) — takes back the
+        `guild:needs-human` that pause put on, once (`retry-cleared`)."""
+        if self.attended:
+            return
+        j = J.Journal(self.common, self.n)
+        ev = [e for e in j.entries if e.get("kind") == "event" and e.get("what") in ("retry-after", "retry-cleared")]
+        if not ev or ev[-1].get("what") != "retry-after":
+            return
+        from guildcore import state as ST
+        from workflows.dev.stages import base as B
+        if B.NEEDS_HUMAN in ST.label_names(p0.gh.issue(self.n).get("labels")):
+            p0.writer.labels_apply(self.n, remove=[B.NEEDS_HUMAN])
+        j.append("event", what="retry-cleared")
+        _progress(self.common, self.n, "auto-resume after the unknown create's settle time — needs-human taken back")
+
+    def _note_retry(self, out):
+        at = getattr(out, "retry_at", None)
+        if at:
+            J.Journal(self.common, self.n).append("event", what="retry-after", at=int(at))
+        return out
 
 
 def _engine_dir():
@@ -505,7 +719,7 @@ def kill_now(common):
         return out
     for nm in names:
         if nm.isdigit() and os.path.isdir(os.path.join(edir, nm)):
-            out += [(int(nm), pg, r) for pg, r in W.reap_journaled(Journal(common, int(nm)))]
+            out += [(int(nm), pg, r) for pg, r in W.reap_journaled(Journal(common, int(nm)), crashed_only=False)]
     return out
 
 
@@ -589,6 +803,7 @@ def parser():
     r.add_argument("--detach", action="store_true")
     r.add_argument("--worker", action="store_true", help=argparse.SUPPRESS)
     r.add_argument("--only", choices=STAGES)
+    r.add_argument("--expect-type", choices=("bug", "refactor"))     # K5r1-m8: /gld debug|refactor
     w = sub.add_parser("wait")
     w.add_argument("--issue", required=True, type=int)
     w.add_argument("--max-seconds", type=float, default=540)
@@ -630,12 +845,15 @@ def parser():
 def _test_guard(d):
     """Under GLD_ENGINE_TEST=1 the engine must never read or write a real config dir (~/.claude*): no isolated
     CLAUDE_CONFIG_DIR → refused before any version check, registry write or GitHub call."""
-    if d.env.get("GLD_ENGINE_TEST") != "1":
+    return test_guard(d.env)
+
+
+def test_guard(env):
+    """K5r1-m6: shared by `dev`, `version --active` and `status … --all-repos` (gld_engine.py)."""
+    if env.get("GLD_ENGINE_TEST") != "1":
         return None
-    cfg = d.env.get("CLAUDE_CONFIG_DIR") or ""
-    home = os.path.realpath(os.path.expanduser("~"))
-    real = os.path.realpath(cfg) if cfg else ""
-    if not cfg or real == home or os.path.basename(real).startswith(".claude") and os.path.dirname(real) == home:
+    from guildcore.adapters.claude import isolated_config_dir
+    if not isolated_config_dir(env.get("CLAUDE_CONFIG_DIR") or ""):
         return "GLD_ENGINE_TEST=1 needs an isolated CLAUDE_CONFIG_DIR (never ~/.claude*)"
     return None
 

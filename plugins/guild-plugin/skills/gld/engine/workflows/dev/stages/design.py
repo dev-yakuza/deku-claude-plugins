@@ -596,9 +596,10 @@ def make_children(p, e, rec, plan, children, answers, trusted):
             # a lost reply was already looked up by its token (REST list, backoff) inside the writer;
             # "ambiguous" = still unknown → a person, and nothing is sent again
             # K4r4-m3: 1-based slice counter; the message names when a resume can settle an unknown create
-            return B.fail(p, STAGE, "child creation failed at slice %s (%d/%d) — %s" % (
-                s["key"], i + 1, len(slices), B.one_line(str(ex), 320)),
-                "transient" if ex.kind in ("transient", "ambiguous") else "defect")
+            line = "child creation failed at slice %s (%d/%d) — %s" % (s["key"], i + 1, len(slices), B.one_line(str(ex), 320))
+            if ex.kind == "ambiguous":
+                return B.unknown_create(p, STAGE, line, ex)
+            return B.fail(p, STAGE, line, "transient" if ex.kind == "transient" else "defect")
         have[full] = n
         publish_plan(p, json.dumps(plan, ensure_ascii=False, sort_keys=True), {full: int(n)})   # K5: numbers on GitHub
     now, stop = B.own_children_or_stop(p, STAGE)

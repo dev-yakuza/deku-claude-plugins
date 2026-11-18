@@ -55,6 +55,9 @@ class RoleCall(object):
 class StageResult(object):
     ADVANCE, DONE, LOOPBACK, PAUSE, ASK, FAIL = "ADVANCE", "DONE", "LOOPBACK", "PAUSE", "ASK", "FAIL"
     SPLIT = "SPLIT"                   # K4 design: `OK SPLIT: <N> children` (nxt = N)
+    # K5r1-M2: a run stopped on purpose at a step boundary (attended `hold`, a budget `stop`, a busy child) —
+    # never DONE: a parent driving children stops there and never goes on to the next child or integration
+    HOLD = "HOLD"
 
     def __init__(self, kind, nxt=None, cause=None, line=None, qid=None, fail_class=None, notes=()):
         self.kind = kind
@@ -64,6 +67,7 @@ class StageResult(object):
         self.qid = qid
         self.fail_class = fail_class  # prevalidate | prevalidate_env | gh_auth | transient | defect
         self.notes = list(notes)
+        self.retry_at = None          # K5r1 decision 2: an unattended unknown-create pause the supervisor retries (epoch)
 
     def token(self):
         if self.kind == self.ADVANCE:
@@ -74,6 +78,8 @@ class StageResult(object):
             return "OK SPLIT: %s children" % self.nxt
         if self.kind == self.LOOPBACK:
             return "OK LOOPBACK: execute"
+        if self.kind == self.HOLD:
+            return "OK HOLD: %s" % (self.line or "held")
         if self.kind == self.PAUSE:
             return "OK PAUSE: needs-human — %s" % self.cause
         if self.kind == self.ASK:
@@ -387,6 +393,18 @@ def fail(p, stage, reason, cls="defect", env_key="service"):
     return r
 
 
+def unknown_create(p, stage, reason, ex):
+    """An Issue create whose landing is unknown (`GhWriteError("ambiguous")`): the `env: service` pause, never a
+    re-send. K5r1 user decision 2: unattended, the result carries `retry_at` — the FSM ends with exit 75 at that
+    time so the supervisor resumes by itself (the re-check: found → continue, absent → create again; a late
+    duplicate is surfaced by the orphan check). Attended: the FAIL line as before."""
+    import time as _t
+    r = fail(p, stage, reason, "transient")
+    if p.unattended and r.kind == StageResult.PAUSE:
+        r.retry_at = max(int(getattr(ex, "retry_at", None) or 0), int(_t.time()) + 60)
+    return r
+
+
 def role_outcome(p, stage, role, res):
     """RoleResult statuses outside the P-RES five (K1 A9) → the stage's answer, or None when the
     status is one of DONE / DONE_WITH_CONCERNS / BLOCKED / NEEDS_CONTEXT / FAIL (caller's)."""
@@ -465,6 +483,21 @@ def issue_text(p, issue, cap=None):
     if cap is not None:
         body = body[:cap]
     text = "# %s\n\n%s" % (issue.get("title") or "", body)
+    return text if t == "member" else A.OUTSIDER_PREFACE + text
+
+
+def title_text(p, issue, n=None):
+    """K5r1-m1: an Issue TITLE for a judge brief through the same author trust as `issue_text` — `#N title`
+    as is for a member; an outsider's (or an unreadable association's — a title is short, so this one folds
+    unknown into the marked side instead of stopping) gets `OUTSIDER_PREFACE` first. auth / rate-limit
+    re-raise (exit 3 / 75)."""
+    from workflows.dev.stages import analyze as A
+    num = int(n if n is not None else (issue.get("number") or p.issue))
+    try:
+        t, _assoc = A.author_trust(p, issue, _issue=num)
+    except A.TrustUnknown:
+        t = "unknown"
+    text = "#%d %s" % (num, issue.get("title") or "")
     return text if t == "member" else A.OUTSIDER_PREFACE + text
 
 
@@ -597,5 +630,7 @@ def own_children_or_stop(p, stage, include_withdrawn=False):
     except GhWriteError as ex:
         if ex.kind in ("auth", "ratelimit"):
             raise
-        cls = "transient" if ex.kind in ("transient", "ambiguous") else "defect"
-        return None, fail(p, stage, "child Issues of #%d — %s" % (p.issue, one_line(str(ex), 260)), cls)
+        line = "child Issues of #%d — %s" % (p.issue, one_line(str(ex), 260))
+        if ex.kind == "ambiguous":
+            return None, unknown_create(p, stage, line, ex)
+        return None, fail(p, stage, line, "transient" if ex.kind == "transient" else "defect")

@@ -149,10 +149,25 @@ def cache_key(point, inputs, tier, system_schema_sha, valves, plugin):
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:24]
 
 
+_OWN_START = []
+
+
+def _own_start():
+    """This process's start time (`ps -o lstart`), read once per process."""
+    if not _OWN_START:
+        try:
+            from guildcore.adapters.claude import process_start
+            _OWN_START.append(process_start(os.getpid()))
+        except Exception:                                    # noqa: BLE001 — a missing ps leaves it unknown
+            _OWN_START.append(None)
+    return _OWN_START[0]
+
+
 class Journal(JournalView):
     """Append side of one Issue's journal (`<git-common-dir>/guild/engine/<N>/journal.jsonl`)."""
 
     def __init__(self, git_common_dir, issue, clock=None):
+        self.common_dir = git_common_dir
         self.dir = issue_dir(git_common_dir, issue)
         self.path = os.path.join(self.dir, "journal.jsonl")
         self.ctx_path = os.path.join(self.dir, "ctx.json")
@@ -271,8 +286,10 @@ class Journal(JournalView):
 
     # -- processes ---------------------------------------------------------------------------
     def record_pid(self, who, pid, pgid, start_time, session_id=None):
+        # K5r1-M1: the engine process that started the group (pid + its own start time) rides along — a
+        # restart reaps a group only when that owner is provably dead (a crashed run), never a live run's
         return self.append("pid", who=who, pid=pid, pgid=pgid, start_time=start_time,
-                           session_id=session_id)
+                           session_id=session_id, owner=os.getpid(), owner_start=_own_start())
 
     def pids(self):
         return [e for e in self.entries if e["kind"] == "pid"]

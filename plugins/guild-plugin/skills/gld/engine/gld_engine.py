@@ -43,6 +43,13 @@ def main(argv=None):
         sys.stdout.write(__doc__.split("\n\n")[1] + "\n")
         return 0 if argv else 64
     wf, rest = argv[0], argv[1:]
+    if (wf == "version" and "--active" in rest) or (wf == "status" and "--all-repos" in rest):
+        # K5r1-m6: these read the config dir (`claude plugin list`, the registry) — the same test guard as `dev`
+        from workflows.dev.cli import test_guard
+        bad = test_guard(os.environ)
+        if bad:
+            sys.stdout.write('{"error": "%s"}\n' % bad)
+            return 64
     if wf == "version":
         if rest[:1] == ["--active"]:
             # §10.3: the ACTIVE plugin version for the supervisor's per-pass check — one line:

@@ -94,8 +94,13 @@ class Driver(object):
     """`ports_for(issue, stage, variant=None) -> Ports` (live: workflows.dev.ports.fsm_ports; tests: fakes).
     `stages` overrides the stage functions (tests)."""
 
-    def __init__(self, ports_for, unattended=True, plugin=None, stages=None, events=None, boundary=None):
+    def __init__(self, ports_for, unattended=True, plugin=None, stages=None, events=None, boundary=None,
+                 child_lock=None):
         self.ports_for = ports_for
+        # K5r1-M1: `child_lock(c) -> (lock, None) | (None, holder)` — a parent drives a child only while it
+        # holds THAT child's IssueLock (one writer per Issue, §2.7); a child another run holds stops the
+        # parent with exit 4 (busy) — the supervisor waits in place, then `busy-skipped`
+        self.child_lock = child_lock
         # K5: `boundary(n) -> Outcome | None`, asked before every stage run (also a child's in 2b) — the kill
         # switch, the active plugin version and an attended `hold` stop the run at a step boundary (§2.4, §10.3)
         self.boundary = boundary
@@ -108,37 +113,29 @@ class Driver(object):
 
     # -- the process end -------------------------------------------------------------------------
     def run(self, n, only=None):
-        """K4r1-M4: EVERY way the FSM can end maps to the §2.4 contract — a GitHub read or write
-        error by its class (auth → 3, rate limit → 75, transient → `env: service` pause, else
-        `defect: engine FAIL`), any other exception → `defect: engine FAIL — <type>` (exit 0 with
-        needs-human; 1 only when that pause cannot be written either)."""
+        """K4r1-M4: EVERY way the FSM can end maps to the §2.4 contract (`end_of`) — a GitHub read or
+        write error by its class (auth → 3, rate limit → 75, transient / unknown → `env: service` pause,
+        else `defect: engine FAIL`), any other exception → `defect: engine FAIL — <type>` (exit 0 with
+        needs-human; 1 only when that pause cannot be written either).
+        K5r1 decision 2: an unattended pause on an Issue create whose landing is unknown ends with exit 75
+        at its `retry_at` — the supervisor resumes by itself (never a person's chore, never a re-send)."""
         try:
-            return self._run(n, only)
-        except ChildEnded as ce:
-            return ce.outcome
-        except Halted:
-            return Outcome(None, 6, "halted: kill-switch", halted="kill-switch")
-        except RateLimited as rl:
-            return Outcome(None, 75, "rate limited", rl=getattr(rl, "verdict", None))
-        except GhWriteError as ex:
-            if ex.kind == "auth":
-                return Outcome(None, 3, "gh auth failed — %s" % B.one_line(str(ex), 160))
-            if ex.kind == "ratelimit":
-                return Outcome(None, 75, "GitHub rate limit — %s" % B.one_line(str(ex), 120))
-            return self._defect(self.active or n, "gh write failed — %s" % B.one_line(str(ex), 160), "transient" if ex.kind == "transient" else "defect")
-        except GhError as ex:
-            kind = classify_error(str(ex))
-            if kind == "auth":
-                return Outcome(None, 3, "gh auth failed — %s" % B.one_line(str(ex), 160))
-            if kind == "ratelimit":
-                return Outcome(None, 75, "GitHub rate limit — %s" % B.one_line(str(ex), 120))
-            return self._defect(self.active or n, "gh read failed — %s" % B.one_line(str(ex), 160),
-                                "transient" if kind == "transient" else "defect")
+            out = self._run(n, only)
         except Exception as ex:                                       # noqa: BLE001 — the contract's last line
-            return self._defect(self.active or n, "%s — %s" % (ex.__class__.__name__, B.one_line(str(ex), 160)))
+            out = end_of(ex, lambda reason, cls: self._defect(self.active or n, reason, cls))
+        return self.retry_after(out)
+
+    def retry_after(self, out):
+        r = out.result
+        if not self.unattended or out.exit_code != 0 or r is None or r.kind != B.StageResult.PAUSE \
+                or not getattr(r, "retry_at", None):
+            return out
+        return retry_outcome(r, r.retry_at)
 
     def _defect(self, n, reason, cls="defect"):
         try:
+            if self.ports_for is None:
+                raise RuntimeError("no GitHub ports (setup failed before they existed)")
             p = self.ports_for(n, None)
             r = B.fail(p, "engine", reason, cls)
             return Outcome(r, 0)
@@ -238,12 +235,24 @@ class Driver(object):
             return self._end(n, r)
 
     def _drive_child(self, c):
+        """K5r1-M1/M2: a child runs under its own IssueLock; only an explicit DONE lets the parent go on
+        (`children.run` stops on anything else — hold, pause, ask, budget, fail); a process end (exit ≠ 0)
+        or a busy child ends the parent's run the same way."""
+        lock = None
+        if self.child_lock is not None:
+            lock, holder = self.child_lock(c)
+            if lock is None:
+                mode = (holder or {}).get("mode") or "unknown"
+                line = "busy: child #%d of #%d is held by an %s run — the parent waits for it" % (c, self.active or 0, mode)
+                raise ChildEnded(Outcome(B.StageResult(B.StageResult.HOLD, line=line), 4, line))
         self.depth += 1
         parent = self.active
         try:
             out = self._run(c, None)
         finally:
             self.depth -= 1
+            if lock is not None:
+                lock.release()
         self.active = parent            # an exception leaves `active` on the child: its pause lands there
         if out.result is None or out.exit_code != 0:
             raise ChildEnded(out)
@@ -287,7 +296,7 @@ class Driver(object):
         so = OUT.find(comments, "analyze:output")
         ac = "\n".join("%s: %s" % (a["id"], a["text"]) for a in (AN.parse_output(so.body).ac if so else []))
         issue = p.gh.issue(n)
-        d = HO.judge(p, "test", "execute→test", bad, [], ac, "#%d %s" % (n, issue.get("title") or ""), "X→T")
+        d = HO.judge(p, "test", "execute→test", bad, [], ac, B.title_text(p, issue, n), "X→T")   # K5r1-m1
         if d.choice in ("ok", "ok_with_assumption"):
             return None
         sig = sorted(set(str(x) for x in (d.fields.get("signature") or []))) or ["handoff:%s" % (bad[0] if bad else "gap")]
@@ -366,6 +375,53 @@ class Driver(object):
             PZ.complete(p.writer, p.decisions, n, blk, pz)
             return Outcome(B.StageResult(B.StageResult.PAUSE, cause=cause), 0)
         return None
+
+
+class _Reset(object):
+    def __init__(self, resets_at):
+        self.resets_at = int(resets_at)
+
+
+def retry_outcome(result, at):
+    """Exit 75 with `resetsAt` = `at`: the supervisor's wait-and-rerun path (bounded there — 6 waits, then
+    `account-rate-limited` blocked, never failed). The result line says what it is: not a rate limit."""
+    import time as _t
+    line = "env: service — an Issue create's landing is unknown; the supervisor resumes after %s and re-checks " \
+           "it (found → go on, absent → create again) — not a rate limit" % _t.strftime("%Y-%m-%dT%H:%M:%SZ", _t.gmtime(int(at)))
+    o = Outcome(result, 75, line, rl=_Reset(at))
+    o.retry_at = int(at)
+    return o
+
+
+def end_of(ex, defect):
+    """The §2.4 end of an exception (the FSM's and the CLI's setup / restart check — K5r1-M4).
+    `defect(reason, cls) -> Outcome` writes the pause (cls transient → `env: service`, else `defect:`)."""
+    if isinstance(ex, ChildEnded):
+        return ex.outcome
+    if isinstance(ex, Halted):
+        return Outcome(None, 6, "halted: kill-switch", halted="kill-switch")
+    if isinstance(ex, RateLimited):
+        return Outcome(None, 75, "rate limited", rl=getattr(ex, "verdict", None))
+    if isinstance(ex, GhWriteError):
+        if ex.kind == "auth":
+            return Outcome(None, 3, "gh auth failed — %s" % B.one_line(str(ex), 160))
+        if ex.kind == "ratelimit":
+            return Outcome(None, 75, "GitHub rate limit — %s" % B.one_line(str(ex), 120))
+        out = defect("gh write failed — %s" % B.one_line(str(ex), 160),
+                     "transient" if ex.kind in ("transient", "unknown", "ambiguous") else "defect")
+        if ex.kind == "ambiguous" and out.result is not None and out.result.kind == B.StageResult.PAUSE:
+            import time as _t
+            out.result.retry_at = max(int(getattr(ex, "retry_at", None) or 0), int(_t.time()) + 60)
+        return out
+    if isinstance(ex, GhError):
+        kind = classify_error(str(ex))
+        if kind == "auth":
+            return Outcome(None, 3, "gh auth failed — %s" % B.one_line(str(ex), 160))
+        if kind == "ratelimit":
+            return Outcome(None, 75, "GitHub rate limit — %s" % B.one_line(str(ex), 120))
+        return defect("gh read failed — %s" % B.one_line(str(ex), 160),
+                      "transient" if kind in ("transient", "unknown") else "defect")
+    return defect("%s — %s" % (ex.__class__.__name__, B.one_line(str(ex), 160)), "defect")
 
 
 def final_events(outcome, cost_usd=0.0, out=None):

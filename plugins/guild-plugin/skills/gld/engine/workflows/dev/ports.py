@@ -589,6 +589,14 @@ def live(issue, worktree, base, branch, config, clock, gh, writer, decisions, ru
 
 # ---- K3: the execute stage's live ports ------------------------------------------------------------
 
+def _branch_title(issue, gh, config, clock, main, journal):
+    """K5r1-m1: the BRANCH judge's Issue title through the author trust (`base.title_text`)."""
+    from workflows.dev.stages import base as _B
+    lp = _B.Ports(issue, gh, None, None, clock, config, main, journal=journal,
+                  git_dir=getattr(journal, "common_dir", None))
+    return _B.title_text(lp, gh.issue(issue), issue)
+
+
 def live_execute(issue, main, variant, config, clock, gh, writer, decisions, runner, judge_runner,
                  push_url, journal=None, unattended=True, host=None, plugin=None, env=None, local_dev_py=None,
                  worktree_path=None):
@@ -620,7 +628,7 @@ def live_execute(issue, main, variant, config, clock, gh, writer, decisions, run
 
         def related(name, log):
             d = judge_runner.judge(__import__("workflows.dev.judging", fromlist=["x"]).spec(
-                None, "BRANCH", [("issue", "#%d %s" % (issue, gh.issue(issue).get("title") or "")),
+                None, "BRANCH", [("issue", _branch_title(issue, gh, config, clock, main, journal)),
                                  ("branch", name), ("log", log[:3000])], "execute", "X0"))
             return d.choice
         cands = BR.candidates(main, issue, base, cur, related)

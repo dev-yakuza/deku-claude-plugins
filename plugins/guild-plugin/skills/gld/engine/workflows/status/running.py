@@ -110,12 +110,16 @@ def probe(lock):
     return alive, info
 
 
-def running(common_dirs):
+def running(common_dirs, halts=None):
+    """(rows, missing); `halts` (a list, K5r1-m3) collects every common dir whose kill switch `HALT` is on —
+    the runbook's "no repository still has HALT" check reads it from this same command."""
     rows, missing = [], []
     for cd in common_dirs:
         if not os.path.isdir(cd):
             missing.append(cd)
             continue
+        if halts is not None and os.path.exists(os.path.join(journal.engine_dir(cd), "HALT")):
+            halts.append(cd)
         for lock in sorted(glob.glob(os.path.join(journal.engine_dir(cd), "*.lock"))):
             m = re.match(r"^(\d+)\.lock$", os.path.basename(lock))
             if not m:
@@ -128,8 +132,12 @@ def running(common_dirs):
     return rows, missing
 
 
-def render_running(rows, missing):
+def render_running(rows, missing, halts=()):
     out = []
+    for h in halts:
+        out.append("HALT  %s  (kill switch on — `dev valve resume` there, or `--all`)" % h)
+    if not halts:
+        out.append("HALT: none")
     for r in rows:
         out.append("#%d  %s  mode=%s pid=%s pgid=%s started=%s" % (
             r["issue"], r["repo"], r["mode"] or "?", r["pid"] or "?", r["pgid"] or "?",

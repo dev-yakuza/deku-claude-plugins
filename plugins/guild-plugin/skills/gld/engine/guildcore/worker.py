@@ -217,9 +217,13 @@ def python():
     return sys.executable or "python3"
 
 
-def reap_journaled(journal):
+def reap_journaled(journal, crashed_only=True):
     """Restart (K1-B5): kill every process group the journal recorded that is still alive (safe
-    kill — start time / live group check). Returns [(pgid, outcome)]."""
+    kill — start time / session id checked). Returns [(pgid, outcome)].
+    K5r1-M1: `crashed_only` (the restart check) touches a group only when its run is provably over —
+    the caller holds that Issue's lock (no live run can hold it) AND the journaled owner (the engine
+    process that started the group: pid + start time) is dead; a record whose owner is alive is
+    left alone (`owner-alive`). `halt --now` passes False: the kill switch stops live runs too."""
     from guildcore.adapters.claude import safe_kill_group
     out = []
     seen = set()
@@ -227,5 +231,8 @@ def reap_journaled(journal):
         if rec.get("pgid") in seen:
             continue
         seen.add(rec.get("pgid"))
+        if crashed_only and rec.get("owner") and holder_alive({"pid": rec["owner"], "pstart": rec.get("owner_start")}):
+            out.append((rec.get("pgid"), "owner-alive"))
+            continue
         out.append((rec.get("pgid"), safe_kill_group(rec, grace_s=3)))
     return out

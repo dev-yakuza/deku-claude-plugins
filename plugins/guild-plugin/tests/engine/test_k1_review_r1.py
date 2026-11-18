@@ -122,7 +122,14 @@ class B5ProcessGroups(unittest.TestCase):
         p = subprocess.Popen(["sleep", "30"], start_new_session=True)
         self.addCleanup(lambda: (p.poll() is None and p.kill(), p.wait()))
         j.record_pid("developer", p.pid, os.getpgid(p.pid), C.process_start(p.pid))
-        self.assertEqual(W.reap_journaled(j), [(p.pid, "killed")])
+        # K5r1-M1: the journaled owner (this live process) is alive → a restart never touches its group
+        self.assertEqual(W.reap_journaled(j), [(p.pid, "owner-alive")])
+        self.assertIsNone(p.poll())
+        dead = subprocess.Popen(["true"])
+        dead.wait()
+        j.append("pid", who="developer", pid=p.pid, pgid=os.getpgid(p.pid), start_time=C.process_start(p.pid),
+                 session_id=None, owner=dead.pid, owner_start="Thu Jan  1 00:00:00 1970")
+        self.assertEqual(W.reap_journaled(j), [(p.pid, "killed")])     # the crashed owner's group is reaped
 
 
 class B6RateLimits(Base):

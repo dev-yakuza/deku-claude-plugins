@@ -242,9 +242,9 @@ class GhWriter(object):
         if age is not None and age >= self.SETTLE_S:
             j.done(it, abandoned=True)
             return True
-        raise GhWriteError("issue:create", "an Issue create (%s) may have landed and is not in the issue list yet — "
-                           "nothing is re-created while that is unknown; resume after %s"
-                           % (_one_line(it.get("target"), 60), self.settle_at(it)), "ambiguous")
+        raise self._ambiguous(it, "an Issue create (%s) may have landed and is not in the issue list yet — "
+                              "nothing is re-created while that is unknown; resume after %s"
+                              % (_one_line(it.get("target"), 60), self.settle_at(it)))
 
     def _records(self, issue):
         """Record candidates only (K2-M5): never PATCH a stranger's comment that carries a marker."""
@@ -544,6 +544,15 @@ class GhWriter(object):
             if self._resolve_one(it, reads) == "found":
                 known.add(it["token"])
 
+    def _ambiguous(self, it, message):
+        """`GhWriteError(kind="ambiguous")` carrying `retry_at` (epoch): when a re-check can settle the create —
+        found → recorded, still absent → never landed (the stage creates it again; a late copy is the orphan
+        check's). K5r1 user decision 2: the unattended supervisor resumes on its own at that time."""
+        ex = GhWriteError("issue:create", message, "ambiguous")
+        ts = _parse_iso(it.get("t"))
+        ex.retry_at = (ts + self.SETTLE_S + 30) if ts is not None else None
+        return ex
+
     def settle_at(self, it):
         """The ISO time after which an unresolved create counts as never landed (intent + SETTLE_S)."""
         ts = _parse_iso(it.get("t"))
@@ -561,10 +570,10 @@ class GhWriter(object):
         if age is not None and age >= self.SETTLE_S:
             j.done(it, abandoned=True)
             return "abandoned"
-        raise GhWriteError("issue:create", "the create of %s may have landed (its reply was lost) and is not in "
-                           "the issue list yet — nothing is re-created while that is unknown; resume after %s "
-                           "(an absent create is settled as never landed %d minutes after it was sent)"
-                           % (it.get("key"), self.settle_at(it), self.SETTLE_S // 60), "ambiguous")
+        raise self._ambiguous(it, "the create of %s may have landed (its reply was lost) and is not in "
+                              "the issue list yet — nothing is re-created while that is unknown; resume after %s "
+                              "(an absent create is settled as never landed %d minutes after it was sent)"
+                              % (it.get("key"), self.settle_at(it), self.SETTLE_S // 60))
 
     ORPHAN_SCAN_S = 86400     # an abandoned create is looked for as an orphan for a day after it was given up
 
@@ -669,10 +678,10 @@ class GhWriter(object):
             # landed: the token through the REST list, else a person — never a second POST
             n = self.find_by_token(token, label, it.get("since"))
             if n is None:
-                raise GhWriteError("issue:create", "the create of %s failed ambiguously (%s) and the issue list "
-                                   "does not show it — nothing is re-created while that is unknown; resume after %s "
-                                   "(an absent create is settled as never landed %d minutes after it was sent)"
-                                   % (key, _one_line(e.message), self.settle_at(it), self.SETTLE_S // 60), "ambiguous")
+                raise self._ambiguous(it, "the create of %s failed ambiguously (%s) and the issue list "
+                                      "does not show it — nothing is re-created while that is unknown; resume after %s "
+                                      "(an absent create is settled as never landed %d minutes after it was sent)"
+                                      % (key, _one_line(e.message), self.settle_at(it), self.SETTLE_S // 60))
             self._record_issue(it, n, recovered=True)
             return n, False
         if not self._verify_with_backoff("issue:create", lambda _r: token in

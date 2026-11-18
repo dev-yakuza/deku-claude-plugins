@@ -225,16 +225,18 @@ class Busy(unittest.TestCase):
         finally:
             lk.release()
 
-    def test_detach_attaches_to_an_unattended_owner_and_takes_its_end(self):
+    def test_detach_on_an_unattended_owner_reports_it_and_never_starts_a_second_writer(self):
+        # K5r1-M5 (supersedes the foreground attach): `--detach` returns at once; the driver waits with `dev wait`
         e = Env(self)
         lk = W.IssueLock(e.common, 7)
         lk.acquire("unattended")
-        W.Events(e.common, 7).emit("terminal", "2026-11-18T00:00:00Z", exit_code=75, line="rate limited")
-        e.d.sleep = lambda s: time.sleep(0.05)
-        t = threading.Timer(0.3, lk.release)
-        t.start()
-        self.assertEqual(e.run("--unattended", "--detach"), 75)
-        t.join()
+        try:
+            self.assertEqual(e.run("--unattended", "--detach"), 0)
+            self.assertIn("is running unattended", json.loads(e.lines()[1])["result"])
+            self.assertEqual(e.spawned, [])
+            self.assertEqual(FakeDriver.calls, [])
+        finally:
+            lk.release()
 
 
 class RestartCheck(unittest.TestCase):
@@ -243,7 +245,12 @@ class RestartCheck(unittest.TestCase):
         j = e.h.journal
         j.intent(op="issue:create", target="7-a tok", key="7-a", token="tok", find_label="guild:child",
                  since="2026-11-15T23:00:00Z", entry_id=None, stage=None, step_id=None, attempt=0)
-        self.assertEqual(e.run("--unattended"), 0)
+        # K5r1 decision 2: unattended → exit 75 at the settle time (the supervisor resumes by itself)
+        self.assertEqual(e.run("--unattended"), 75)
+        ev = json.loads(e.lines()[0])
+        self.assertEqual(ev["rate_limit_info"]["status"], "rejected")
+        self.assertGreater(ev["rate_limit_info"]["resetsAt"], time.time())
+        self.assertIn("not a rate limit", json.loads(e.lines()[1])["result"])
         self.assertEqual(FakeDriver.calls, [])                            # no stage ran
         self.assertIn("guild:needs-human", e.h.labels())
         nh = [c["body"] for c in e.h.gh.fx["issues"]["7"]["comments"] if "guild:needs-human" in c["body"]]

@@ -237,6 +237,8 @@ def fix_child(p, q, trusted=True):
         # K4r4-m3: the same classes as make_children — an unknown create is `env: service`, not an engine defect
         if ex.kind in ("auth", "ratelimit"):
             raise
-        return B.fail(p, STAGE, "integration fix child creation failed — %s" % B.one_line(str(ex), 320),
-                      "transient" if ex.kind in ("transient", "ambiguous") else "defect")
+        line = "integration fix child creation failed — %s" % B.one_line(str(ex), 320)
+        if ex.kind == "ambiguous":
+            return B.unknown_create(p, STAGE, line, ex)
+        return B.fail(p, STAGE, line, "transient" if ex.kind == "transient" else "defect")
     return None

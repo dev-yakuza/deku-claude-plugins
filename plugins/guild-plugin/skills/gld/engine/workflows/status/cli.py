@@ -95,8 +95,9 @@ def main(argv, out=None, err=None, clock=None, ledger=None):
             return 0
         if a.cmd == "running":
             dirs = running.registry() if a.all_repos else [running.git_common_dir(a.root)]
-            rows, missing = running.running(dirs)
-            out.write(running.render_running(rows, missing))
+            halts = []
+            rows, missing = running.running(dirs, halts)
+            out.write(running.render_running(rows, missing, halts))
             return 0
         if a.cmd == "directives":
             if not a.all_repos:

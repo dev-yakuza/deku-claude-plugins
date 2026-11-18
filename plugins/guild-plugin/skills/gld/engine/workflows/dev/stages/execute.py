@@ -317,7 +317,7 @@ def dwc_judgment(p, cx, attempt, dwc_now):
         return []
     from guildcore.records import redact as RD
     parts = [("concerns", "\n".join("%s: %s" % (r, RD.redact(t)) for r, t in dwc_now)),
-             ("issue", (p.gh.issue(p.issue).get("title") or "")),
+             ("issue", B.title_text(p, p.gh.issue(p.issue))),            # K5r1-m1: trust-marked title
              ("test_cases", (p.read_file("docs/specs/%d/test-cases.md" % p.issue) or "")[:6000])]
     d = p.judge(JG.spec(p, "EX-DWC", parts, STAGE, "X4"))
     B.record_judgment(p, STAGE, "EX-DWC", ",".join(r for r, _t in dwc_now), d, reason=d.fields.get("reason"))

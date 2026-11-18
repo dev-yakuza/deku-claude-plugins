@@ -81,7 +81,11 @@ class Supervisor(unittest.TestCase):
         for reason in ("engine-kill-switch", "plugin-version-changed", "engine-env-python", "engine-env-"):
             self.assertIn(reason, block)
         self.assertIn("busy-skipped", block)
-        self.assertIn("sleep 300", block)
+        # K5r1-m9: the 5-minute busy wait is sliced (WAIT_CHUNK) — a TERM is not delayed by five minutes
+        self.assertNotIn("sleep 300", block)
+        self.assertIn('sleep "$WAIT_CHUNK"', block)
+        self.assertIn('"$EXIT_CODE" -eq 3', block)                     # K5r1-m5: gh auth stops the sprint
+        self.assertIn("engine-gh-auth", block)
 
     def test_gate_before_every_pop(self):
         s = code(render(self))
