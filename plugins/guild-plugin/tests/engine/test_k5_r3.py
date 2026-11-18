@@ -31,6 +31,7 @@ from workflows.dev.stages import base as B
 from workflows.dev.stages.base import StageResult
 
 TOK = re.compile(r"(?<![A-Za-z0-9_])i1(?![A-Za-z0-9_])")
+TOK2 = re.compile(r"(?<![A-Za-z0-9_])i2(?![A-Za-z0-9_])")
 
 
 def _msg(e):
@@ -53,18 +54,20 @@ class M1NeutralText(unittest.TestCase):
         self.assertEqual(ask["kind"], "interpretation-surface")
         self.assertTrue(ask["predict_first"])
         self.assertNotIn("recommended", ask)
-        # the chosen one is i1 ("show the count", the judge's first) — nothing that goes out names it
+        # the chosen one is "show the count" (the judge's first) — K5r4-m1: tokens are numbered in the canonical
+        # content order, so it is i2 ("hide …" < "show …"); nothing that goes out names it
         rendered = json.dumps(dict(ask, options=[o["label"] for o in ask["options"]]), ensure_ascii=False)
-        self.assertIsNone(TOK.search(rendered), rendered)
+        self.assertIsNone(TOK2.search(rendered), rendered)
         self.assertNotIn("show the count", ask["question"])
         # canonical order: by label, stop last — not the judge's ranking (recommended-first)
-        self.assertEqual([o["token"] for o in ask["options"]], ["i2", "i1", "stop"])
+        self.assertEqual([(o["token"], o["label"]) for o in ask["options"]],
+                         [("i1", "hide the count"), ("i2", "show the count"), ("stop", "stop")])
         pend = [b for b in h.decisions_of("ask:interpretation-surface") if b.get("status") == "pending-human"][0]
         self.assertEqual(pend.get("predict_first"), "high-risk")
         self.assertIsNone(pend.get("predict_first_refused"))
         for f in ("question", "cause", "reason"):
-            self.assertIsNone(TOK.search(str(pend.get(f) or "")), f)
-        self.assertIsNone(TOK.search(r.line or ""))
+            self.assertIsNone(TOK2.search(str(pend.get(f) or "")), f)
+        self.assertIsNone(TOK2.search(r.line or ""))
 
     def test_leaky_question_is_refused_not_blind(self):
         # the r3 repro: a question that names the hidden token is never recorded as a blind answer
@@ -124,7 +127,7 @@ class M1NeutralText(unittest.TestCase):
         pend = [b for b in h.decisions_of("ask:readiness") if b.get("status") == "pending-human"][0]
         self.assertEqual(pend.get("predict_first"), "high-risk")
         body = [c["body"] for c in h.gh.comments(7) if "guild:needs-human" in c["body"]][-1]
-        self.assertLess(body.index("i2 = hide the count"), body.index("i1 = show the count"))
+        self.assertLess(body.index("i1 = hide the count"), body.index("i2 = show the count"))
 
     def test_close_decided_is_never_blind(self):
         h, r = self._surface(close={"decide": "completed", "line": "already shipped in #3"})

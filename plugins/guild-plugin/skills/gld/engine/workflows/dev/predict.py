@@ -20,6 +20,10 @@ Only these answers count as a human judgment in §9.5 (G1, graduation, release).
               answer (`predict_first_refused`, recommendation shown openly, never a §9.5 human judgment) when the
               question, its options, the text going out with it or this stage's decision-log free text names the
               recommendation, or when the kind states it by being asked (close-decided)
+  names       (K5r4-M1/m6) an option goes by its engine token, the judge's own id (`Question.aliases` — KICKOFF's
+              `I2` / `B` / `broad`, which `analysis.to_tokens` also rewrites to the token in the judge's text) and
+              its full summary; whole words, case-insensitive. A text naming every option equally often, with no
+              preference word, is neutral; an unreadable decision log refuses (K5r4-m2 — fail closed)
   KICKOFF     its decision block carries `chosen_sha` instead of `chosen` (the chosen interpretation IS the readiness
               question's recommendation); analyze:output names it once the stage goes on
 
@@ -157,7 +161,10 @@ def canonical(options):
 
 
 def _token_re(tok):
-    return re.compile(r"(?<![A-Za-z0-9_])%s(?![A-Za-z0-9_])" % re.escape(tok))
+    """K5r4-M1: an option name as a whole word, any case (`I2` names `i2` to a reader; a one-letter id only in
+    its own case — `analysis.id_regex`)."""
+    from workflows.dev.analysis import id_regex
+    return id_regex(tok)
 
 
 def _strip_enumeration(text, options):
@@ -167,34 +174,84 @@ def _strip_enumeration(text, options):
     return text
 
 
+# K5r4-m6: a text that names every option equally often names none of them — unless it also states a preference
+PREFERENCE = re.compile(r"맞아\s*보|맞는\s*것|적절|타당|바람직|나아\s*보|낫|좋아\s*보|유력|아마|것\s*같|가능성이\s*높|"
+                        r"\bprefer|\blikely\b|\bbetter\b|\bbest\b|\bshould\b|\bseems?\b|\bappropriate\b|"
+                        r"\bcorrect\b|\bsuggest|\bprobably\b|\bpick\b|\bgo with\b", re.I)
+
+
+class _Names(object):
+    """Every name an option goes by — the engine token, the judge's own id (`Question.aliases`), the label (its
+    `…`-truncated head too) and the untruncated summary. Short names match as whole words, case-insensitive;
+    long ones (≥ LABEL_MIN) as case-insensitive substrings."""
+
+    def __init__(self, q):
+        self.q = q
+        self.words, self.phrases = {}, {}
+        for o in q.options:
+            t = o["token"]
+            if t == "stop":
+                continue
+            names = [t] + [str(x) for x in (q.aliases or {}).get(t, []) if x]
+            lb = str(o.get("label") or "")
+            names.append(lb[:-1].rstrip() if lb.endswith("…") else lb)
+            ws, ps = [], []
+            for nm in names:
+                nm = " ".join(nm.split())
+                if not nm or nm == "stop":
+                    continue
+                if len(nm) >= LABEL_MIN and (" " in nm or len(nm) > 40 or not re.match(r"^[\w.:-]+$", nm)):
+                    ps.append(nm.casefold())
+                elif re.match(r"^[\w.:-]+$", nm):
+                    ws.append(_token_re(nm))
+            self.words[t], self.phrases[t] = ws, ps
+
+    def count(self, text, tok):
+        t = " ".join(str(text or "").split())
+        tf = t.casefold()
+        return sum(len(rx.findall(t)) for rx in self.words.get(tok, [])) + \
+            sum(tf.count(ph) for ph in self.phrases.get(tok, []))
+
+    def names_rec(self, text, markers=True):
+        """True when `text` points at the recommendation: names it more often than some other option, or names
+        every option equally but with a preference word, or (`markers`) carries a recommendation marker."""
+        rec = self.q.recommended
+        t = _strip_enumeration(str(text or ""), self.q.options)
+        if markers and MARKERS.search(t):
+            return True
+        n = self.count(t, rec)
+        if not n:
+            return False
+        others = [self.count(t, o) for o in self.words if o != rec]
+        if others and all(c == n for c in others) and not PREFERENCE.search(t):
+            return False                                      # a symmetric mention: "범위: i1 vs i2"
+        return True
+
+
 def leak(p, q, stage=None, texts=()):
     """Where the rendered question would show its recommendation, or None. Looks at the question text, the
     context lines, every other text that goes out with it (`texts`: the needs-human line, the pause prose, the
     cause …), the option labels, and the free-text fields this Issue's decision log already shows for the stage
-    (a STAKES / KICKOFF `reason` that names the chosen interpretation — r3-m1/m2)."""
+    (a STAKES / KICKOFF `reason` that names the chosen interpretation — r3-m1/m2). K5r4-M1: by every name the
+    recommendation goes by (`_Names`); K5r4-m2: a decision log that cannot be read is NOT "nothing shown yet" —
+    the log is on GitHub for the person to see, so the blind answer is refused."""
     rec = q.recommended
     if rec is None:
         return None
-    tre = _token_re(rec)
-    rlabel = next((str(o.get("label") or "") for o in q.options if o["token"] == rec), "")
-    rlabel = rlabel if len(rlabel) >= LABEL_MIN and rlabel != rec else ""
-
-    def names(t):
-        t = _strip_enumeration(str(t or ""), q.options)
-        return bool(tre.search(t)) or bool(rlabel and rlabel.casefold() in t.casefold()) or bool(MARKERS.search(t))
-    if names(q.text):
+    nm = _Names(q)
+    if nm.names_rec(q.text):
         return "question"
-    for i, t in enumerate(list(q.context_lines) + [x for x in texts if x]):
-        if names(t):
+    for t in list(q.context_lines) + [x for x in texts if x]:
+        if nm.names_rec(t):
             return "text"
     for o in q.options:
         lb = str(o.get("label") or "")
-        if MARKERS.search(lb) or (o["token"] != rec and tre.search(lb)):
+        if MARKERS.search(lb) or (o["token"] != rec and nm.count(lb, rec)):
             return "options"
     try:
         log = p.decisions._log()
-    except Exception:                                            # noqa: BLE001 — no log to read: nothing shown yet
-        return None
+    except Exception:                                            # noqa: BLE001 — K5r4-m2: fail closed
+        return "decision-log unreadable"
     for b in log.blocks:
         if stage is not None and b.get("stage") != stage:
             continue
@@ -202,7 +259,7 @@ def leak(p, q, stage=None, texts=()):
             return "decision-log %s" % b.id
         for f in LOG_FIELDS:
             v = b.get(f)
-            if v and (tre.search(str(v)) or (rlabel and rlabel.casefold() in str(v).casefold())):
+            if v and nm.names_rec(str(v), markers=False):
                 if f == "question" and b.get("status") == "pending-human" and b.get("recommended_sha"):
                     continue                                     # an earlier blind question passed this same check
                 return "decision-log %s" % b.id

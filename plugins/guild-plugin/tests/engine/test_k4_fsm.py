@@ -212,7 +212,8 @@ class Resume(unittest.TestCase):
     def test_answer_line_resumes_with_the_human_choice(self):
         h, r = self._paused()
         it = h.issue()
-        it["comments"].append(dict(comment("guild-answer: %s i2" % r.qid, 900, at="2026-11-16T01:00:00Z"),
+        # K5r4-m1: tokens follow the canonical content order — "hide the count" is i1
+        it["comments"].append(dict(comment("guild-answer: %s i1" % r.qid, 900, at="2026-11-16T01:00:00Z"),
                                    user={"login": "owner"}))
         it["labels"] = [l for l in it["labels"] if l["name"] != "guild:needs-human"]
         it["timeline"].append({"id": 5, "event": "unlabeled", "label": {"name": "guild:needs-human"},
@@ -221,7 +222,7 @@ class Resume(unittest.TestCase):
         h.judges["KICKOFF"] = kickoff(goal="unclear")
         out = driver(h, {"design": lambda p, **k: StageResult(StageResult.PAUSE, cause="design stub")}).run(7)
         self.assertIn("guild:design", h.labels())
-        self.assertIn("- (선택) i2: hide the count", h.body_with("analyze:output"))
+        self.assertIn("- (선택) i1: hide the count", h.body_with("analyze:output"))
         res = [b for b in h.decisions_of("KICKOFF")]
         self.assertEqual(len(res), 2)
 

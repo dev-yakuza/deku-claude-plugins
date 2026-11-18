@@ -311,6 +311,8 @@ def run(p, only=None, config_present=True):
     sources = {"issue": body + "\n" + (issue.get("title") or "") + "\n" + comments_text, "charter": charter,
                "plan": plan_text}
     k = AN.coerce_kickoff(d.fields, p.root, sources, net, plan, [], ros, tracked_fn(p), attended=not p.unattended)
+    if k.token_map and getattr(p, "journal", None) is not None:      # K5r4-m1: which judge id became which token
+        p.journal.append("event", what="kickoff-tokens", map=k.token_map, order="canonical")
     _untagged = [x for x in (d.fields.get("untagged_premises") or []) if isinstance(x, int)
                  and any("#%d" % x in pl.answer for pl in plan)]          # J-AN-02 — only a number a plan line names
     for x in _untagged:
@@ -413,7 +415,7 @@ def run(p, only=None, config_present=True):
         if unclear:
             what = "; ".join("%s unclear — %s" % (AN.DIM_KEY[x], k.choice_needed.get(x) or "-") for x in unclear)
             q = ASK.Question("readiness", what, opts, recommended=k.chosen if k.chosen in [o["token"] for o in opts] else None,
-                             recommended_by=d.by, stakes="high" if k.high & set(unclear) else None)
+                             recommended_by=d.by, stakes="high" if k.high & set(unclear) else None, aliases=k.aliases)
             return B.ask(p, STAGE, q, what)
         surf = k.surface.get("ask") or p.engine_cfg("attended_confirm_interpretation", False)
         if surf and "interpretation-surface" not in answers and "readiness" not in answers:
@@ -421,7 +423,7 @@ def run(p, only=None, config_present=True):
             # K5r3-M1: KICKOFF is high-risk → this ask is predict-first; its neutral wording never names the chosen one
             q = ASK.Question("interpretation-surface", what, opts,
                              recommended=k.chosen if k.chosen in [o["token"] for o in opts] else None, recommended_by=d.by,
-                             neutral="#%d: 어느 해석으로 진행할까요?" % p.issue)
+                             neutral="#%d: 어느 해석으로 진행할까요?" % p.issue, aliases=k.aliases)
             return B.ask(p, STAGE, q, what)
         if p.events is not None:                          # JR-M10 — the person can hold/note
             p.events.emit("progress", p.now(), line="analyze #%d: %s · %s · cast %s" % (
@@ -445,7 +447,7 @@ def run(p, only=None, config_present=True):
             opts = [{"token": i["id"], "label": B.one_line(i["summary"], 80)} for i in k.interpretations]
             opts.append({"token": "stop", "label": "stop"})
             q = ASK.Question("readiness", line, opts, recommended=k.chosen if k.chosen in [o["token"] for o in opts] else None,
-                             recommended_by=d.by, stakes="high")
+                             recommended_by=d.by, stakes="high", aliases=k.aliases)
             # K5r3-m3: the enumeration in the canonical order (never the judge's ranking)
             return B.pause(p, STAGE, "ambiguity", line, "ambiguity: %s" % line, question=q,
                            prose="선택지: " + " | ".join("%s = %s" % (o["token"], o["label"])

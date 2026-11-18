@@ -236,8 +236,10 @@ class Attended(unittest.TestCase):
         self.assertEqual(r.kind, StageResult.ASK)
         ask = [e for e in h.events if e[0] == "ask"][0][1]
         # K5r3-m3: a predict-first ask lists its options in the canonical order (label, token; stop last) — never
-        # the judge's ranking (i1 = the judge's chosen "show the count")
-        self.assertEqual([o["token"] for o in ask["options"]], ["i2", "i1", "stop"])
+        # the judge's ranking; K5r4-m1: the token NUMBERS follow that content order too (the judge's chosen "show
+        # the count", listed first by the judge, is i2)
+        self.assertEqual([(o["token"], o["label"]) for o in ask["options"]],
+                         [("i1", "hide the count"), ("i2", "show the count"), ("stop", "stop")])
         # K6 predict-first (§2.6, R5J-M4): KICKOFF is a high-risk group — the person answers before seeing
         # the recommendation; the pending block commits to it (`recommended_sha`), the KICKOFF block seals `chosen`
         self.assertTrue(ask["predict_first"])
@@ -256,24 +258,24 @@ class Attended(unittest.TestCase):
         h = K4(self, unattended=False, roles=[evidence(self)], judges={"KICKOFF": [kickoff(goal="unclear"), kickoff(goal="unclear")]})
         h.p.journal = h.journal                    # K6: the nonce of the hidden recommendation lives in the journal
         r = A.run(h.p)
-        res_id = ASK.answer(h.decisions, h.writer, h.n, r.qid, "i2", journal=h.journal)
+        res_id = ASK.answer(h.decisions, h.writer, h.n, r.qid, "i1", journal=h.journal)
         rev = [b for b in h.decisions_of("ask:readiness") if b.id == res_id][0]
-        self.assertEqual(rev.get("recommended"), "i1")                       # revealed only after the answer
+        self.assertEqual(rev.get("recommended"), "i2")                       # revealed only after the answer
         import hashlib
         pend = [b for b in h.decisions_of("ask:readiness") if b.id == r.qid][0]
-        self.assertEqual(hashlib.sha256(("i1" + rev.get("nonce")).encode()).hexdigest(), pend.get("recommended_sha"))
+        self.assertEqual(hashlib.sha256(("i2" + rev.get("nonce")).encode()).hexdigest(), pend.get("recommended_sha"))
         h.roles += [evidence(self), out_role(self, "DONE", ac_patch=[])]
         r2 = A.run(h.p)
         self.assertEqual(r2.kind, StageResult.ADVANCE)
         out = h.body_with("analyze:output")
-        self.assertIn("- (선택) i2: hide the count", out)
+        self.assertIn("- (선택) i1: hide the count", out)
         self.assertEqual(h.captures[0][0], "correction")
         self.assertTrue(h.decisions_of("applied"))
 
     def test_progress_event_shows_choice_when_clear(self):
         h = K4(self, unattended=False, roles=[evidence(self)], judges={"KICKOFF": kickoff()})
         A.run(h.p)
-        self.assertTrue(any(k == "progress" and "i1" in kw["line"] for k, kw in h.events))
+        self.assertTrue(any(k == "progress" and "i2" in kw["line"] for k, kw in h.events))   # K5r4-m1: show = i2
 
 
 class ProductOwner(unittest.TestCase):

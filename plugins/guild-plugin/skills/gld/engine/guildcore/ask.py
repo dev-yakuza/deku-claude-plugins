@@ -31,7 +31,7 @@ parse_guild_answer = answer_rec.parse
 class Question(object):
     def __init__(self, kind, text, options, recommended=None, recommended_by=None,
                  context_lines=(), predict_first=False, point=None, refs=None, stakes=None, waits_at=None,
-                 group=None, neutral=None):
+                 group=None, neutral=None, aliases=None):
         if kind not in ASK_KINDS:
             raise ValueError("ask kind must be one of the §2.6 set: %s" % kind)
         toks = [o["token"] for o in options]
@@ -54,6 +54,9 @@ class Question(object):
         # (workflows.dev.predict.apply swaps it in); `blind_refused` = why a forced predict-first was refused
         # (the rendered text would show the recommendation) — the answer is then NOT a blind human judgment
         self.neutral = neutral
+        # K5r4-M1: other names an option goes by in the judge's text (its own id, the untruncated summary) —
+        # {token: [alias, …]}; the leak check treats each as that option. Never rendered.
+        self.aliases = dict(aliases or {})
         self.neutralized = False
         self.blind_refused = None
 

@@ -316,7 +316,9 @@ class Kickoff(object):
         self.high = set()             # dims whose stakes are fixed high (premise / reinterpretation)
         self.coerced = []             # human-readable coercion notes (decision log `coerced_by: rule`)
         self.ac = []                  # [{id, text, priority, tag}]
-        self.interpretations = []     # [{id, summary}]
+        self.interpretations = []     # [{id, summary, orig}] — id = engine token, canonical order (K5r4-m1)
+        self.token_map = []           # [{token, orig}] — journaled by the stage (K5r4-m1)
+        self.aliases = {}             # token → [judge id, full summary] — predict.leak (K5r4-M1)
         self.chosen = None
         self.assumptions = []
         self.features = []
@@ -336,13 +338,19 @@ def coerce_kickoff(fields, root, sources, net_lines, plan_lines, premise_unmet_d
     k = Kickoff()
     f = fields or {}
     interp = [i for i in (f.get("interpretations") or []) if isinstance(i, dict) and i.get("id")][:5]
-    # ids become answer tokens `i1`…`i5` (the judge's own ids are free text — §2.5 token grammar)
-    k.interpretations = [{"id": "i%d" % (n + 1), "summary": str(i.get("summary") or ""),
-                          "orig": str(i["id"])[:40]} for n, i in enumerate(interp)]
-    by_orig = dict((i["orig"], i["id"]) for i in k.interpretations)
-    ids = [i["id"] for i in k.interpretations]
-    k.chosen = by_orig.get(str(f.get("chosen"))) or (ids[0] if ids else None)
-    if str(f.get("chosen")) not in by_orig and ids:
+    # ids become answer tokens `i1`…`i5` (the judge's own ids are free text — §2.5 token grammar).
+    # K5r4-m1: the NUMBERS follow a canonical, content-based order (normalized summary, then a hash of the judge's
+    # id) — never the judge's listing order, which tends to put its pick first; the mapping is journaled by the stage
+    order = sorted(range(len(interp)), key=lambda n: canon_key(interp[n]))
+    k.interpretations = [{"id": "i%d" % (r + 1), "summary": str(interp[n].get("summary") or ""),
+                          "orig": str(interp[n]["id"])[:40]} for r, n in enumerate(order)]
+    k.token_map = [{"token": i["id"], "orig": i["orig"]} for i in k.interpretations]
+    # K5r4-M1: the judge's own ids are aliases of the engine tokens — case-insensitive (`I2` = `i2` to a reader)
+    by_orig = dict((i["orig"].strip().casefold(), i["id"]) for i in k.interpretations)
+    k.aliases = dict((i["id"], [i["orig"], i["summary"]]) for i in k.interpretations)
+    first = k.interpretations[order.index(0)]["id"] if interp else None     # the judge's first listed one
+    k.chosen = by_orig.get(str(f.get("chosen")).strip().casefold()) or first
+    if str(f.get("chosen")).strip().casefold() not in by_orig and first:
         k.coerced.append("chosen not among interpretations → %s" % k.chosen)
     rd = f.get("readiness") or {}
     for dim in DIMS:
@@ -362,7 +370,7 @@ def coerce_kickoff(fields, root, sources, net_lines, plan_lines, premise_unmet_d
         elif rating == "clear" and anchor and verify_anchor(anchor, root, sources, tracked):
             k.anchors[dim] = anchor
         k.readiness[dim] = rating
-        k.choice_needed[dim] = str(r.get("choice_needed") or "")
+        k.choice_needed[dim] = to_tokens(str(r.get("choice_needed") or ""), k.token_map)
     plan_dims = {}
     for pl in plan_lines:
         plan_dims.setdefault(pl.dim, []).append(pl)
@@ -422,7 +430,7 @@ def coerce_kickoff(fields, root, sources, net_lines, plan_lines, premise_unmet_d
         k.coerced.append("areas dropped (not a repo directory): %s" % ", ".join(str(x) for x in dropped[:5]))
     cl = f.get("close") or {}
     dec = cl.get("decide") if cl.get("decide") in ("none", "completed", "not_planned") else "none"
-    k.close = {"decide": dec, "source": cl.get("source"), "line": cl.get("line") or ""}
+    k.close = {"decide": dec, "source": cl.get("source"), "line": to_tokens(str(cl.get("line") or ""), k.token_map)}
     if dec != "none":
         pl = close_plan_line(cl.get("line"), plan_lines, dec) if cl.get("source") == "plan_line" else None
         from_plan = pl is not None
@@ -432,8 +440,44 @@ def coerce_kickoff(fields, root, sources, net_lines, plan_lines, premise_unmet_d
         if not from_plan and not attended:
             k.coerced.append("close without a plan-decision line → high ambiguity (unattended)")
     st = f.get("surface_to_human") or {}
-    k.surface = {"ask": bool(st.get("ask")), "question": str(st.get("question") or "")}
+    k.surface = {"ask": bool(st.get("ask")), "question": to_tokens(str(st.get("question") or ""), k.token_map)}
     return k
+
+
+def canon_key(interp):
+    """K5r4-m1: the content-based sort key of an interpretation — its whitespace-normalized, case-folded summary,
+    then a hash of the judge's id (a tie between equal summaries never falls back to the judge's I1 < I2)."""
+    import hashlib
+    s = " ".join(str(interp.get("summary") or "").split()).casefold()
+    return (s, hashlib.sha256(str(interp.get("id")).encode("utf-8")).hexdigest())
+
+
+ID_EDGE = "A-Za-z0-9_-"            # `A-F13` is not the id `A`
+
+
+def id_regex(name):
+    """A judge id / engine token as a whole word: case-insensitive (`I2` = `i2` to a reader), except a one-letter id,
+    which matches its own case only (`A` is an id, `a` is an article)."""
+    return re.compile(r"(?<![%s])%s(?![%s])" % (ID_EDGE, re.escape(name), ID_EDGE), 0 if len(name) == 1 else re.I)
+
+
+def to_tokens(text, token_map):
+    """K5r4-M1: the judge's text with its own interpretation ids (`I2`, `B`, `broad` — any case) replaced by the
+    engine tokens the person sees (`i2`) — one simultaneous substitution (a judge id that spells another token,
+    e.g. its `i1` that became `i2`, never chains). A purely numeric id is left alone (it would rewrite counts and
+    AC numbers); the leak check still treats it as an alias (`predict.leak` — refused, the safe side)."""
+    if not text or not token_map:
+        return text
+    ids = [(t["orig"].strip(), t["token"]) for t in token_map
+           if t.get("orig") and t["orig"].strip() and not t["orig"].strip().isdigit()]
+    if not ids:
+        return text
+    ids.sort(key=lambda x: len(x[0]), reverse=True)
+    alt = "|".join(("(?-i:%s)" if len(o) == 1 else "%s") % re.escape(o) for o, _t in ids)
+    rx = re.compile(r"(?<![%s])(?:%s)(?![%s])" % (ID_EDGE, alt, ID_EDGE), re.I)
+    exact = dict((o, t) for o, t in ids if len(o) == 1)
+    folded = dict((o.casefold(), t) for o, t in ids if len(o) > 1)
+    return rx.sub(lambda mo: exact.get(mo.group(0)) or folded[mo.group(0).casefold()], text)
 
 
 def readiness_assumptions(k):
