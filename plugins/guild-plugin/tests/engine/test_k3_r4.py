@@ -53,11 +53,14 @@ class BaseTools(unittest.TestCase):
         fake = FakeInstall()
         CH.deps_step = fake
         d = PO.deps_main(self.r, tmpdir(self), dict(os.environ), tools=["cspell", "remark"], base="main")
-        self.assertEqual(len(fake.calls), 1)
-        cmds, pkg = fake.calls[0]
-        self.assertEqual(pkg, BASE_PKG)                                  # no github:, no alias, no file:
+        self.assertEqual(len(fake.calls), 2)                             # K3r5-M1: suite (branch) + tools (base)
+        self.assertEqual(fake.calls[0][1], BRANCH_PKG)                   # the suite/roles get the branch's deps
+        cmds, pkg = fake.calls[1]
+        self.assertEqual(pkg, BASE_PKG)                                  # the TOOLS: no github:, no alias, no file:
         self.assertIn("--no-save cspell remark", cmds[-1])
-        self.assertTrue(os.path.islink(os.path.join(self.r, "node_modules")))
+        self.assertEqual(os.path.realpath(os.path.join(self.r, "node_modules")),
+                         os.path.realpath(os.path.join(d.suite_node, "node_modules")))   # the worktree = branch install
+        self.assertNotEqual(os.path.dirname(os.path.dirname(d.node_bin)), d.suite_node)
         self.assertTrue(os.path.exists(os.path.join(d.node_bin, "remark")))
         self.assertEqual(LC.prepare("npx remark a.md", lambda x: False, None, d.node_bin, lambda n: None)[1], None)
 
@@ -70,7 +73,7 @@ class BaseTools(unittest.TestCase):
             t.start()
         for t in ths:
             t.join()
-        self.assertEqual(len(fake.calls), 1)                             # one install, the other waited + reused
+        self.assertEqual(len(fake.calls), 2)                             # one per kind; the other thread reused both
 
     def test_branch_manifest_change_does_not_change_the_tool_dir(self):
         mans = PO.base_manifests(self.r, "main")
@@ -95,7 +98,7 @@ class BaseConfigs(unittest.TestCase):
         with open(os.path.join(r, ".remarkrc"), "w") as fh:
             fh.write("{}")                                                # a branch-added config
         restore = PO.base_check_configs(r, base)
-        self.assertEqual(open(os.path.join(r, "cspell.json")).read(), '{"words": []}')
+        self.assertEqual(json.load(open(os.path.join(r, "cspell.json"))), {"words": []})
         self.assertFalse(os.path.exists(os.path.join(r, ".remarkrc")))
         restore()
         self.assertEqual(open(os.path.join(r, "cspell.json")).read(), '{"ignorePaths": ["**"]}')
@@ -116,3 +119,62 @@ class EveryCommand(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class K3r5(unittest.TestCase):
+    def test_branch_npm_dependency_reaches_the_suite(self):
+        r = repo(self, {"package.json": json.dumps(BASE_PKG)})
+        git(r, "switch", "-q", "-c", "feat")
+        pkg = dict(BASE_PKG, dependencies={"lodash": "^4.17.21"})
+        with open(os.path.join(r, "package.json"), "w") as fh:
+            json.dump(pkg, fh)
+        os.environ["GLD_ENGINE_RUNS"] = tmpdir(self)
+        self.addCleanup(os.environ.pop, "GLD_ENGINE_RUNS", None)
+        saved = CH.deps_step
+        self.addCleanup(setattr, CH, "deps_step", saved)
+        fake = FakeInstall()
+
+        def install(cmds, cwd, *a, **k):
+            res = fake(cmds, cwd, *a, **k)
+            if "lodash" in json.dumps(fake.calls[-1][1]):
+                os.makedirs(os.path.join(cwd, "node_modules", "lodash"))
+            return res
+        CH.deps_step = install
+        PO.deps_main(r, tmpdir(self), dict(os.environ), tools=["cspell"], base="main")
+        self.assertTrue(os.path.isdir(os.path.join(r, "node_modules", "lodash")))      # what the suite resolves
+
+    def test_cspell_keeps_only_added_words(self):
+        base = json.dumps({"words": ["alpha"], "ignorePaths": ["build/**"], "language": "en"}).encode()
+        branch = json.dumps({"words": ["alpha", "kanjiyomi"], "ignorePaths": ["**"], "enabled": False,
+                             "ignoreRegExpList": [".*"], "language": "xx"}).encode()
+        out, added = PO.merge_cspell(base, branch)
+        self.assertEqual(added, ["kanjiyomi"])
+        self.assertEqual(json.loads(out), {"words": ["alpha", "kanjiyomi"], "ignorePaths": ["build/**"], "language": "en"})
+
+    def test_word_list_file_additions_only(self):
+        r = repo(self, {"cspell.json": json.dumps({"dictionaryDefinitions": [{"name": "p", "path": "./words.txt"}]}),
+                        "words.txt": "alpha\n"})
+        base = git(r, "rev-parse", "HEAD")
+        with open(os.path.join(r, "words.txt"), "w") as fh:
+            fh.write("kanjiyomi\n")                                    # the branch dropped alpha, added a word
+        restore = PO.base_check_configs(r, base)
+        self.assertEqual(open(os.path.join(r, "words.txt")).read(), "alpha\nkanjiyomi\n")
+        restore()
+        self.assertEqual(open(os.path.join(r, "words.txt")).read(), "kanjiyomi\n")
+
+    def test_crash_during_checks_is_repaired(self):
+        r = repo(self, {"analysis_options.yaml": "a: 1\n"})
+        base = git(r, "rev-parse", "HEAD")
+        with open(os.path.join(r, "analysis_options.yaml"), "w") as fh:
+            fh.write("a: 2\n")
+        os.environ["GLD_ENGINE_RUNS"] = tmpdir(self)
+        self.addCleanup(os.environ.pop, "GLD_ENGINE_RUNS", None)
+        PO.base_check_configs(r, base)                                    # … and the engine dies here
+        self.assertEqual(open(os.path.join(r, "analysis_options.yaml")).read(), "a: 1\n")
+        self.assertEqual(PO.recover_check_backup(r), ["analysis_options.yaml"])
+        self.assertEqual(open(os.path.join(r, "analysis_options.yaml")).read(), "a: 2\n")
+        self.assertEqual(PO.recover_check_backup(r), [])
+
+    def test_skipped_warmup_is_env(self):
+        red = CH.CheckResult(False, 1, False, "Building native assets failed", [], 60)
+        self.assertTrue(PO.net_env({"warm": "skipped(root flutter_test_config.dart)"}, red).startswith("warm-up skipped"))

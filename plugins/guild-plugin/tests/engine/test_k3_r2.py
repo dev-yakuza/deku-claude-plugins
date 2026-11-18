@@ -227,6 +227,18 @@ class LiveChecks(_Live):
         PO.link_node_modules(wt, nd)
         self.assertEqual(os.path.realpath(os.path.join(wt, "node_modules")), os.path.realpath(os.path.join(nd, "node_modules")))
 
+    def test_failed_dependency_step_refuses_the_1l_commit(self):
+        from workflows.dev import ports as PO
+        saved = PO.deps_main
+        self.addCleanup(setattr, PO, "deps_main", saved)
+        PO.deps_main = lambda *a, **k: CH.CheckResult(False, 1, False, "version solving failed.", [], 60)
+        p = self.live([])
+        with open(os.path.join(self.wt, "src", "a.py"), "a") as fh:
+            fh.write("# x\n")
+        ok, line = p.commit_local(["src/a.py"], [], "implement")
+        self.assertFalse(ok)
+        self.assertIn("dependency step failed — version solving failed.", line)
+
     def test_only_changed_paths_are_staged(self):
         p = self.live([])
         ok, line = p.commit_local([":(glob)**", "README.md"], [], "implement")

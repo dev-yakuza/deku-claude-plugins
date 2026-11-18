@@ -364,7 +364,7 @@ def base_manifests(worktree, base):
     return out
 
 
-def node_dir(worktree, manifests=None, tools=()):
+def node_dir(worktree, manifests=None, tools=(), kind="tools"):
     """The ENGINE-owned node_modules home, keyed by <base>'s manifests (+ the extra check tools):
     outside every role's allowWrite; roles see it only through the `node_modules` symlink the engine
     (re)creates. Shared by the repo's Issues with the same base manifests (installs are locked)."""
@@ -373,6 +373,7 @@ def node_dir(worktree, manifests=None, tools=()):
     for f in sorted(manifests or {}):
         h.update(f.encode() + b"\0" + manifests[f])
     h.update(("\0".join(sorted(tools))).encode())
+    h.update(b"\0kind=" + kind.encode())        # K3r5-M1: the check tools (base) and the suite deps (branch) never share
     # beside the run root (`~/.cache/guild-engine/<repo-hash>/`): engine-owned, no role allowWrite reaches
     # it, readable by the sandboxes (the shared git dir is not — the deps step denies it)
     root = os.path.dirname(os.path.dirname(RR.run_root(worktree, 0)))
@@ -384,21 +385,21 @@ def link_node_modules(worktree, nd):
     the engine's prepared dir."""
     import shutil as _sh
     dst = os.path.join(worktree, "node_modules")
-    if os.path.islink(dst) or os.path.isfile(dst):
-        os.remove(dst)
-    elif os.path.isdir(dst):
+    if os.path.isdir(dst) and not os.path.islink(dst):
         _sh.rmtree(dst, True)
-    os.symlink(os.path.join(nd, "node_modules"), dst)
+    tmp = "%s.engine-%d-%d" % (dst, os.getpid(), id(nd))
+    os.symlink(os.path.join(nd, "node_modules"), tmp)
+    os.replace(tmp, dst)                              # atomic swap of the link
 
 
-def install_check_tools(worktree, run_dir, env, mans, tools, copy_list=(), issue=None, timeout_s=1800):
+def install_check_tools(worktree, run_dir, env, mans, tools, copy_list=(), issue=None, timeout_s=1800, kind="tools"):
     """`npm install --ignore-scripts` of <base>'s manifests (+ `--no-save` extra tools) into the shared
     engine dir, under an exclusive lock (K3r4-m5), into a temp dir renamed into place (atomic), cached:
     an existing complete install is reused. Returns (CheckResult|None, proxy, node_bin|None)."""
     import fcntl
     import shutil as _sh
     import tempfile
-    nd = node_dir(worktree, mans, tools)
+    nd = node_dir(worktree, mans, tools, kind)
     os.makedirs(os.path.dirname(nd), exist_ok=True)
     with open(nd + ".lock", "w") as lk:
         fcntl.flock(lk, fcntl.LOCK_EX)
@@ -454,17 +455,39 @@ def deps_main(worktree, run_dir, env, copy_list=(), issue=None, timeout_s=1800, 
         first, px = CH.deps_step(["flutter pub get"], worktree, sb, os.path.join(run_dir, "tmp"), env=env,
                                  hosts=REGISTRY_HOSTS["pubspec.yaml"], timeout_s=timeout_s)
         first.proxy = px
-    mans = base_manifests(worktree, base) if base else {}
-    if "package.json" in mans:
-        r, px, node_bin = install_check_tools(worktree, run_dir, env, mans, tools, copy_list, issue, timeout_s)
-        if node_bin:
-            link_node_modules(worktree, os.path.dirname(os.path.dirname(node_bin)))
-        else:
-            notes.append("package.json step (<base> manifests) failed: %s"
-                         % CH.redact_lines(((r.raw if r else "") .strip().split("\n") or ["?"])[-1]))
+    # K3r5-M1 — TWO node installs: the SUITE's (and the roles') from the BRANCH's manifests, linked into
+    # the worktree; the 1L CHECK TOOLS from <base>'s manifests, engine-owned, used only by the checks
+    branch_mans = {}
+    for f in ("package.json", "package-lock.json"):
+        fp = os.path.join(worktree, f)
+        if os.path.isfile(fp) and not os.path.islink(fp):
+            with open(fp, "rb") as fh:
+                branch_mans[f] = fh.read()
+    suite_node = None
+    if "package.json" in branch_mans:
+        rb, pxb, bin_b = install_check_tools(worktree, run_dir, env, branch_mans, (), copy_list, issue, timeout_s,
+                                             kind="suite")
+        if bin_b:
+            suite_node = os.path.dirname(os.path.dirname(bin_b))
+            link_node_modules(worktree, suite_node)
         if first is None:
-            first = CH.CheckResult(True, 0, False, (r.raw if r else ""), (r.steps if r else []), 0)
+            first = rb if rb is not None else CH.CheckResult(True, 0, False, "", [], 0)
+            first.proxy = pxb
+        elif rb is not None and not rb.passed:
+            first = CH.CheckResult(False, rb.rc, False, (first.raw or "") + "\n" + (rb.raw or ""), first.steps + rb.steps,
+                                   first.ceiling_s)
+            first.proxy = pxb
+    mans = base_manifests(worktree, base) if base else {}
+    if "package.json" in mans and tools is not None:
+        r, px, node_bin = install_check_tools(worktree, run_dir, env, mans, tools, copy_list, issue, timeout_s)
+        if not node_bin:
+            notes.append("check tools (<base> manifests) failed: %s"
+                         % CH.redact_lines(((r.raw if r else "").strip().split("\n") or ["?"])[-1]))
+        if first is None:
+            first = CH.CheckResult(True, 0, False, "", [], 0)
             first.proxy = px
+    if first is not None:
+        first.suite_node = suite_node
     if first is not None:
         first.notes, first.node_bin = notes, node_bin
     return first
@@ -608,6 +631,8 @@ def live_execute(issue, main, variant, config, clock, gh, writer, decisions, run
             raise problem
         return prepared
     p.prepare = prepare
+    if prepared:
+        recover_check_backup(worktree)                  # a crash during an earlier run's 1L checks
     p.vcs = VC.Vcs(worktree)
     p.remote_url = push_url
     p.default_branch = BR.default_branch(main)
@@ -702,8 +727,12 @@ def live_execute(issue, main, variant, config, clock, gh, writer, decisions, run
         from workflows.dev import local_checks as LC
         from workflows.dev.stages import base as SB
         import shutil as _sh
+        recover_check_backup(worktree)
         if state["deps"] is None:                       # K3r3-M2: a 1L commit never precedes the deps step
             p.deps()
+        if not getattr(state["deps"], "passed", True):  # K3r5-m1: never analyze over a stale package config
+            return False, "dependency step failed — %s" % CH.redact_lines(
+                ((state["deps"].raw or "").strip().split("\n") or ["?"])[-1])
         changed = set(x[3:] for x in G.run(worktree, "status", "--porcelain", "-uall").decode("utf-8", "replace")
                       .split("\n") if len(x) > 3)
         paths = [x for x in dict.fromkeys(list(files) + list(tests)) if x in changed]
@@ -717,8 +746,7 @@ def live_execute(issue, main, variant, config, clock, gh, writer, decisions, run
         env["npm_config_offline"] = "true"           # measured: npx otherwise waits ~70 s for the registry
         staged = [x for x in G.run(worktree, "diff", "--cached", "--name-only").decode("utf-8", "replace").split("\n") if x]
         node_bin = getattr(state["deps"], "node_bin", None)
-        if node_bin and os.path.isdir(node_bin):
-            link_node_modules(worktree, os.path.dirname(os.path.dirname(node_bin)))   # the engine's, re-made
+        tools_node = os.path.dirname(os.path.dirname(node_bin)) if node_bin and os.path.isdir(node_bin) else None
         base_dir = os.path.join(rd, "in", "base-scripts")
         base_sha = G.run(worktree, "rev-parse", p.base).decode().strip()
 
@@ -735,7 +763,8 @@ def live_execute(issue, main, variant, config, clock, gh, writer, decisions, run
             os.chmod(dst, 0o555)
             return dst
         checks, dropped = base_checks()
-        restore = base_check_configs(worktree, base_sha, p)        # K3r4-m3: the checks read <base>'s configs
+        restore = base_check_configs(worktree, base_sha, p, tools_node,     # K3r4-m3 / K3r5: <base> configs
+                                     getattr(state["deps"], "suite_node", None))   # and <base> tools for the checks
         try:
             refused = run_checks(p, worktree, checks, staged, node_bin, base_has, base_export, sb, env, rd)
         finally:
@@ -840,7 +869,7 @@ def net_env(info, r):
     w = (info or {}).get("warm") or ""
     if r.passed:
         return None
-    if w.startswith("failed"):
+    if w.startswith(("failed", "skipped")):        # K3r5: a skipped warm-up is engine-side too
         return "warm-up %s" % w
     return None
 
@@ -852,11 +881,76 @@ CHECK_CONFIGS = (".remarkrc", ".remarkrc.json", ".remarkrc.js", ".remarkrc.cjs",
                  ".editorconfig")
 
 
-def base_check_configs(worktree, base_sha, p=None):
-    """K3r4-m3: the config files the check tools read are <base>'s, like the scripts. A file the branch
-    changed (or added) is swapped for <base>'s bytes (or moved aside) for the checks only and put back
-    afterwards; each difference goes to the decision log. Returns the restore function."""
-    saved = []
+CSPELL_JSON = ("cspell.json", ".cspell.json", "cspell.config.json", ".cspell.config.json")
+
+
+def check_backup_path(worktree):
+    """Where the swap of the check configs is journaled (engine-owned, outside the worktree)."""
+    import hashlib
+    root = os.path.dirname(os.path.dirname(RR.run_root(worktree, 0)))
+    return os.path.join(root, "check-backup-%s.json" % hashlib.sha256(os.path.realpath(worktree).encode()).hexdigest()[:12])
+
+
+def recover_check_backup(worktree):
+    """K3r5 crash safety: an engine killed while the checks ran left <base> configs (and the tools'
+    node_modules link) in the worktree — put the branch's bytes back. Returns the restored paths."""
+    import base64
+    bp = check_backup_path(worktree)
+    if not os.path.exists(bp):
+        return []
+    with open(bp) as fh:
+        rec = json.load(fh)
+    done = []
+    for ent in rec.get("files") or []:
+        dst = os.path.join(worktree, ent["rel"])
+        if ent["data"] is None:
+            if os.path.exists(dst):
+                os.remove(dst)
+        else:
+            with open(dst, "wb") as fh:
+                fh.write(base64.b64decode(ent["data"]))
+        done.append(ent["rel"])
+    if "node_link" in rec:
+        nm = os.path.join(worktree, "node_modules")
+        if os.path.islink(nm):
+            os.remove(nm)
+        if rec["node_link"]:
+            os.symlink(rec["node_link"], nm)
+        done.append("node_modules")
+    os.remove(bp)
+    return done
+
+
+def merge_cspell(base_bytes, branch_bytes):
+    """<base>'s cspell config + ONLY the branch's dictionary word ADDITIONS (`words`); the branch's
+    ignorePaths / ignoreRegExpList / enabled / language settings never apply. Returns (bytes, added)."""
+    try:
+        b = json.loads(base_bytes.decode("utf-8"))
+        r = json.loads(branch_bytes.decode("utf-8")) if branch_bytes else {}
+    except ValueError:
+        return base_bytes, []
+    have = set(b.get("words") or [])
+    added = [w for w in (r.get("words") or []) if isinstance(w, str) and w not in have]
+    if added:
+        b["words"] = list(b.get("words") or []) + added
+    return json.dumps(b, ensure_ascii=False, indent=2).encode("utf-8"), added
+
+
+def base_check_configs(worktree, base_sha, p=None, tools_node=None, suite_node=None):
+    """K3r4-m3 / K3r5: the config files the check tools read are <base>'s (cspell: + the branch's added
+    dictionary words, and lines added to word-list files <base>'s config references), and the
+    worktree's `node_modules` points at the <base> TOOLS install for the checks only. The branch's bytes
+    are journaled OUTSIDE the worktree first (`check_backup_path`) — `recover_check_backup` repairs a
+    crash; the returned function restores normally. Differences go to the decision log."""
+    import base64
+    recover_check_backup(worktree)
+    files, swaps = [], []
+
+    def note(point, rel, reason):
+        if p is not None:
+            from workflows.dev.stages import base as SB
+            SB.record_code(p, "execute", point, "base-used", refs=rel, reason=reason)
+    dict_files = []
     for rel in CHECK_CONFIGS:
         dst = os.path.join(worktree, rel)
         at_base = G.ok(worktree, "cat-file", "-e", "%s:%s" % (base_sha, rel))
@@ -865,28 +959,64 @@ def base_check_configs(worktree, base_sha, p=None):
             continue
         cur = open(dst, "rb").read() if here else None
         base_bytes = G.run(worktree, "show", "%s:%s" % (base_sha, rel)) if at_base else None
+        if rel in CSPELL_JSON and base_bytes is not None:
+            try:
+                for d in (json.loads(base_bytes.decode("utf-8")).get("dictionaryDefinitions") or []):
+                    if isinstance(d, dict) and isinstance(d.get("path"), str):
+                        dict_files.append(os.path.normpath(d["path"].lstrip("./")))
+            except ValueError:
+                pass
         if cur == base_bytes:
             continue
-        saved.append((dst, cur))
-        if base_bytes is None:
+        want = base_bytes
+        if rel in CSPELL_JSON and base_bytes is not None and cur is not None:
+            want, added = merge_cspell(base_bytes, cur)
+            if added:
+                note("check-dictionary-words", rel, "words the branch added, kept for the checks: %s"
+                     % ", ".join(added[:40]))
+        if want == cur:
+            continue
+        files.append({"rel": rel, "data": base64.b64encode(cur).decode() if cur is not None else None})
+        swaps.append((dst, want))
+        note("check-config-changed", rel, "the branch %s %s; the 1L checks ran with <base>'s%s" % (
+            "added" if not at_base else ("removed" if not here else "changed"), rel,
+            " (+ its added dictionary words)" if rel in CSPELL_JSON else ""))
+    for rel in dict_files:                         # word-list files: <base> + lines the branch ADDED
+        dst = os.path.join(worktree, rel)
+        if rel.startswith("..") or not G.ok(worktree, "cat-file", "-e", "%s:%s" % (base_sha, rel)) or \
+                not os.path.isfile(dst) or os.path.islink(dst):
+            continue
+        base_bytes = G.run(worktree, "show", "%s:%s" % (base_sha, rel))
+        cur = open(dst, "rb").read()
+        if cur == base_bytes:
+            continue
+        bl = base_bytes.decode("utf-8", "replace").split("\n")
+        added = [w for w in cur.decode("utf-8", "replace").split("\n") if w.strip() and w not in bl]
+        want = (base_bytes.decode("utf-8", "replace").rstrip("\n") + "\n" + "\n".join(added) + "\n").encode("utf-8")
+        files.append({"rel": rel, "data": base64.b64encode(cur).decode()})
+        swaps.append((dst, want))
+        if added:
+            note("check-dictionary-words", rel, "words the branch added, kept for the checks: %s" % ", ".join(added[:40]))
+    rec = {"files": files}
+    nm = os.path.join(worktree, "node_modules")
+    if tools_node:
+        rec["node_link"] = os.readlink(nm) if os.path.islink(nm) else (suite_node or None)
+    bp = check_backup_path(worktree)
+    os.makedirs(os.path.dirname(bp), exist_ok=True)
+    with open(bp + ".tmp", "w") as fh:
+        json.dump(rec, fh)
+    os.replace(bp + ".tmp", bp)                     # journaled BEFORE the worktree is touched
+    for dst, want in swaps:
+        if want is None:
             os.remove(dst)
         else:
             with open(dst, "wb") as fh:
-                fh.write(base_bytes)
-        if p is not None:
-            from workflows.dev.stages import base as SB
-            SB.record_code(p, "execute", "check-config-changed", "base-used", refs=rel,
-                           reason="the branch %s %s; the 1L checks ran with <base>'s" % (
-                               "added" if not at_base else ("removed" if not here else "changed"), rel))
+                fh.write(want)
+    if tools_node:
+        link_node_modules(worktree, tools_node)
 
     def restore():
-        for dst, data in saved:
-            if data is None:
-                if os.path.exists(dst):
-                    os.remove(dst)
-            else:
-                with open(dst, "wb") as fh:
-                    fh.write(data)
+        recover_check_backup(worktree)
     return restore
 
 
