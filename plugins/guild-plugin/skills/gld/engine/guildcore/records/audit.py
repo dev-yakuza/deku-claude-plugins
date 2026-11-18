@@ -76,6 +76,10 @@ class AuditBlock(object):
         self.findings_none = "findings: none" in cl
         self.findings = [f for f in (Finding(x) for x in block.lines) if f.token]
         self.role_axis = [x for x in cl if ROLE_AXIS_RE.match(x)]
+        # K4 carry-over 6 (decision: STRICT read, detected not guessed): lines that say `looped-back`
+        # but parse as no finding — a legacy free-form pending item the carry-forward cannot see
+        self.unreadable_pending = [x for x in cl if re.search(r"looped[- ]back", x, re.I) and not TOKEN_RE.match(x)
+                                   and not DISP_RE.search(x) and not ROLE_AXIS_RE.match(x)]
 
 
 class AuditRecord(object):

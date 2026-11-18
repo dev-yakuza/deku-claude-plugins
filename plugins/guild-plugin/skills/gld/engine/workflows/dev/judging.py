@@ -26,17 +26,31 @@ TIERS = {"TEST": "sonnet", "QA": "sonnet", "VIS-ENV": "sonnet", "DIRECTIVE": "so
          # K3 execute (§3.3 EX-ARB — opus when a BLOCKER/MAJOR is in the brief, chosen by the caller;
          # §3.4 IDENT/SAMECAUSE/BRANCH haiku, GATECAST/MUTATION sonnet "MJ+")
          "EX-ARB": "sonnet", "IDENT": "haiku", "SAMECAUSE": "haiku", "BRANCH": "haiku",
-         "GATECAST": "sonnet", "MUTATION": "sonnet", "EX-DWC": "sonnet"}
+         "GATECAST": "sonnet", "MUTATION": "sonnet", "EX-DWC": "sonnet",
+         # K4 (§3.1–3.3): L0 KICKOFF/SPLIT/INTEGRATE opus --effort high; SJ-STAKES opus; AN-PO, DE-ARB,
+         # HANDOFF sonnet
+         "KICKOFF": "opus", "SPLIT": "opus", "INTEGRATE": "opus", "STAKES": "opus", "AN-PO": "sonnet",
+         "DE-ARB": "sonnet", "HANDOFF": "sonnet"}
 LAYER = {"RUNNER": "MJ", "PRMATCH": "MJ", "FOLLOWUP": "MJ", "DWC": "MJ", "IDENT": "MJ", "SAMECAUSE": "MJ",
-         "BRANCH": "MJ", "GATECAST": "MJ+", "MUTATION": "MJ+"}
-CHOICE = {"TEST": "overall", "EX-ARB": "summary"}
+         "BRANCH": "MJ", "GATECAST": "MJ+", "MUTATION": "MJ+",
+         "KICKOFF": "L0", "SPLIT": "L0", "INTEGRATE": "L0", "STAKES": "SJ-opus"}
+CHOICE = {"TEST": "overall", "EX-ARB": "summary", "STAKES": "level", "AN-PO": "action", "DE-ARB": "action",
+          "SPLIT": "decision"}
 UNSURE = {"TEST": "gap", "QA": "block", "VIS-ENV": "env_suspect", "DIRECTIVE": "out_of_scope",
           "RUNNER": None, "PRMATCH": "none", "FOLLOWUP": "needs_filing", "DWC": "partial_read",
           "EX-ARB": "accept", "IDENT": "different", "SAMECAUSE": "different", "BRANCH": "unrelated",
-          "GATECAST": "convene", "MUTATION": "mutation", "EX-DWC": "proceed"}
-BUDGET = {"SJ": 0.5, "MJ": 0.05, "MJ+": 0.3}
-CAPS = {"SJ": 25000, "MJ": 6000, "MJ+": 12000}
-NO_ELIDE = {"TEST": ("excerpts",), "DIRECTIVE": ("comments",), "EX-ARB": ("findings", "hunks")}
+          "GATECAST": "convene", "MUTATION": "mutation", "EX-DWC": "proceed",
+          # K4: §3.1 conservative defaults — KICKOFF not ready, STAKES high, AN-PO re-rate (unclear),
+          # DE-ARB pause, SPLIT stays unsure (the stage asks a person), INTEGRATE gap, HANDOFF upstream gap
+          "KICKOFF": "not_ready", "STAKES": "high", "AN-PO": "rerate_success", "DE-ARB": "pause",
+          "SPLIT": None, "INTEGRATE": "gap", "HANDOFF": "upstream_gap"}
+BUDGET = {"SJ": 0.5, "MJ": 0.05, "MJ+": 0.3, "L0": 2.0, "SJ-opus": 1.0}
+CAPS = {"SJ": 25000, "MJ": 6000, "MJ+": 12000, "L0": 40000, "SJ-opus": 25000}
+NO_ELIDE = {"TEST": ("excerpts",), "DIRECTIVE": ("comments",), "EX-ARB": ("findings", "hunks"),
+            # CR-M12: KICKOFF's human comments (and the Issue itself) are never elided
+            "KICKOFF": ("issue", "comments")}
+TOOLS = {"TEST": "Read,Grep", "EX-ARB": "Read,Grep", "INTEGRATE": "Read,Grep,Glob"}
+EFFORT = {"KICKOFF": "high", "SPLIT": "high", "INTEGRATE": "high"}
 HEDGES = ("권장", "가능하면", "여유되면", "미검증(참고)")
 # K2-m1: removal only where the hedge is a FRAME — parenthesised, or leading the item — never a
 # substring of a meaningful word ("권장 설정이 표시되는지" stays; the lint re-ask handles wording)
@@ -80,7 +94,65 @@ def coerce_followup(fields):
     return fields, None
 
 
-COERCIONS = {"QA": (coerce_qa,), "PRMATCH": (coerce_prmatch,), "FOLLOWUP": (coerce_followup,)}
+def coerce_stakes(fields):
+    """§3.2: a low/medium without a reason why it is local AND reversible → high."""
+    if fields.get("level") in ("low", "medium") and not (fields.get("local_reversible_reason") or "").strip():
+        fields["level"] = "high"
+        return fields, "rule"
+    return fields, None
+
+
+def coerce_an_po(fields):
+    if fields.get("action") == "rerate_success":
+        r = fields.get("rating")
+        if r not in ("clear", "partial", "unclear") or (r == "partial" and not fields.get("anchor")):
+            fields["rating"] = "unclear"
+            return fields, "rule"
+    return fields, None
+
+
+def coerce_de_arb(fields):
+    a = fields.get("action")
+    if (a == "reinvoke" and not (fields.get("role") and (fields.get("addendum") or "").strip())) or \
+            (a == "decide" and not (fields.get("assumption") or "").strip()):
+        fields["action"] = "pause"
+        fields.setdefault("cause", "design arbitration without a usable %s" % a)
+        return fields, "rule"
+    if a == "escalate" and fields.get("reason") not in ("executor_conflict", "cross_stage"):
+        fields["action"] = "pause"
+        return fields, "rule"
+    return fields, None
+
+
+def coerce_split(fields):
+    if fields.get("decision") == "split" and len(fields.get("slices") or []) < 2:
+        fields["decision"] = "unsure"
+        return fields, "rule"
+    return fields, None
+
+
+def coerce_integrate(fields):
+    if fields.get("verdict") == "gap" and not fields.get("gaps"):
+        fields["gaps"] = [{"kind": "coverage", "needs_decision": True, "line": "integration judged a gap without naming it"}]
+        return fields, "rule"
+    return fields, None
+
+
+def coerce_handoff(fields):
+    v = fields.get("verdict")
+    if v == "upstream_gap" and fields.get("fixable_by_execute") and not fields.get("signature"):
+        fields["fixable_by_execute"] = False
+        return fields, "rule"
+    if v == "ok_with_assumption" and not (fields.get("line") or "").strip():
+        fields["verdict"] = "upstream_gap"
+        fields["fixable_by_execute"] = False
+        return fields, "rule"
+    return fields, None
+
+
+COERCIONS = {"QA": (coerce_qa,), "PRMATCH": (coerce_prmatch,), "FOLLOWUP": (coerce_followup,),
+             "STAKES": (coerce_stakes,), "AN-PO": (coerce_an_po,), "DE-ARB": (coerce_de_arb,),
+             "SPLIT": (coerce_split,), "INTEGRATE": (coerce_integrate,), "HANDOFF": (coerce_handoff,)}
 
 
 def hedged(items):
@@ -108,7 +180,7 @@ def system_parts(p, group):
 
 def spec(p, group, brief_parts, stage, step, point=None, model=None, cwd=None, needs_more_fn=None):
     layer = LAYER.get(group, "SJ")
-    tools = "Read,Grep" if group in ("TEST", "EX-ARB") else ""
+    tools = TOOLS.get(group, "")
     m = model
     if m is None and p is not None:
         m = ((p.engine_cfg("judges", {}) or {}).get(group) or {}).get("model")
@@ -118,4 +190,4 @@ def spec(p, group, brief_parts, stage, step, point=None, model=None, cwd=None, n
                      coercions=COERCIONS.get(group, ()), budget_usd=BUDGET[layer],
                      cap_chars=CAPS[layer], needs_more_fn=needs_more_fn,
                      cwd=cwd if tools else None, issue=p.issue if p else None, stage=stage,
-                     step=step, plugin=p.plugin if p else None)
+                     step=step, plugin=p.plugin if p else None, effort=EFFORT.get(group))

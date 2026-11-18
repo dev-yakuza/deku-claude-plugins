@@ -307,6 +307,16 @@ class GhWriter(object):
         raise GhWriteError("pr:create", "unreachable", "terminal")
 
     # -- Issues --------------------------------------------------------------------------------
+    def issue_close(self, issue, reason):
+        """analyze 0b ④: close with `completed` | `not_planned`; verified by re-reading the state.
+        Already closed → no write. Returns True when this call closed it."""
+        if (self.read.issue(issue).get("state") or "").upper() == "CLOSED":
+            return False
+        self._perform("issue:close", issue, lambda: self.write.close_issue(issue, reason),
+                      lambda r: (self.read.issue(issue).get("state") or "").upper() == "CLOSED",
+                      reason=reason)
+        return True
+
     def issue_create(self, title, body, labels=(), key=None, key_kind="slice-key"):
         """Create once: the body carries `<!-- guild:<key_kind> <key> -->`; an existing Issue
         with that key is returned instead (A-F23). Returns (number, created)."""

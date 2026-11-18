@@ -87,7 +87,7 @@ def main(argv, out=None, err=None, clock=None, ledger=None):
             out.write(text)
             if a.html:
                 p = board.html_path(a.root)
-                os.makedirs(os.path.dirname(p), exist_ok=True)
+                os.makedirs(os.path.dirname(p), exist_ok=True)  # fs-ok: status board html in the engine memory dir (human command)
                 with open(p, "w", encoding="utf-8") as fh:  # fs-ok: status board html in the engine memory dir (human command)
                     fh.write(board.render_html(text, board.R.board_text(cfg.language)["title"]))
                 out.write("HTML: %s\n" % p)

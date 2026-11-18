@@ -214,9 +214,9 @@ def sandbox_profile(block, extra_write=(), loopback=True, unix_sockets=UNIX_SOCK
 def check_env(role_env, tmp):
     """The checks env: the role's scrubbed env + no bytecode reuse/writes + a private TMPDIR."""
     e = dict(role_env or os.environ)
-    os.makedirs(tmp, exist_ok=True)
+    os.makedirs(tmp, exist_ok=True)  # fs-ok: engine-created check tmp / engine process-tools dir, before the check runs
     pyc = os.path.join(tmp, "pycache")
-    os.makedirs(pyc, exist_ok=True)
+    os.makedirs(pyc, exist_ok=True)  # fs-ok: engine-created check tmp / engine process-tools dir, before the check runs
     e.update({"PYTHONDONTWRITEBYTECODE": "1", "PYTHONPYCACHEPREFIX": pyc, "TMPDIR": tmp,
               # K3r6-m3: the suite's node_modules is the engine's (read-only) — tool caches go to the run tmp
               "BABEL_CACHE_PATH": os.path.join(tmp, "babel-cache.json"), "XDG_CACHE_HOME": os.path.join(tmp, "cache"),
@@ -530,7 +530,7 @@ def process_tools_dir(home=None):
     import hashlib
     import shutil as _sh
     base = os.path.join(home or os.path.expanduser("~"), ".cache", "guild-engine", "bin")
-    os.makedirs(base, exist_ok=True)
+    os.makedirs(base, exist_ok=True)  # fs-ok: engine-created check tmp / engine process-tools dir, before the check runs
     for src in SETUID_TOOLS:
         if not os.path.exists(src):
             continue
@@ -542,7 +542,7 @@ def process_tools_dir(home=None):
         if have != want or not os.path.exists(dst):
             tmp = dst + ".tmp"
             _sh.copyfile(src, tmp)  # fs-ok: engine-owned ~/.cache/guild-engine/bin tool copies
-            os.chmod(tmp, 0o755)
+            os.chmod(tmp, 0o755)  # fs-ok: engine-created check tmp / engine process-tools dir, before the check runs
             p = subprocess.run(["codesign", "-s", "-", "--force", tmp], stdout=subprocess.DEVNULL,
                                stderr=subprocess.DEVNULL)
             if p.returncode != 0:

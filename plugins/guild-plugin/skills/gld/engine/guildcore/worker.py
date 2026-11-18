@@ -54,8 +54,8 @@ class IssueLock(object):
     def acquire(self, mode):
         if mode not in MODES:
             raise ValueError("lock mode must be attended|unattended")
-        os.makedirs(os.path.dirname(self.flock_path), exist_ok=True)
-        fd = os.open(self.flock_path, os.O_RDWR | os.O_CREAT, 0o644)
+        os.makedirs(os.path.dirname(self.flock_path), exist_ok=True)  # fs-ok: engine lock/log under <git-common-dir>/guild/engine (no role can write there)
+        fd = os.open(self.flock_path, os.O_RDWR | os.O_CREAT, 0o644)  # fs-ok: engine lock/log under <git-common-dir>/guild/engine (no role can write there)
         try:
             fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except OSError as e:
@@ -75,7 +75,7 @@ class IssueLock(object):
         if self.fd is None:
             return
         try:
-            os.unlink(self.info_path)
+            os.unlink(self.info_path)  # fs-ok: engine lock/log under <git-common-dir>/guild/engine (no role can write there)
         except OSError:
             pass
         fcntl.flock(self.fd, fcntl.LOCK_UN)
@@ -86,7 +86,7 @@ class IssueLock(object):
         """True when another open file description holds the flock (probe with LOCK_NB)."""
         if not os.path.exists(self.flock_path):
             return False
-        fd = os.open(self.flock_path, os.O_RDWR)
+        fd = os.open(self.flock_path, os.O_RDWR)  # fs-ok: engine lock/log under <git-common-dir>/guild/engine (no role can write there)
         try:
             fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except OSError:
@@ -187,7 +187,7 @@ class Events(object):
 
     def clear_hold(self):
         try:
-            os.unlink(self.hold_path)
+            os.unlink(self.hold_path)  # fs-ok: engine lock/log under <git-common-dir>/guild/engine (no role can write there)
         except OSError:
             pass
 
@@ -195,7 +195,7 @@ class Events(object):
 def start_detached(argv, cwd, env, log_path):
     """Start the worker in its own session (survives the driver's death); stdout/stderr go to a
     side log. Returns the pid. The worker takes the IssueLock itself."""
-    os.makedirs(os.path.dirname(log_path), exist_ok=True)
+    os.makedirs(os.path.dirname(log_path), exist_ok=True)  # fs-ok: engine lock/log under <git-common-dir>/guild/engine (no role can write there)
     with open(log_path, "ab") as log, open(os.devnull, "rb") as nul:  # fs-ok: engine-owned worker log
         p = subprocess.Popen(argv, cwd=cwd, env=env, stdin=nul, stdout=log, stderr=log,
                              start_new_session=True, close_fds=True)

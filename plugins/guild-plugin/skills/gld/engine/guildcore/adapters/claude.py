@@ -116,10 +116,10 @@ def child_env(parent_env, settings_env=None, cache="5m", judge=False, suite_ceil
         # the CLI keeps its own auth, its Bash subprocesses get a scrubbed env (K1r2-M1)
         env["CLAUDE_CODE_SUBPROCESS_ENV_SCRUB"] = "1"
         tmp = os.path.join(role_dir, "tmp")
-        os.makedirs(tmp, exist_ok=True)
+        os.makedirs(tmp, exist_ok=True)  # fs-ok: engine-owned run dir tmp / isolated gh config dir
         env["TMPDIR"] = tmp                  # a private TMPDIR, not /tmp/claude-<uid> (K1r2-M2)
         ghd = os.path.join(role_dir, "in", "gh-config-empty")
-        os.makedirs(ghd, exist_ok=True)
+        os.makedirs(ghd, exist_ok=True)  # fs-ok: engine-owned run dir tmp / isolated gh config dir
         env["GH_CONFIG_DIR"] = ghd
         env["GIT_TERMINAL_PROMPT"] = "0"
         env["GIT_CONFIG_NOSYSTEM"] = "1"

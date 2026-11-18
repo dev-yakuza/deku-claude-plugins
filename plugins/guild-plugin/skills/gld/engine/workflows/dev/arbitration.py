@@ -1,0 +1,78 @@
+"""workflows.dev.arbitration — the judgments analyze and design share (§3.2 SJ-STAKES, §3.3 DE-ARB).
+
+* `stakes(p, stage, dim_or_q, question, options, about_to_take, body, areas, irreversible)` — SJ-STAKES
+  is asked PER QUESTION and never sees the reasons of the judgment that raised it (R2J-N7 — no
+  self-justification). Code: a choice touching an irreversible path is never `low` (→ `medium`);
+  `unsure` / no reason → `high` (judging.coerce_stakes). Attended never calls it (§3.2).
+* `blocked(p, stage, role, res, ctx, reinvoked, rerun)` — DE-ARB for a BLOCKED / NEEDS_CONTEXT role
+  (or a hand-over that still fails after its repair). ONE re-invocation per role per stage
+  (`reinvoked`, §4.2 "역할 맥락 재호출 1"); `decide` unattended only after STAKES says low/medium;
+  `escalate` / `pause` / `unsure` → a person (attended `ask design-block`, unattended
+  `ambiguity:` pause). The G-ESCALATE rung between SJ and the human is not used here: an
+  `executor_conflict` / `cross_stage` at analyze/design always ends with a person (more
+  conservative than the ladder — K4 note).
+Returns ("retry", RoleResult) | ("decided", assumption) | StageResult.
+"""
+
+from guildcore import ask as ASK
+from workflows.dev import judging as JG
+from workflows.dev.stages import base as B
+
+LEVELS = ("low", "medium", "high")
+
+
+def stakes(p, stage, refs, question, options, about_to_take, body, areas, irreversible_paths, step):
+    brief = [("question", question),
+             ("options", "\n".join("- %s" % o for o in options) or "-"),
+             ("about_to_take", about_to_take or "-"),
+             ("issue", body or ""),
+             ("areas", "\n".join("- %s" % a for a in areas) or "-"),
+             ("irreversible", "\n".join("- %s" % x for x in irreversible_paths) or "none")]
+    d = p.judge(JG.spec(p, "STAKES", brief, stage, step))
+    f, _by = JG.coerce_stakes(dict(d.fields, level=d.choice))       # re-applied: never trust the transport
+    level = f.get("level") if f.get("level") in LEVELS else "high"
+    coerced = None if level == d.choice else "no local/reversible reason → high"
+    if irreversible_paths and level == "low":
+        level, coerced = "medium", "irreversible path → never low (§3.2)"
+    B.record_judgment(p, stage, "STAKES", refs, d, choice=level,
+                      reason=(d.fields.get("local_reversible_reason") or coerced or "")[:300],
+                      extra={"question": question[:300]} if question else None)
+    return level
+
+
+def _ask_or_pause(p, stage, line, options, recommended=None, kind="design-block"):
+    toks = []
+    for o in options or []:
+        t = "".join(ch for ch in str(o).lower().replace(" ", "-") if ch.isalnum() or ch in ":_-")[:30]
+        if t and t not in toks and t != "stop":
+            toks.append(t)
+    opts = [{"token": t, "label": t} for t in toks[:4]] + [{"token": "stop", "label": "stop"}]
+    rec = recommended if recommended in [o["token"] for o in opts] else None
+    q = ASK.Question(kind, line, opts, recommended=rec, recommended_by="judge:sonnet" if rec else None)
+    return B.ask(p, stage, q, line, {"cause_kind": "ambiguity", "line": line, "token_cause": "ambiguity: %s" % line})
+
+
+def blocked(p, stage, role, res, ctx_parts, reinvoked, rerun, body="", areas=(), irreversible_paths=(), step="E2.1"):
+    line = B.one_line(res.line or res.status, 240)
+    brief = [("role", "%s returned %s" % (role, res.status)), ("line", line)] + list(ctx_parts)
+    d = p.judge(JG.spec(p, "DE-ARB", brief, stage, step))
+    act = d.choice
+    B.record_judgment(p, stage, "DE-ARB", "J-DE-03", d, choice=act,
+                      reason=(d.fields.get("addendum") or d.fields.get("assumption") or d.fields.get("cause") or "")[:300],
+                      extra={"role": role})
+    if act == "reinvoke" and (d.fields.get("role") or role) == role and role not in reinvoked:
+        reinvoked.add(role)
+        return ("retry", rerun(d.fields.get("addendum") or ""))
+    if act == "decide":
+        assumption = d.fields.get("assumption") or ""
+        if p.unattended:
+            level = stakes(p, stage, "J-DE-03", "%s: %s" % (role, line), [], assumption, body, list(areas),
+                           list(irreversible_paths), step)
+            if level == "high":
+                why = "설계 막힘(%s) — 가정으로 넘기기엔 stakes high: %s" % (role, line)
+                return B.pause(p, stage, "ambiguity", why, "ambiguity: %s" % why)
+        return ("decided", assumption)
+    why = "설계 막힘(%s): %s" % (role, line)
+    if act == "escalate":
+        why = "%s — %s" % (why, d.fields.get("question") or d.fields.get("reason"))
+    return _ask_or_pause(p, stage, B.one_line(why, 280), d.fields.get("options") or [])

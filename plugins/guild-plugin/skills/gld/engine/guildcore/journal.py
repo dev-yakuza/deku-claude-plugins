@@ -112,9 +112,9 @@ class JournalView(object):
 
 def fsync_append(path, line):
     """Append one line durably: O_APPEND write of the whole line, then fsync."""
-    os.makedirs(os.path.dirname(path), exist_ok=True)
+    os.makedirs(os.path.dirname(path), exist_ok=True)  # fs-ok: engine journal under <git-common-dir>/guild/engine (no role can write there)
     data = (line.rstrip("\n") + "\n").encode("utf-8")
-    fd = os.open(path, os.O_RDWR | os.O_CREAT | os.O_APPEND, 0o644)
+    fd = os.open(path, os.O_RDWR | os.O_CREAT | os.O_APPEND, 0o644)  # fs-ok: engine journal under <git-common-dir>/guild/engine (no role can write there)
     try:
         size = os.fstat(fd).st_size
         if size and os.pread(fd, 1, size - 1) != b"\n":
@@ -126,7 +126,7 @@ def fsync_append(path, line):
 
 
 def atomic_write(path, text):
-    os.makedirs(os.path.dirname(path), exist_ok=True)
+    os.makedirs(os.path.dirname(path), exist_ok=True)  # fs-ok: engine journal under <git-common-dir>/guild/engine (no role can write there)
     tmp = "%s.tmp.%d" % (path, os.getpid())
     with open(tmp, "w", encoding="utf-8") as fh:  # fs-ok: engine-owned journal
         fh.write(text)

@@ -97,10 +97,10 @@ def export_gates(worktree, base_sha, dest):
     rc, _ = _git(worktree, "cat-file", "-e", "%s:%s" % (base_sha, GATES_REL))
     if rc != 0:
         return False
-    os.makedirs(dest, exist_ok=True)
+    os.makedirs(dest, exist_ok=True)  # fs-ok: engine export dir (base content) or the run dir in/ — engine-owned destination
     arch = subprocess.Popen(["git", "archive", "--format=tar", "%s:%s" % (base_sha, GATES_REL)],
                             cwd=worktree, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
-    tar = subprocess.run(["tar", "-x", "-C", dest], stdin=arch.stdout, stderr=subprocess.PIPE)
+    tar = subprocess.run(["tar", "-x", "-C", dest], stdin=arch.stdout, stderr=subprocess.PIPE)  # fs-ok: engine export dir (base content) or the run dir in/ — engine-owned destination
     arch.stdout.close()
     if arch.wait() != 0 or tar.returncode != 0:
         raise SettingsError("could not export gates from %s" % base_sha[:12])
@@ -108,7 +108,7 @@ def export_gates(worktree, base_sha, dest):
     # too. The gate reads `GUILD_GATE_CONFIG` when set (hooks and the role env carry it); a branch
     # that edits `.claude/guild/config.json` cannot turn the gate off for its own commits.
     rc, cfg = _git(worktree, "show", "%s:.claude/guild/config.json" % base_sha)
-    with open(os.path.join(dest, GATE_CONFIG_NAME), "w", encoding="utf-8") as fh:
+    with open(os.path.join(dest, GATE_CONFIG_NAME), "w", encoding="utf-8") as fh:  # fs-ok: engine export dir (base content) or the run dir in/ — engine-owned destination
         fh.write(cfg.decode("utf-8", "replace") if rc == 0 else "{}\n")
     return True
 
@@ -402,17 +402,17 @@ def export_tree_readonly(worktree, base_sha, rel_dir, dest):
             return dest, want
         import shutil
         for base, _d, _f in os.walk(dest):
-            os.chmod(base, 0o755)
-        shutil.rmtree(dest)
+            os.chmod(base, 0o755)  # fs-ok: engine export dir (base content) or the run dir in/ — engine-owned destination
+        shutil.rmtree(dest)  # fs-ok: engine export dir (base content) or the run dir in/ — engine-owned destination
     rc, _ = _git(worktree, "cat-file", "-e", "%s:%s" % (base_sha, rel_dir if rel_dir != "." else ""))
     if rc != 0:
         return None, None
     tmp = dest + ".tmp%d" % os.getpid()
-    os.makedirs(tmp, exist_ok=True)
+    os.makedirs(tmp, exist_ok=True)  # fs-ok: engine export dir (base content) or the run dir in/ — engine-owned destination
     tree = "%s:%s" % (base_sha, rel_dir) if rel_dir != "." else base_sha
     arch = subprocess.Popen(["git", "archive", "--format=tar", tree], cwd=worktree,
                             stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
-    tar = subprocess.run(["tar", "-x", "-C", tmp], stdin=arch.stdout, stderr=subprocess.PIPE)
+    tar = subprocess.run(["tar", "-x", "-C", tmp], stdin=arch.stdout, stderr=subprocess.PIPE)  # fs-ok: engine export dir (base content) or the run dir in/ — engine-owned destination
     arch.stdout.close()
     if arch.wait() != 0 or tar.returncode != 0:
         return None, None
@@ -420,9 +420,9 @@ def export_tree_readonly(worktree, base_sha, rel_dir, dest):
     for base, _dirs, fs in os.walk(tmp, topdown=False):
         for f in fs:
             fp = os.path.join(base, f)
-            os.chmod(fp, 0o555 if os.access(fp, os.X_OK) else 0o444)
-        os.chmod(base, 0o555)
-    os.makedirs(os.path.dirname(dest), exist_ok=True)
+            os.chmod(fp, 0o555 if os.access(fp, os.X_OK) else 0o444)  # fs-ok: engine export dir (base content) or the run dir in/ — engine-owned destination
+        os.chmod(base, 0o555)  # fs-ok: engine export dir (base content) or the run dir in/ — engine-owned destination
+    os.makedirs(os.path.dirname(dest), exist_ok=True)  # fs-ok: engine export dir (base content) or the run dir in/ — engine-owned destination
     os.replace(tmp, dest)  # fs-ok: engine home export / run dir in/ (roles denyWrite)
     with open(stamp, "w") as fh:  # fs-ok: engine home export / run dir in/ (roles denyWrite)
         fh.write(digest + "\n")
@@ -464,7 +464,7 @@ def render_gitconfig(worktree, dest):
     for sec, kvs in sections.items():
         lines.append("[%s]" % sec)
         lines += ["\t%s = %s" % (k, v.replace("\\", "\\\\").replace('"', '\\"')) for k, v in kvs]
-    os.makedirs(os.path.dirname(dest), exist_ok=True)
+    os.makedirs(os.path.dirname(dest), exist_ok=True)  # fs-ok: engine export dir (base content) or the run dir in/ — engine-owned destination
     with open(dest, "w", encoding="utf-8") as fh:  # fs-ok: engine home export / run dir in/ (roles denyWrite)
         fh.write("\n".join(lines) + "\n")
     return {"GIT_CONFIG_GLOBAL": dest, "GIT_CONFIG_NOSYSTEM": "1"}
@@ -565,17 +565,17 @@ def export_gates_readonly(worktree, base_sha):
             return dest, want
         import shutil
         for base, dirs, files in os.walk(dest):
-            os.chmod(base, 0o755)
-        shutil.rmtree(dest)
+            os.chmod(base, 0o755)  # fs-ok: engine export dir (base content) or the run dir in/ — engine-owned destination
+        shutil.rmtree(dest)  # fs-ok: engine export dir (base content) or the run dir in/ — engine-owned destination
     tmp = dest + ".tmp%d" % os.getpid()
     if not export_gates(worktree, base_sha, tmp):
         return None, None
     digest = tree_digest(tmp)
     for base, dirs, files in os.walk(tmp, topdown=False):
         for f in files:
-            os.chmod(os.path.join(base, f), 0o444 if not os.access(os.path.join(base, f), os.X_OK) else 0o555)
-        os.chmod(base, 0o555)
-    os.makedirs(os.path.dirname(dest), exist_ok=True)
+            os.chmod(os.path.join(base, f), 0o444 if not os.access(os.path.join(base, f), os.X_OK) else 0o555)  # fs-ok: engine export dir (base content) or the run dir in/ — engine-owned destination
+        os.chmod(base, 0o555)  # fs-ok: engine export dir (base content) or the run dir in/ — engine-owned destination
+    os.makedirs(os.path.dirname(dest), exist_ok=True)  # fs-ok: engine export dir (base content) or the run dir in/ — engine-owned destination
     os.replace(tmp, dest)  # fs-ok: engine home export / run dir in/ (roles denyWrite)
     with open(stamp, "w") as fh:  # fs-ok: engine home export / run dir in/ (roles denyWrite)
         fh.write(digest + "\n")
@@ -665,10 +665,10 @@ def render(role, task=None, worktree=None, base=None, run_dir=None, issue=None, 
         from guildcore.checks import SANDBOX_EXEC, sandbox_profile
         if run_dir and out.get("sandbox") and os.path.exists(SANDBOX_EXEC):
             prof = os.path.join(run_dir, "in", "hook-sandbox.sb")
-            os.makedirs(os.path.dirname(prof), exist_ok=True)
+            os.makedirs(os.path.dirname(prof), exist_ok=True)  # fs-ok: engine export dir (base content) or the run dir in/ — engine-owned destination
             with open(prof, "w") as fh:  # fs-ok: engine home export / run dir in/ (roles denyWrite)
                 fh.write(sandbox_profile(out["sandbox"]))
-            os.chmod(prof, 0o444)
+            os.chmod(prof, 0o444)  # fs-ok: engine export dir (base content) or the run dir in/ — engine-owned destination
             hk = out.setdefault("hooks", {})
             for d in dropped:
                 cmd = d["hook"].get("command")
@@ -696,7 +696,7 @@ def render(role, task=None, worktree=None, base=None, run_dir=None, issue=None, 
             "routing_in_settings_env": sorted(k for k in merged_env if k in ROUTING_KEYS)}
     path = None
     if run_dir:
-        os.makedirs(os.path.join(run_dir, "in"), exist_ok=True)
+        os.makedirs(os.path.join(run_dir, "in"), exist_ok=True)  # fs-ok: engine export dir (base content) or the run dir in/ — engine-owned destination
         path = os.path.join(run_dir, "in", "settings.json")
         with open(path, "w", encoding="utf-8") as fh:  # fs-ok: engine home export / run dir in/ (roles denyWrite)
             json.dump(out, fh, ensure_ascii=False, indent=1, sort_keys=True)

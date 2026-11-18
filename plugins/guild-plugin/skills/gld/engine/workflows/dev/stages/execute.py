@@ -132,6 +132,7 @@ def run(p, variant):
         return nh(p, cx, "#%d's branch still carries unreviewed auditor changes — revert them, then append the "
                   "resolved marker to the auditor-violation note (%s)" % (p.issue, ref),
                   "unresolved auditor violation", unstage=False)
+    legacy_unreadable(p, comments)
     lb = LB.from_comments(comments)                                             # P0.11
     if lb is not None and lb.not_yet_handled():
         cx.loopback = lb.latest_active()
@@ -583,8 +584,8 @@ def evidence_step(p, cx, dev, attempt):
         reason = "suite timed out at %d ms — last running: %s" % (r.ceiling_s * 1000, r.last_running or "?")
         green = False
     elif summ is None:
-        return B.pause(p, STAGE, "env", "테스트 요약 형식을 읽지 못함 — commands.test_summary 를 설정하세요",
-                       "테스트 요약 형식을 읽지 못함", env_key="other")
+        return env_pause(p, "테스트 요약 형식을 읽지 못함 — commands.test_summary 를 설정하세요",
+                         "테스트 요약 형식을 읽지 못함", "X2.3")
     else:
         green = bool(r.passed and summ.green)
         if not green:
@@ -1141,7 +1142,7 @@ def pr_step(p, e, cx):
                 else:
                     p.writer.pr_body_splice(prn, name, blk)
         except ValueError:
-            return B.pause(p, STAGE, "env", "PR body unreadable", "PR body unreadable", env_key="other")
+            return env_pause(p, "PR body unreadable", "PR body unreadable", "X5.11")
     else:
         body = pr_body(p, cx, sections, base_note)
         title = "%s: %s" % ({"implement": "feat", "debug": "fix", "refactor": "refactor"}[cx.variant],
@@ -1297,6 +1298,40 @@ def consume(p, cx):
 
 
 # ---- needs-human -----------------------------------------------------------------------------------------
+
+def legacy_unreadable(p, comments):
+    """K4 carry-over 6: a legacy audit block's free-form `looped-back` lines are NOT read as pending
+    (no guessing at a severity/identity from prose — the auditor re-scans the whole diff anyway); each
+    such block is put on the record once (`legacy-pending-unreadable`, shown in the C14 PR log) so a
+    person sees what the carry-forward could not."""
+    from guildcore.decisions import DecisionLog
+    rec = AU.from_comments(comments)
+    if rec is None:
+        return
+    seen = set(b.get("refs") for b in DecisionLog.load(comments).blocks if b.get("point") == "legacy-pending-unreadable")
+    for blk in rec.blocks:
+        if blk.unreadable_pending and ("audit-record %d" % blk.n) not in seen:
+            B.record_code(p, STAGE, "legacy-pending-unreadable", "not-carried", refs="audit-record %d" % blk.n,
+                          reason=B.one_line(blk.unreadable_pending[0], 200))
+
+
+def env_pause(p, line, token, step):
+    """K3 r1-m8 (K4 carry-over 3): an execute `env:` stop carries the H§M read on its record — code writes
+    `사람 지시 확인: 없음 — …` when no person left an unmarked comment (no judgment); otherwise SJ-DIRECTIVE
+    reads them (whole) and an applicable one is shown on the line after the cause (conservative: the stop
+    is still taken — the engine cannot act on a free-text directive by itself)."""
+    from workflows.dev import directive as DR
+    try:
+        g = DR.gather(p.gh, p.issue)
+    except Exception:                     # noqa: BLE001 — the read never blocks the stop itself
+        g = None
+    dline = None
+    if g is not None:
+        kind, dline, dd = DR.judge(p, STAGE, g, line, step)
+        if dd is not None:
+            B.record_judgment(p, STAGE, "DIRECTIVE", "J-H1", dd, choice=kind)
+    return B.pause(p, STAGE, "env", line, token, env_key="other", directive_line=dline)
+
 
 def nh(p, cx, attended_line, pause_text, kind="defect", unstage=True, prose="", question=None, ask_kind="escalation",
        token=None):

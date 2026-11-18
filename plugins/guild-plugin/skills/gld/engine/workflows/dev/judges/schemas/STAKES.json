@@ -1,0 +1,26 @@
+{
+ "type": "object",
+ "required": [
+  "level"
+ ],
+ "properties": {
+  "level": {
+   "type": "string",
+   "enum": [
+    "low",
+    "medium",
+    "high",
+    "unsure"
+   ]
+  },
+  "local_reversible_reason": {
+   "type": "string"
+  },
+  "cites": {
+   "type": "array",
+   "items": {
+    "type": "string"
+   }
+  }
+ }
+}

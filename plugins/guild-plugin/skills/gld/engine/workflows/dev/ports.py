@@ -39,8 +39,11 @@ def prompt(call, issue):
     path = os.path.join(PROMPTS, "%s-%s.md" % (call.role, call.task))
     if not os.path.exists(path) and call.task == "review":           # K3: 3.5b specialists share one
         path = os.path.join(PROMPTS, "specialist-review.md")
+    if not os.path.exists(path) and call.task == "design":           # K4: design specialists share one
+        path = os.path.join(PROMPTS, "specialist-design.md")
     with open(path, encoding="utf-8") as fh:
         text = fh.read().replace("{issue}", str(issue))
+    text = text.replace("{file}", "ux.md" if call.role == "designer" else "%s.md" % call.role)
     if call.addendum:
         text = text.rstrip("\n") + "\n\n" + call.addendum + "\n"
     return text
@@ -107,9 +110,9 @@ def warm_in_place(root, tree, run_dir, env, issue=None, proxy_hosts=None, extra_
     if os.path.exists(os.path.join(tree, "flutter_test_config.dart")):
         return None, {"skipped": "root flutter_test_config.dart"}
     wdir = os.path.join(tree, WARMUP_DIR)
-    os.makedirs(wdir)
+    os.makedirs(wdir)  # fs-ok: new warm-up dir: makedirs fails on an existing path or link (K3r7 (b))
     rel = os.path.join(WARMUP_DIR, "warmup_test.dart")
-    with open(os.path.join(tree, rel), "w", encoding="utf-8") as fh:
+    with open(os.path.join(tree, rel), "w", encoding="utf-8") as fh:  # fs-ok: inside the warm-up dir the engine just created (makedirs above)
         fh.write(WARMUP_DART)
     placeholders = []
     try:
@@ -157,11 +160,11 @@ def warm_in_place(root, tree, run_dir, env, issue=None, proxy_hosts=None, extra_
         r.proxy = px
         return r, px
     finally:
-        shutil.rmtree(wdir, True)
+        shutil.rmtree(wdir, True)  # fs-ok: the warm-up dir the engine created; rmtree never follows links
         # the test asset bundle built by the warm-up is ALWAYS dropped (K2r6-m1): it may hold the
         # EMPTY placeholders (measured, word_app: `no such table: words`) or <base>'s assets that
         # HEAD deleted or changed — the offline run rebuilds it from the tree it actually tests
-        shutil.rmtree(os.path.join(tree, "build", "unit_test_assets"), True)
+        shutil.rmtree(os.path.join(tree, "build", "unit_test_assets"), True)  # fs-ok: materialized temp tree (tar filter=data); rmtree never follows links
         for n in placeholders:
             try:
                 FS.remove(tree, n)
@@ -232,7 +235,7 @@ def suite_in_tree(worktree, base, cmds, owner, timeout_s, run_dir, env, copy_lis
             return r
         sb = tree_sandbox(tt.path, run_dir, worktree, issue, extra_roots)
         reports = [os.path.join(run_dir, "tmp", "report-%d.jsonl" % i) for i in range(len(cmds))]
-        os.makedirs(os.path.join(run_dir, "tmp"), exist_ok=True)
+        os.makedirs(os.path.join(run_dir, "tmp"), exist_ok=True)  # fs-ok: engine-owned path (run dir tmp / engine cache / check-backup journal), no role writes there
         r = CH.run_command([with_json_report(c, rp) for c, rp in zip(cmds, reports)], timeout_s, cwd=tt.path,
                            env=env, journal=journal, who="check-%s" % owner, sandbox=sb, tmp=os.path.join(run_dir, "tmp"))
         texts = []
@@ -398,7 +401,7 @@ def install_check_tools(worktree, run_dir, env, mans, tools, copy_list=(), issue
     import shutil as _sh
     import tempfile
     nd = node_dir(worktree, mans, tools, kind)
-    os.makedirs(os.path.dirname(nd), exist_ok=True)
+    os.makedirs(os.path.dirname(nd), exist_ok=True)  # fs-ok: engine-owned path (run dir tmp / engine cache / check-backup journal), no role writes there
     with open(nd + ".lock", "w") as lk:      # fs-ok: engine cache dir, no role writes there
         fcntl.flock(lk, fcntl.LOCK_EX)
         try:
@@ -406,7 +409,7 @@ def install_check_tools(worktree, run_dir, env, mans, tools, copy_list=(), issue
                 return None, {}, os.path.join(nd, "node_modules", ".bin")
             tmp = tempfile.mkdtemp(prefix=os.path.basename(nd) + ".tmp", dir=os.path.dirname(nd))
             for f, data in mans.items():
-                with open(os.path.join(tmp, f), "wb") as fh:
+                with open(os.path.join(tmp, f), "wb") as fh:  # fs-ok: engine-owned path (run dir tmp / engine cache / check-backup journal), no role writes there
                     fh.write(data)
             pkg = {}
             try:
@@ -426,11 +429,11 @@ def install_check_tools(worktree, run_dir, env, mans, tools, copy_list=(), issue
             r, px = CH.deps_step(cmds, tmp, sb, os.path.join(run_dir, "tmp"), env=env,
                                  hosts=REGISTRY_HOSTS["package.json"], timeout_s=timeout_s)
             if not (r.passed and os.path.isdir(os.path.join(tmp, "node_modules"))):
-                _sh.rmtree(tmp, True)
+                _sh.rmtree(tmp, True)  # fs-ok: engine-owned path (run dir tmp / engine cache / check-backup journal), no role writes there
                 return r, px, None
-            open(os.path.join(tmp, ".complete"), "w").close()
+            open(os.path.join(tmp, ".complete"), "w").close()  # fs-ok: engine-owned path (run dir tmp / engine cache / check-backup journal), no role writes there
             if os.path.exists(nd):
-                _sh.rmtree(nd, True)
+                _sh.rmtree(nd, True)  # fs-ok: engine-owned path (run dir tmp / engine cache / check-backup journal), no role writes there
             os.rename(tmp, nd)                    # fs-ok: engine cache dir
             return r, px, os.path.join(nd, "node_modules", ".bin")
         finally:
@@ -756,7 +759,7 @@ def live_execute(issue, main, variant, config, clock, gh, writer, decisions, run
 
         def base_export(path):
             n = os.path.normpath(path)
-            os.makedirs(base_dir, exist_ok=True)
+            os.makedirs(base_dir, exist_ok=True)  # fs-ok: engine-owned path (run dir tmp / engine cache / check-backup journal), no role writes there
             return FS.write_bytes(base_dir, n, G.run(worktree, "show", "%s:%s" % (base_sha, n)), 0o555)
         checks, dropped = base_checks()
         try:
@@ -845,7 +848,7 @@ def net_in_tree(worktree, base, rev, files, raw, copy_list, run_dir, env, issue=
     def _warm(b, tree, inspect=None):
         r, _px = warm_in_place(worktree, tree, run_dir, env, issue, inspect=inspect)
         return r
-    os.makedirs(os.path.join(run_dir, "tmp"), exist_ok=True)
+    os.makedirs(os.path.join(run_dir, "tmp"), exist_ok=True)  # fs-ok: engine-owned path (run dir tmp / engine cache / check-backup journal), no role writes there
     rep = os.path.join(run_dir, "tmp", "net-report.jsonl")
     with EFF.prepared_tree(worktree, base, [], _warm if base else None, copy_list, target=rev) as (tt, info):
         if info["halt"]:
@@ -879,6 +882,57 @@ CHECK_CONFIGS = (".remarkrc", ".remarkrc.json", ".remarkrc.js", ".remarkrc.cjs",
                  "cspell.config.yaml", "cspell.config.yml", "cspell.yaml", "cspell.yml", ".cspell.config.json",
                  "analysis_options.yaml", ".markdownlint.json", ".markdownlintignore", ".prettierrc", ".prettierignore",
                  ".editorconfig")
+
+
+# K4 carry-over 7 (K3r7-m2): the same config NAMES in a sub-directory (a `lib/analysis_options.yaml` with
+# `exclude: ["**"]` weakens `flutter analyze` there) and the formats the root list missed are swapped too
+CHECK_CONFIG_ALT = ("cspell.config.js", "cspell.config.cjs", "cspell.config.mjs", "cspell.config.toml",
+                    ".vscode/cspell.json")
+CHECK_CONFIG_NAMES = frozenset(os.path.basename(x) for x in CHECK_CONFIGS + CHECK_CONFIG_ALT)
+MANIFEST_CHECK_KEYS = ("cspell", "remarkConfig", "prettier", "markdownlint")
+
+
+def config_candidates(worktree, base_sha):
+    """Every check-config path at <base> or in the branch's tree (tracked or untracked, not ignored),
+    by base name — root list first, then sub-directory and alternative-format ones, sorted."""
+    out = list(CHECK_CONFIGS) + [x for x in CHECK_CONFIG_ALT if x not in CHECK_CONFIGS]
+    seen = set(out)
+    lists = []
+    try:
+        lists.append(G.run(worktree, "ls-tree", "-r", "-z", "--name-only", base_sha).decode("utf-8", "replace"))
+    except Exception:                       # noqa: BLE001 — no base listing → the root list only
+        pass
+    lists.append(G.run(worktree, "ls-files", "-z", "-co", "--exclude-standard", check=False).decode("utf-8", "replace"))
+    extra = set()
+    for text in lists:
+        for rel in text.split("\0"):
+            if rel and rel not in seen and os.path.basename(rel) in CHECK_CONFIG_NAMES and "node_modules/" not in rel:
+                extra.add(rel)
+    return out + sorted(extra)
+
+
+def manifest_check_keys_changed(worktree, base_sha):
+    """package.json `cspell` / `remarkConfig` … fields the branch changed — recorded, not swapped (the
+    manifest also drives the install)."""
+    def keys(raw):
+        try:
+            obj = json.loads(raw)
+        except ValueError:
+            return {}
+        return dict((k, obj.get(k)) for k in MANIFEST_CHECK_KEYS if isinstance(obj, dict) and k in obj)
+    try:
+        b = G.run(worktree, "show", "%s:package.json" % base_sha).decode("utf-8", "replace")
+    except Exception:                       # noqa: BLE001
+        b = "{}"
+    path = os.path.join(worktree, "package.json")
+    if not os.path.isfile(path) or os.path.islink(path):
+        return []
+    try:
+        cur = FS.read_nofollow(path, WORDLIST_MAX_BYTES)[0].decode("utf-8", "replace")
+    except FS.UnsafePath:
+        return ["package.json"]
+    kb, kc = keys(b), keys(cur)
+    return sorted(k for k in set(kb) | set(kc) if kb.get(k) != kc.get(k))
 
 
 WORDLIST_MAX_BYTES = 2 * 1024 * 1024
@@ -931,7 +985,7 @@ def recover_check_backup(worktree):
             done.append("node_modules")
         except FS.UnsafePath:
             pass
-    os.remove(bp)
+    os.remove(bp)  # fs-ok: engine-owned path (run dir tmp / engine cache / check-backup journal), no role writes there
     return done
 
 
@@ -978,16 +1032,21 @@ def base_check_configs(worktree, base_sha, p=None, tools_node=None, suite_node=N
             raise CheckConfigLink(rel, "not a regular file")
         if os.path.getsize(dst) > WORDLIST_MAX_BYTES:
             raise CheckConfigLink(rel, "larger than %d bytes" % WORDLIST_MAX_BYTES)
-        with open(dst, "rb") as fh:
-            return fh.read()
-    for rel in CHECK_CONFIGS:
+        try:
+            return FS.read_nofollow(dst, WORDLIST_MAX_BYTES)[0]          # K3r7-m3: O_NOFOLLOW + fstat
+        except FS.UnsafePath as e:
+            raise CheckConfigLink(rel, str(e))
+    for k in manifest_check_keys_changed(worktree, base_sha):
+        note("check-config-in-manifest", "package.json", "the branch changed package.json `%s` — not swapped "
+             "(the manifest also drives the install); shown to the reviewer" % k)
+    for rel in config_candidates(worktree, base_sha):
         at_base = G.ok(worktree, "cat-file", "-e", "%s:%s" % (base_sha, rel))
         cur = read_branch(rel)
         here = cur is not None
         if not at_base and not here:
             continue
         base_bytes = G.run(worktree, "show", "%s:%s" % (base_sha, rel)) if at_base else None
-        if rel in CSPELL_JSON and base_bytes is not None:
+        if os.path.basename(rel) in CSPELL_JSON and base_bytes is not None:
             try:
                 for d in (json.loads(base_bytes.decode("utf-8")).get("dictionaryDefinitions") or []):
                     if isinstance(d, dict) and isinstance(d.get("path"), str):
@@ -997,7 +1056,7 @@ def base_check_configs(worktree, base_sha, p=None, tools_node=None, suite_node=N
         if cur == base_bytes:
             continue
         want = base_bytes
-        if rel in CSPELL_JSON and base_bytes is not None and cur is not None:
+        if os.path.basename(rel) in CSPELL_JSON and base_bytes is not None and cur is not None:
             want, added = merge_cspell(base_bytes, cur)
             if added:
                 note("check-dictionary-words", rel, "words the branch added, kept for the checks: %s"
@@ -1008,7 +1067,7 @@ def base_check_configs(worktree, base_sha, p=None, tools_node=None, suite_node=N
         swaps.append((rel, want))
         note("check-config-changed", rel, "the branch %s %s; the 1L checks ran with <base>'s%s" % (
             "added" if not at_base else ("removed" if not here else "changed"), rel,
-            " (+ its added dictionary words)" if rel in CSPELL_JSON else ""))
+            " (+ its added dictionary words)" if os.path.basename(rel) in CSPELL_JSON else ""))
     for rel in dict_files:                         # word-list files: <base> + lines the branch ADDED
         if rel.startswith("..") or not G.ok(worktree, "cat-file", "-e", "%s:%s" % (base_sha, rel)):
             continue
@@ -1035,7 +1094,7 @@ def base_check_configs(worktree, base_sha, p=None, tools_node=None, suite_node=N
     if tools_node:
         rec["node_link"] = os.readlink(nm) if os.path.islink(nm) else (suite_node or None)
     bp = check_backup_path(worktree)
-    os.makedirs(os.path.dirname(bp), exist_ok=True)
+    os.makedirs(os.path.dirname(bp), exist_ok=True)  # fs-ok: engine-owned path (run dir tmp / engine cache / check-backup journal), no role writes there
     with open(bp + ".tmp", "w") as fh:            # fs-ok: engine cache (the journal)
         json.dump(rec, fh)
     os.replace(bp + ".tmp", bp)                     # fs-ok: journaled BEFORE the worktree is touched
@@ -1072,3 +1131,83 @@ def run_checks(p, worktree, checks, staged, node_bin, base_has, base_export, sb,
         if LC.classify(r) == "fail":
             return "check `%s`: %s" % (chk.name, CH.redact_lines((r.raw.strip().split("\n") or ["failed"])[-1]))
     return None
+
+
+# ---- K4: the issue FSM's ports ---------------------------------------------------------------------
+
+CONFIG_FROM_BASE = ("commands", "engine", "visual")
+
+
+def config_at_base(main, base, cfg):
+    """K4 carry-over 1: `commands.*` / `engine.*` / `visual.*` come from the BASE's committed config —
+    a branch cannot change the suite command, the effective-check copy list or the visual setup the
+    engine runs (the working-tree config may carry an Issue branch's edit). Unreadable base → the
+    loaded config, with the reason. Returns (Config, note)."""
+    import json as _json
+    from guildcore import config as CF
+    if not base or cfg is None:
+        return cfg, "no base"
+    try:
+        text = G.run(main, "show", "%s:.claude/guild/config.json" % base).decode("utf-8", "replace")
+        raw_b = _json.loads(text)
+    except Exception as ex:                                  # noqa: BLE001 — a missing file is a note, not a stop
+        return cfg, "base config unreadable (%s)" % ex.__class__.__name__
+    if not isinstance(raw_b, dict):
+        return cfg, "base config is not an object"
+    raw = dict(cfg.raw)
+    for k in CONFIG_FROM_BASE:
+        if k in raw_b:
+            raw[k] = raw_b[k]
+        else:
+            raw.pop(k, None)
+    return CF.Config(raw, cfg.root, list(cfg.warnings)), "commands/engine/visual from %s" % base
+
+
+def fsm_factory(main, config, clock, gh, gh_write, runner, judge_runner, unattended=True, push_url=None,
+                host=None, plugin=None, env=None, events=None, local_dev_py=None):
+    """`ports_for(issue, stage, variant=None)` for `workflows.dev.fsm.Driver`: analyze / design /
+    children (and the FSM's own reads) on the main checkout, read-only; execute through
+    `live_execute` (its own worktree) with the design specs installed from the engine's spec store;
+    test / qa on that worktree when it exists. Config `commands/engine/visual` from the base."""
+    from guildcore.decisions import DecisionWriter
+    from guildcore.journal import Journal
+    from guildcore.records.write import GhWriter
+    from workflows.dev import branching as BR
+    from workflows.dev import roleout as RO
+    env = dict(env if env is not None else os.environ)
+    common = G.run(main, "rev-parse", "--path-format=absolute", "--git-common-dir").decode().strip()
+
+    def base_cfg():
+        default = BR.default_branch(main)
+        base = BR.resolve_base(main, env.get("GLD_SPRINT_BASE"), "origin/%s" % default if default else None)
+        return config_at_base(main, base, config)
+
+    def ports_for(n, stage, variant=None):
+        journal = Journal(common, n, clock)
+        writer = GhWriter(gh, gh_write, journal=journal)
+        decisions = DecisionWriter(writer, n, clock)
+        note = None
+        if stage == "execute":
+            cfg, note = base_cfg()
+            p = live_execute(n, main, variant, cfg, clock, gh, writer, decisions, runner, judge_runner, push_url,
+                             journal=journal, unattended=unattended, host=host, plugin=plugin, env=env,
+                             local_dev_py=local_dev_py)
+        elif stage in ("test", "qa"):
+            cfg, note = base_cfg()
+            wt = BR.worktree_path(main, n)
+            p = live(n, wt if os.path.isdir(wt) else main, None, None, cfg, clock, gh, writer, decisions, runner,
+                     judge_runner, journal=journal, unattended=unattended, push_url=push_url, host=host, plugin=plugin)
+        else:
+            p = live(n, main, None, None, config, clock, gh, writer, decisions, runner, judge_runner, journal=journal,
+                     unattended=unattended, push_url=push_url, host=host, plugin=plugin)
+        p.git_dir = common
+        p.spec_store = os.path.join(common, "guild", "engine", str(int(n)), "specs")
+        p.events = events
+        p.config_note = note
+        if stage == "execute" and p.root and os.path.realpath(p.root) != os.path.realpath(main):
+            installed, _kept = RO.install(p.spec_store, p.root, n)
+            if installed:
+                from workflows.dev.stages import base as B
+                B.record_code(p, "execute", "specs-installed", "installed", reason=", ".join(installed)[:300])
+        return p
+    return ports_for

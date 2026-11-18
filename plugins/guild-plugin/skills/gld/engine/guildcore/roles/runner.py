@@ -76,11 +76,11 @@ def result_contract():
 
 def write_env_file(path, values):
     import shlex
-    os.makedirs(os.path.dirname(path), exist_ok=True)
+    os.makedirs(os.path.dirname(path), exist_ok=True)  # fs-ok: engine-owned run dir (created by the engine; roles denyWrite in/)
     with open(path, "w", encoding="utf-8") as fh:  # fs-ok: engine-owned run dir in/ (roles denyWrite) or engine home
         for k, v in sorted(values.items()):
             fh.write("export %s=%s\n" % (k, shlex.quote(str(v))))
-    os.chmod(path, 0o444)
+    os.chmod(path, 0o444)  # fs-ok: engine-owned run dir (created by the engine; roles denyWrite in/)
     return path
 
 
@@ -166,11 +166,11 @@ def run_root(worktree, issue, env=None):
 
 
 def new_run_dir(root, stage, who):
-    os.makedirs(root, exist_ok=True)
+    os.makedirs(root, exist_ok=True)  # fs-ok: engine-owned run dir (created by the engine; roles denyWrite in/)
     seq = len([d for d in os.listdir(root) if os.path.isdir(os.path.join(root, d))]) + 1
     d = os.path.join(root, "%03d-%s-%s" % (seq, stage, who))
     for sub in ("in", "out"):
-        os.makedirs(os.path.join(d, sub), exist_ok=True)
+        os.makedirs(os.path.join(d, sub), exist_ok=True)  # fs-ok: engine-owned run dir (created by the engine; roles denyWrite in/)
     return d
 
 
@@ -179,7 +179,7 @@ def stage_inputs(run_dir, inputs):
     out = {}
     for name, src in (inputs or {}).items():
         dst = os.path.join(run_dir, "in", name)
-        os.makedirs(os.path.dirname(dst), exist_ok=True)
+        os.makedirs(os.path.dirname(dst), exist_ok=True)  # fs-ok: engine-owned run dir (created by the engine; roles denyWrite in/)
         if isinstance(src, dict):
             with open(dst, "w", encoding="utf-8") as fh:  # fs-ok: engine-owned run dir in/ (roles denyWrite) or engine home
                 fh.write(src.get("text") or "")
@@ -311,7 +311,7 @@ class Runner(object):
         self._baseline[(os.path.abspath(worktree), issue)] = snap
         self._unbaselined.discard((os.path.abspath(worktree), issue))
         p = self._baseline_path(worktree, issue)
-        os.makedirs(os.path.dirname(p), exist_ok=True)
+        os.makedirs(os.path.dirname(p), exist_ok=True)  # fs-ok: engine-owned run dir (created by the engine; roles denyWrite in/)
         tmp = p + ".tmp"
         with open(tmp, "w", encoding="utf-8") as fh:  # fs-ok: engine-owned run dir in/ (roles denyWrite) or engine home
             json.dump(snap, fh, sort_keys=True)
@@ -456,7 +456,7 @@ class Runner(object):
         hook_notes = (["hook runs in the role sandbox: %s" % c for c in rendered.meta.get("hooks_sandboxed") or []] +
                       ["hook SKIPPED (shown to the human): %s" % c for c in rendered.meta.get("hooks_skipped") or []])
         task = render_task(spec, run_dir, staged)
-        with open(os.path.join(run_dir, "in", "task.md"), "w", encoding="utf-8") as fh:
+        with open(os.path.join(run_dir, "in", "task.md"), "w", encoding="utf-8") as fh:  # fs-ok: engine-owned run dir (created by the engine; roles denyWrite in/)
             fh.write(task)
         watch = [f for f in (src.local_p, src.user_p) if f]
         url = None

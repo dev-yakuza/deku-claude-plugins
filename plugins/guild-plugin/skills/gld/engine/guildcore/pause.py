@@ -28,10 +28,14 @@ class Pause(object):
 def pause(writer, decisions, issue, p, question=None, stage=None, by="code"):
     """Write a pause. `question` = ask.Question or None. Returns {did, comment_id}."""
     did = None
-    if question is not None:
-        did = decisions.record(question.pending_fields(stage=stage, by=by))
-        decisions.stamp_server_time(did)
     cause = needs_human.cause_line(p.cause_kind, p.line, p.env_key)
+    if question is not None:
+        f = question.pending_fields(stage=stage, by=by)
+        # K4: the cause line rides in the pending block so a resume can finish a pause that died
+        # before its comment landed (§2.5 rule 2(d)) with the SAME cause, not a generic one
+        f["cause"] = cause
+        did = decisions.record(f)
+        decisions.stamp_server_time(did)
     answer = (int(did[1:]), [o["token"] for o in question.options]) if question is not None else None
     body = needs_human.render(cause, p.prose, p.directive_line, answer)
     c = writer.create_comment(issue, body)

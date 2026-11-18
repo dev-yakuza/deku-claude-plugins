@@ -34,6 +34,9 @@ _READ_FORMS = (
     # K2 (qa Step 2 `### PR CI`): the head commit's check-runs and a failed run's annotations
     re.compile(r"^gh api (--paginate )?repos/[^/ ]+/[^/ ]+/commits/[0-9a-f]{7,40}/check-runs( |$)"),
     re.compile(r"^gh api (--paginate )?repos/[^/ ]+/[^/ ]+/check-runs/\d+/annotations( |$)"),
+    # K4 (analyze A1.0 trust gate, P2): the Issue's own REST row — `author_association` is not in
+    # `gh issue view --json`; a plan-decision / safety-net block is honoured only from a member's body
+    re.compile(r"^gh api repos/[^/ ]+/[^/ ]+/issues/\d+ --jq "),
 )
 _WRITE_FLAGS = re.compile(r"(^| )(-X|--method|-f|-F|--field|--raw-field|--input|"
                           r"--add-label|--remove-label|--body|--body-file)( |=|$)")
@@ -133,6 +136,29 @@ class GhCli(object):
                        + self._repo_args())
         return json.loads(out or "[]")
 
+    def issue_author_association(self, n):
+        """K4: OWNER | MEMBER | COLLABORATOR | CONTRIBUTOR | NONE … of the Issue's author."""
+        out = self._gh(["gh", "api", "repos/%s/issues/%d" % (self.owner_repo(), int(n)), "--jq",
+                        ".author_association"])
+        return out.strip() or None
+
+    def closed_by_prs(self, n):
+        """dev 2b step 1b: `closedByPullRequestsReferences` — [{number, repo: "owner/name"}]."""
+        out = self._gh(["gh", "issue", "view", str(int(n)), "--json", "closedByPullRequestsReferences"]
+                       + self._repo_args())
+        refs = (json.loads(out or "{}").get("closedByPullRequestsReferences") or [])
+        rows = []
+        for r in refs:
+            repo = r.get("repository") or {}
+            owner = (repo.get("owner") or {}).get("login") or ""
+            rows.append({"number": r.get("number"), "repo": "%s/%s" % (owner, repo.get("name") or "")})
+        return rows
+
+    def pr_state(self, n):
+        """{state, mergedAt} of a PR (dev 2b step 1b, 2c)."""
+        return json.loads(self._gh(["gh", "pr", "view", str(int(n)), "--json", "number,state,mergedAt,url"]
+                                   + self._repo_args()))
+
     def issue_list(self, state="open", label=None, limit=200):
         argv = ["gh", "issue", "list", "--state", state, "--limit", str(limit),
                 "--json", "number,title,body,labels,state,stateReason"]
@@ -218,6 +244,22 @@ class FakeGh(object):
                             "state": it.get("state", "OPEN"), "labels": it.get("labels", [])})
         return out[:limit]
 
+    def issue_author_association(self, n):
+        self.calls.append(("issue_author_association", n))
+        return self._issue(n).get("author_association")
+
+    def closed_by_prs(self, n):
+        self.calls.append(("closed_by_prs", n))
+        return [dict(r) for r in self._issue(n).get("closed_by_prs", [])]
+
+    def pr_state(self, n):
+        self.calls.append(("pr_state", n))
+        for p in self.fx.get("prs", []):
+            if int(p.get("number")) == int(n):
+                return {"number": p["number"], "state": p.get("state", "OPEN"), "mergedAt": p.get("mergedAt"),
+                        "url": p.get("url")}
+        raise GhError("no pull request %s" % n)
+
     def issue_list(self, state="open", label=None, limit=200):
         self.calls.append(("issue_list", state, label))
         rows = []
@@ -290,6 +332,8 @@ _WRITE_FORMS = (
     re.compile(r"^gh issue edit \d+( --(add|remove)-label [^ ]+)+( --repo [^ ]+)?$"),
     # K3 execute Step 5: the engine opens the PR (roles never touch GitHub, Q23)
     re.compile(r"^gh api repos/[^/ ]+/[^/ ]+/pulls -X POST --input -$"),
+    # K4 analyze 0b ④ (close as decided): `{"state": "closed", "state_reason": …}` only
+    re.compile(r"^gh api repos/[^/ ]+/[^/ ]+/issues/\d+ -X PATCH --input -$"),
 )
 
 
@@ -334,6 +378,12 @@ class GhWriteCli(object):
         return json.loads(self._gh(["gh", "api", "repos/%s/issues" % self.repo, "-X", "POST",
                                     "--input", "-"], {"title": title, "body": body,
                                                       "labels": list(labels)}))
+
+    def close_issue(self, n, reason):
+        if reason not in ("completed", "not_planned"):
+            raise GhError("close reason must be completed|not_planned: %r" % reason)
+        return json.loads(self._gh(["gh", "api", "repos/%s/issues/%d" % (self.repo, int(n)), "-X", "PATCH",
+                                    "--input", "-"], {"state": "closed", "state_reason": reason}))
 
     def patch_pr_body(self, n, body):
         return json.loads(self._gh(["gh", "api", "repos/%s/pulls/%d" % (self.repo, int(n)), "-X",
@@ -440,6 +490,15 @@ class FakeGhWrite(object):
                 "number": n, "title": title, "body": body, "state": "OPEN",
                 "labels": [{"name": l} for l in labels], "comments": [], "timeline": []}
         return {"number": n, "html_url": "https://github.com/%s/issues/%d" % (self.fake.repo, n)}
+
+    def close_issue(self, n, reason):
+        if reason not in ("completed", "not_planned"):
+            raise GhError("HTTP 422: bad state_reason")
+        it = self._issue(n)
+        if self._gate(("close_issue", n, reason)):
+            it["state"] = "CLOSED"
+            it["stateReason"] = reason.upper()
+        return {"number": int(n), "state": "closed"}
 
     def patch_pr_body(self, n, body):
         land = self._gate(("patch_pr_body", n))

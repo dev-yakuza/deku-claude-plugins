@@ -103,14 +103,29 @@ def write_text(root, rel, text, mode=0o644):
     return write_bytes(root, rel, text.encode("utf-8"), mode)
 
 
+def read_nofollow(path, max_bytes=None):
+    """K3r7-m3 (defence in depth): read a regular file without following a link swapped in after the
+    caller's lstat — O_NOFOLLOW + fstat re-check on the open descriptor. Returns (bytes, st_mode)."""
+    try:
+        fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0))  # a FIFO never blocks
+    except OSError as e:
+        raise UnsafePath("cannot open without following links: %s (%s)" % (path, e.__class__.__name__))
+    with os.fdopen(fd, "rb") as fh:
+        st = os.fstat(fh.fileno())
+        if not stat.S_ISREG(st.st_mode):
+            raise UnsafePath("not a regular file: %s" % path)
+        if max_bytes is not None and st.st_size > max_bytes:
+            raise UnsafePath("larger than %d bytes: %s" % (max_bytes, path))
+        return fh.read(), st.st_mode
+
+
 def copy_in(root, rel, src, mode=None):
     """Copy the regular file `src` (never through a link) to root/rel."""
     st = os.lstat(src)
     if not stat.S_ISREG(st.st_mode):
         raise UnsafePath("source is not a regular file: %s" % src)
-    with open(src, "rb") as fh:
-        data = fh.read()
-    return write_bytes(root, rel, data, mode if mode is not None else (st.st_mode & 0o777))
+    data, m = read_nofollow(src)
+    return write_bytes(root, rel, data, mode if mode is not None else (m & 0o777))
 
 
 def copytree_in(root, rel, src, skip=()):

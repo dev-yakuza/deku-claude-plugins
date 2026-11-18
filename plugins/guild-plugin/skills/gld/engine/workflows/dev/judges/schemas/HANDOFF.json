@@ -1,0 +1,32 @@
+{
+ "type": "object",
+ "required": [
+  "verdict"
+ ],
+ "properties": {
+  "verdict": {
+   "type": "string",
+   "enum": [
+    "ok",
+    "ok_with_assumption",
+    "upstream_gap",
+    "unsure"
+   ]
+  },
+  "line": {
+   "type": "string"
+  },
+  "reason": {
+   "type": "string"
+  },
+  "signature": {
+   "type": "array",
+   "items": {
+    "type": "string"
+   }
+  },
+  "fixable_by_execute": {
+   "type": "boolean"
+  }
+ }
+}

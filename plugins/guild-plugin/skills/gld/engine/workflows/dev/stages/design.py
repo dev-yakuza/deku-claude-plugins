@@ -1,0 +1,419 @@
+"""workflows.dev.stages.design — the `design` stage as code (catalog A §2.8; design §3.2 G-SPLIT, §3.3
+DE-ARB, §3.6 design→execute).
+
+    E0  enter (C-F-1, entry label) → analyze:output (absent / no AC → NEEDS_CONTEXT, J-DEV-05 maps it
+        to analyze) → IS_LEAF (`guild:child`) → discovery of existing children (always, never the label)
+    E1  VISUAL (code: VISUAL_AVAILABLE ∧ KICKOFF `ui_surface` inside `visual.packages`, or the
+        safety-net override) · specialists = KICKOFF cast ∩ design specialists ∩ installed roster
+    E2  roles, in this order: tester (cases — given ONLY the AC; it runs before the tech-lead, so on a
+        fresh design no skeleton exists anywhere it could read) → tech-lead (skeleton + split.json) →
+        specialists. Every artifact is written to the role's own `out/` and read back by the engine
+        (`roleout`, P1); BLOCKED/NEEDS_CONTEXT → DE-ARB (one re-invocation per role); FAIL → FAIL.
+        Each artifact's contract (design→execute, §3.6) is checked; a failure → that role repairs
+        ONCE → still failing → SJ-HANDOFF (ok / ok_with_assumption → on; upstream_gap → a person)
+    E3  split (split.json `split: true`) → L0-SPLIT (unsure → a person; leaf → `ask leaf-split`; every
+        parent AC must be in a slice) → children created in order with a hidden slice key (A-F23 —
+        existing keys are never created again) → design:output (with the split) → `guild:children` →
+        roster `<!-- guild:children:output -->` (once) → `OK SPLIT: N children` (A-F38 order)
+    E4  single PR: specs kept in the engine's spec store → design:output → `guild:design → guild:execute`
+"""
+
+import json
+import re
+
+from guildcore import ask as ASK
+from guildcore import state as ST
+from guildcore.checks import visual as V
+from guildcore.adapters.gh import GhWriteError
+from guildcore.decisions import DecisionLog
+from guildcore.records import markers
+from guildcore.records import outputs as OUT
+from workflows.dev import analysis as AN
+from workflows.dev import arbitration as ARB
+from workflows.dev import handoff as HO
+from workflows.dev import judging as JG
+from workflows.dev import roleout as RO
+from workflows.dev.stages import analyze as A
+from workflows.dev.stages import base as B
+
+STAGE = "design"
+CHILD_PREFIX = "[Guild子] "
+SLICE_KEY_RE = re.compile(r"<!-- guild:slice-key (\S+) -->")
+TL_STATUSES = ("DONE", "BLOCKED", "NEEDS_CONTEXT", "FAIL")
+SPECIALIST_SCHEMA = {"type": "object", "properties": {"file": {"type": "string"},
+                                                       "none_applicable": {"type": "boolean"}}}
+
+
+def kickoff_block(comments):
+    blk = None
+    for b in DecisionLog.load(comments).blocks:
+        if b.get("point") == "KICKOFF" and b.get("stage") == "analyze":
+            blk = b
+    return blk
+
+
+def visual_decision(cfg, kick, ac):
+    """(VISUAL, why) — L.1 as code; the UI-surface half is KICKOFF's (J-DE-01 merged into it)."""
+    avail = V.visual_available(cfg)
+    if not avail:
+        return False, "VISUAL_AVAILABLE=false"
+    net_visual = kick is not None and kick.get("safety_net_visual") == "true"
+    if net_visual:
+        return True, "safety-net visual case (override)"
+    if kick is None:
+        return False, "ui surface unknown (analyze ran before the engine) — no visual cases"
+    if kick.get("ui_surface") != "true":
+        return False, "no UI surface"
+    pk = (cfg.get("visual") or {}).get("packages") or []
+    if pk:
+        areas = [x for x in (kick.get("areas") or "").split(",") if x]
+        if not any(a == q or a.startswith(q.rstrip("/") + "/") or q.startswith(a.rstrip("/") + "/")
+                   for a in areas for q in pk):
+            return False, "UI surface outside visual.packages"
+    return True, "UI surface ∧ VISUAL_AVAILABLE"
+
+
+def visual_count(test_cases):
+    if not test_cases or "<!-- guild:visual-cases -->" not in test_cases:
+        return 0
+    tail = test_cases.split("<!-- guild:visual-cases -->", 1)[1]
+    n = 0
+    for ln in tail.split("\n"):
+        s = ln.strip()
+        if s.startswith("#"):
+            break
+        if s.startswith("|") and not re.match(r"^\|[\s:|-]+\|?$", s) and "AC" in s:
+            n += 1
+        elif s.startswith(("- ", "* ")):
+            n += 1
+    return n
+
+
+def specialist_file(role):
+    return "ux.md" if role == "designer" else "%s.md" % role
+
+
+def existing_keys(children):
+    out = {}
+    for c in children:
+        m = SLICE_KEY_RE.search(c.get("body") or "")
+        if m:
+            out[m.group(1)] = c["number"]
+    return out
+
+
+# ---- the stage ----------------------------------------------------------------------------------
+
+def run(p, only=None, config_present=True):
+    e = B.enter(p, STAGE, config_present)
+    if isinstance(e, B.StageResult):
+        return e
+    B.note_untrusted(p, STAGE)
+    B.register_exact(p)
+    comments = B.records(p)
+    so = OUT.find(comments, "analyze:output")
+    if so is None:
+        return B.StageResult(B.StageResult.FAIL, line="analyze output not found for #%d" % p.issue,
+                             fail_class="needs_context")
+    rec = AN.parse_output(so.body)
+    if not rec.ac:
+        return B.StageResult(B.StageResult.FAIL, line="analyze output not found for #%d (no acceptance criteria)" % p.issue,
+                             fail_class="needs_context")
+    is_leaf = "guild:child" in e.labels
+    kick = kickoff_block(comments)
+    cfg = getattr(p.config, "raw", None) or (p.config if isinstance(p.config, dict) else {})
+    issue = p.gh.issue(p.issue)
+    trust, _assoc = A.trusted_body(p, issue)
+    body = issue.get("body") or ""
+    slot = ""
+    if trust:
+        for m in ("<!-- guild:refactor-slot -->", "<!-- guild:safety-net -->", "<!-- guild:safety-net-only -->"):
+            if m in body:
+                slot += m.replace("<!-- guild:", "").replace(" -->", "") + "\n"
+    children = ST.discover_children(p.gh, p.issue)
+    answers = {}
+    for kind in ("design-block", "leaf-split", "escalation"):
+        q, res = B.pending_answer(p, STAGE, kind, comments)
+        if res is not None:
+            if res.get("choice") == "stop":
+                return B.StageResult(B.StageResult.PAUSE, cause="stopped by the human answer %s" % res.id)
+            answers[kind] = (q, res)
+    visual, vwhy = visual_decision(cfg, kick, rec.ac)
+    ros = A.roster(p)
+    cast = [x for x in ((kick.get("cast") or "").split(",") if kick else (rec.cast or [])) if x]
+    specialists = sorted(set(r for r in cast if r in AN.DESIGN_SPECIALISTS and r in ros))
+    if visual and "designer" in ros and "designer" not in specialists:
+        specialists.append("designer")                 # the UI surface IS the designer trigger (one decision)
+    trace = ["visual: %s (%s)" % ("yes" if visual else "no", vwhy), "leaf: %s" % is_leaf,
+             "existing children: %s" % (", ".join("#%d" % c["number"] for c in children) or "none"),
+             "specialists: %s" % (", ".join(specialists) or "none")]
+    ac_ids = [a["n"] for a in rec.ac]
+    ac_md = "\n".join("- %s%s: %s" % (a["id"], " (safety net)" if a["net"] else "", a["text"]) for a in rec.ac)
+    analyze_md = so.body
+    std = "\n\n".join("## %s\n%s" % s for s in A.standards(p))
+    irr = AN.irreversible((kick.get("areas") or "").split(",") if kick else [], p.engine_cfg("irreversible_globs"))
+    reinvoked, assumptions, concerns, rows = set(), [], [], []
+    ctx = [("analyze", analyze_md[:12000])]
+
+    # E2.1 — tester (cases) first: given only the AC
+    vis_txt = "VISUAL = %s" % ("yes" if visual else "no")
+    tester_in = {"ac.md": {"text": ac_md}, "visual.txt": {"text": vis_txt}}
+
+    def tester(addendum=None):
+        return p.run_role(B.RoleCall("tester", "cases", STAGE, "E1.1", inputs=tester_in, addendum=addendum))
+
+    def check_cases(text):
+        return HO.cases_bad(text, ac_ids, visual)
+    got = artifact(p, "tester", tester, "out/test-cases.md", check_cases, reinvoked, ctx, body, irr, ac_md)
+    if isinstance(got, B.StageResult):
+        return got
+    tc_text, tres, tnote = got
+    rows.append(("tester", "스파인", tres.status, tres.line))
+    assumptions += tnote
+
+    # E2.2 — tech-lead (skeleton + split)
+    ex_md = "\n\n".join("#%d %s\n%s" % (c["number"], c["title"], c.get("body") or "") for c in children)
+    tl_in = {"analyze-output.md": {"text": analyze_md}, "standards.md": {"text": std},
+             "existing-children.md": {"text": ex_md}, "slot.txt": {"text": slot}}
+
+    def techlead(addendum=None):
+        return p.run_role(B.RoleCall("tech-lead", "design", STAGE, "E1.1", inputs=tl_in, addendum=addendum,
+                                     allowed_status=TL_STATUSES))
+    split_holder = {}
+
+    got = artifact(p, "tech-lead", techlead, "out/skeleton.md", HO.skeleton_bad, reinvoked, ctx, body, irr, ac_md,
+                   extra=lambda res: split_holder.update(split=RO.json_out(p, STAGE, res, (res.extras or {}).get("split_path")
+                                                                           or "out/split.json")))
+    if isinstance(got, B.StageResult):
+        return got
+    sk_text, tlres, tlnote = got
+    rows.append(("tech-lead", "스파인", tlres.status, tlres.line))
+    assumptions += tlnote
+    split = split_holder.get("split") or {"split": False}
+    if not isinstance(split.get("split"), bool):
+        B.record_code(p, STAGE, "split-json-invalid", "single", reason="split.json without a boolean `split` → single")
+        split = {"split": False}
+
+    # E2.3 — specialists
+    spec_files = {}
+    for role in specialists:
+        fname = specialist_file(role)
+        sp_in = {"analyze-output.md": {"text": analyze_md}, "standards.md": {"text": std}, "visual.txt": {"text": vis_txt}}
+
+        def sp(addendum=None, role=role, sp_in=sp_in):
+            return p.run_role(B.RoleCall(role, "design", STAGE, "E1.5", inputs=sp_in, addendum=addendum,
+                                         schema=SPECIALIST_SCHEMA))
+        res = sp()
+        while res.status in ("BLOCKED", "NEEDS_CONTEXT"):
+            if res.status == "BLOCKED" and (res.extras or {}).get("evidence"):
+                # J-DE-09: a specialist BLOCKED carrying an objective finding (A-F27 `evidence`) reverses an approach
+                p.capture("correction", STAGE, role, "%s BLOCKED at design" % role,
+                          B.one_line(str(res.extras.get("evidence")), 160), "#%d" % p.issue, True)
+            out = ARB.blocked(p, STAGE, role, res, ctx, reinvoked, lambda add, f=sp: f(add), body, [], irr, "E2.1")
+            if isinstance(out, B.StageResult):
+                return out
+            if out[0] == "decided":
+                assumptions.append("%s %s — %s" % (role, res.status, out[1]))
+                res = None
+                break
+            res = out[1]
+        if res is None:
+            rows.append((role, "참여", "BLOCKED→판단", ""))
+            continue
+        r = B.role_outcome(p, STAGE, role, res)
+        if r is not None:
+            return r
+        if res.status == "FAIL":
+            return B.fail(p, STAGE, "%s FAIL — %s" % (role, B.one_line(res.line or "", 160)))
+        if res.status == "DONE_WITH_CONCERNS":
+            concerns.append("%s: %s" % (role, B.one_line(res.line or "", 200)))
+        if not (res.extras or {}).get("none_applicable"):
+            text = RO.read(p, STAGE, res, (res.extras or {}).get("file") or "out/" + fname)
+            if text is None:
+                return B.fail(p, STAGE, "%s reported %s without its file" % (role, res.status))
+            spec_files[fname] = text
+        rows.append((role, "게이트" if role in AN.GATE_ROLES else "참여", res.status, res.line))
+
+    # keep the specs (engine store — installed into the execute worktree later)
+    RO.put(p, "test-cases.md", tc_text)
+    RO.put(p, "skeleton.md", sk_text)
+    for fname, text in spec_files.items():
+        RO.put(p, fname, text)
+    RO.put(p, "split.json", json.dumps(split, ensure_ascii=False))
+    if p.engine_cfg("handoff_judge", "default") == "always":
+        hd = HO.judge(p, STAGE, "design→execute", [], [("skeleton", sk_text[:6000]), ("test_cases", tc_text[:6000])],
+                      ac_md, issue.get("title") or "", "E4")
+        if hd.choice == "upstream_gap":
+            return _gap(p, "design 산출물 간극(HANDOFF) — %s" % B.one_line(hd.fields.get("reason") or "", 200))
+        if hd.choice == "ok_with_assumption":
+            assumptions.append(hd.fields.get("line") or "")
+
+    if split.get("split"):
+        return do_split(p, e, rec, split, sk_text, children, is_leaf, answers, rows, assumptions, concerns,
+                        visual, tc_text, trace, specialists, spec_files)
+    out = render_output(p.issue, rows, visual, tc_text, spec_files, specialists, cast, None, assumptions,
+                        concerns, trace)
+    p.writer.upsert_comment(p.issue, "design:output", out)
+    for kind, (q, res) in answers.items():
+        B.mark_applied(p, STAGE, res)
+    B.transition(p, e, "execute")
+    return B.StageResult(B.StageResult.ADVANCE, nxt="execute")
+
+
+def _gap(p, line):
+    q = ASK.Question("design-block", line, [{"token": "stop", "label": "stop"}])
+    return B.ask(p, STAGE, q, line, {"cause_kind": "ambiguity", "line": line, "token_cause": "ambiguity: %s" % line})
+
+
+def artifact(p, role, call, rel, check, reinvoked, ctx, body, irr, ac_md, extra=None):
+    """Run a design role → its artifact (text, result, assumptions) or a StageResult. BLOCKED /
+    NEEDS_CONTEXT → DE-ARB; the contract check failing → one repair → SJ-HANDOFF."""
+    res = call()
+    notes = []
+    while res.status in ("BLOCKED", "NEEDS_CONTEXT"):
+        out = ARB.blocked(p, STAGE, role, res, ctx, reinvoked, lambda add: call(add), body, [], irr, "E2.1")
+        if isinstance(out, B.StageResult):
+            return out
+        if out[0] == "decided":
+            # a design artifact cannot be assumed into existence — the decision becomes the retry's context
+            notes.append("%s %s — %s" % (role, res.status, out[1]))
+            if role in reinvoked:
+                return _gap(p, "%s %s — 판단(%s)으로도 산출물이 없음" % (role, res.status, B.one_line(out[1], 120)))
+            reinvoked.add(role)
+            res = call("Decision for your blocker (proceed on it): %s" % out[1])
+            continue
+        res = out[1]
+    r = B.role_outcome(p, STAGE, role, res)
+    if r is not None:
+        return r
+    if res.status == "FAIL":
+        return B.fail(p, STAGE, "%s FAIL — %s" % (role, B.one_line(res.line or "", 160)))
+    repaired = False
+    while True:
+        if extra is not None:
+            extra(res)
+        text = RO.read(p, STAGE, res, rel) or ""
+        bad = check(text)
+        if not bad:
+            return text, res, notes
+        if not repaired:
+            repaired = True
+            res = call("Your artifact failed the hand-over check: %s. Fix exactly that and return again." % "; ".join(bad))
+            r = B.role_outcome(p, STAGE, role, res)
+            if r is not None:
+                return r
+            if res.status not in ("DONE", "DONE_WITH_CONCERNS"):
+                return _gap(p, "%s repair returned %s — %s" % (role, res.status, B.one_line(res.line or "", 160)))
+            continue
+        d = HO.judge(p, STAGE, "design→execute", bad, [(role, text[:8000])], ac_md, "#%d" % p.issue, "E2.1")
+        if d.choice == "ok":
+            return text, res, notes
+        if d.choice == "ok_with_assumption":
+            return text, res, notes + [d.fields.get("line") or ""]
+        return _gap(p, "design 산출물 간극(%s) — %s" % (role, "; ".join(bad)[:200]))
+
+
+def render_output(issue, rows, visual, tc_text, spec_files, specialists, cast, split_line, assumptions, concerns, trace):
+    v = markers.value
+    n = int(issue)
+    out = [markers.open_tag("design:output"), "## Guild design — #%d" % n, "",
+           split_line or "분할: 없음 — 단일 PR",
+           "skeleton: docs/specs/%d/skeleton.md" % n,
+           "test-cases: docs/specs/%d/test-cases.md" % n,
+           "visual: %s" % ("yes" if visual else "no")]
+    if visual:
+        out.append("시각 케이스 %d건" % visual_count(tc_text))
+    for fname in sorted(spec_files):
+        out.append("spec: docs/specs/%d/%s" % (n, fname))
+    out += ["", "### 참여 역할"]
+    for role, why, st, line in rows:
+        out.append("- %s (%s): %s%s" % (role, why, st, (" — " + v(B.one_line(line, 160))) if line else ""))
+    skipped = [r for r in cast if r in AN.DESIGN_SPECIALISTS and r not in specialists]
+    if skipped:
+        out += ["", "### 소집하지 않은 역할"] + ["- %s: 설치되지 않음" % r for r in skipped]
+    if concerns:
+        out += ["", "### 우려"] + ["- %s" % v(c) for c in concerns]
+    if assumptions:
+        out += ["", "### 가정"] + ["- 가정: %s" % v(a) for a in assumptions if a]
+    out += ["", "<details><summary>preflight trace</summary>", ""] + ["- %s" % v(t) for t in trace] + \
+        ["", "</details>", markers.close_tag("design:output")]
+    return markers.assert_own_markers("\n".join(out), "design:output")
+
+
+def child_body(parent, sl, ac_by_id):
+    scope = re.sub(r"Parent Issue:\s*#", "Parent Issue #", sl.get("scope") or "")   # no second discovery line
+    lines = [markers.value(scope, one_line=False), "", "## 수용 기준"]
+    for aid in sl.get("ac_ids") or []:
+        a = ac_by_id.get(aid)
+        if a is not None:
+            lines.append("- %s: %s" % (aid, markers.value(a["text"])))
+    lines += ["", "Parent Issue: #%d" % int(parent)]
+    return "\n".join(lines)
+
+
+def do_split(p, e, rec, split, sk_text, children, is_leaf, answers, rows, assumptions, concerns, visual, tc_text,
+             trace, specialists, spec_files):
+    keys = existing_keys(children)
+    brief = [("split", json.dumps(split, ensure_ascii=False)[:12000]),
+             ("parent_ac", "\n".join("%s: %s" % (a["id"], a["text"]) for a in rec.ac)),
+             ("existing_children", "\n".join("#%d %s (key %s)" % (c["number"], c["title"],
+                                             next((k for k, v in keys.items() if v == c["number"]), "-")) for c in children) or "none"),
+             ("skeleton", sk_text[:8000])]
+    d = p.judge(JG.spec(p, "SPLIT", brief, STAGE, "E2.2"))
+    slices = sorted([s for s in d.fields.get("slices") or [] if isinstance(s, dict)], key=lambda s: s.get("order") or 0)
+    choice = d.choice
+    covered = set()
+    for s in slices:
+        covered.update(s.get("ac_ids") or [])
+    missing = [a["id"] for a in rec.ac if a["id"] not in covered]
+    seen = set()
+    dup = [s.get("key") for s in slices if s.get("key") in seen or seen.add(s.get("key"))]
+    if choice == "split" and (missing or dup):
+        choice = "unsure"
+    B.record_judgment(p, STAGE, "SPLIT", "J-DE-05", d, choice=choice,
+                      reason=("AC not in any slice: %s" % ", ".join(missing)) if missing else (d.fields.get("reason") or "")[:300],
+                      extra={"slices": [s.get("key") for s in slices] or None})
+    if choice == "single":
+        out = render_output(p.issue, rows, visual, tc_text, spec_files, specialists, [], "분할: 없음 — 단일 PR (L0-SPLIT)",
+                            assumptions, concerns, trace)
+        p.writer.upsert_comment(p.issue, "design:output", out)
+        B.transition(p, e, "execute")
+        return B.StageResult(B.StageResult.ADVANCE, nxt="execute")
+    if choice != "split":
+        return _gap(p, "분할 판단 불확실 — 분할은 되돌리기 어려움 (%s)" % B.one_line(d.fields.get("reason") or "", 160))
+    if is_leaf:
+        line = "child #%d cannot be re-split — re-scope the parent" % p.issue
+        q = ASK.Question("leaf-split", line, [{"token": "stop", "label": "stop"}])
+        return B.ask(p, STAGE, q, line, {"cause_kind": "ambiguity", "line": line, "token_cause": "ambiguity: %s" % line})
+    ac_by_id = dict((a["id"], a) for a in rec.ac)
+    todo = [s for s in slices if ("%d-%s" % (p.issue, s["key"])) not in keys]
+    made = []
+    for i, s in enumerate(todo):
+        title = CHILD_PREFIX + markers.value(s.get("name") or s["key"])[:90]
+        try:
+            n, _created = p.writer.issue_create(title, child_body(p.issue, s, ac_by_id), labels=["guild:child", "guild:analyze"],
+                                                key="%d-%s" % (p.issue, s["key"]))
+        except GhWriteError as ex:
+            if ex.kind == "auth":
+                raise
+            return B.StageResult(B.StageResult.FAIL, fail_class="defect",
+                                 line="child creation failed after %d/%d — %s" % (i, len(todo), B.one_line(str(ex), 160)))
+        made.append(n)
+    now = ST.discover_children(p.gh, p.issue)
+    nums = [c["number"] for c in now]
+    split_line = "분할: %d개 자식 — %s" % (len(nums), ", ".join("#%d" % x for x in nums))
+    out = render_output(p.issue, rows, visual, tc_text, spec_files, specialists, [], split_line, assumptions, concerns, trace)
+    p.writer.upsert_comment(p.issue, "design:output", out)
+    B.transition(p, e, "children")
+    if markers.find(B.records(p), "children:output") is None:
+        by_num = dict((c["number"], c) for c in now)
+        lines = [markers.open_tag("children:output"), "## 자식 Issue (#%d)" % p.issue, ""]
+        for c in now:
+            sl = next((s for s in slices if ("%d-%s" % (p.issue, s["key"])) in (c.get("body") or "")), None)
+            lines.append("- #%d · %s · %s" % (c["number"], markers.value(by_num[c["number"]]["title"])[:100],
+                                               markers.value(B.one_line((sl or {}).get("scope") or "", 140))))
+        lines.append(markers.close_tag("children:output"))
+        p.writer.create_comment(p.issue, markers.assert_own_markers("\n".join(lines), "children:output"))
+    for kind, (q, res) in answers.items():
+        B.mark_applied(p, STAGE, res)
+    return B.StageResult(B.StageResult.SPLIT, nxt=len(nums))

@@ -1,0 +1,382 @@
+{
+ "type": "object",
+ "required": [
+  "interpretations",
+  "chosen",
+  "assumptions",
+  "readiness",
+  "plan_decisions",
+  "close",
+  "ac",
+  "work_type",
+  "cast",
+  "po",
+  "ui_surface",
+  "safety_net_visual",
+  "areas",
+  "surface_to_human",
+  "verdict"
+ ],
+ "properties": {
+  "interpretations": {
+   "type": "array",
+   "items": {
+    "type": "object",
+    "required": [
+     "id",
+     "summary"
+    ],
+    "properties": {
+     "id": {
+      "type": "string"
+     },
+     "summary": {
+      "type": "string"
+     }
+    }
+   }
+  },
+  "chosen": {
+   "type": "string"
+  },
+  "assumptions": {
+   "type": "array",
+   "items": {
+    "type": "object",
+    "required": [
+     "text"
+    ],
+    "properties": {
+     "text": {
+      "type": "string"
+     },
+     "anchor": {
+      "type": [
+       "object",
+       "null"
+      ],
+      "properties": {
+       "cite": {
+        "type": "string"
+       },
+       "source": {
+        "type": "string"
+       },
+       "quote": {
+        "type": "string"
+       }
+      }
+     }
+    }
+   }
+  },
+  "readiness": {
+   "type": "object",
+   "required": [
+    "goal",
+    "constraint",
+    "success"
+   ],
+   "properties": {
+    "goal": {
+     "type": "object",
+     "required": [
+      "rating"
+     ],
+     "properties": {
+      "rating": {
+       "type": "string",
+       "enum": [
+        "clear",
+        "partial",
+        "unclear",
+        "unsure"
+       ]
+      },
+      "anchor": {
+       "type": [
+        "object",
+        "null"
+       ],
+       "properties": {
+        "cite": {
+         "type": "string"
+        },
+        "source": {
+         "type": "string"
+        },
+        "quote": {
+         "type": "string"
+        }
+       }
+      },
+      "choice_needed": {
+       "type": "string"
+      }
+     }
+    },
+    "constraint": {
+     "type": "object",
+     "required": [
+      "rating"
+     ],
+     "properties": {
+      "rating": {
+       "type": "string",
+       "enum": [
+        "clear",
+        "partial",
+        "unclear",
+        "unsure"
+       ]
+      },
+      "anchor": {
+       "type": [
+        "object",
+        "null"
+       ],
+       "properties": {
+        "cite": {
+         "type": "string"
+        },
+        "source": {
+         "type": "string"
+        },
+        "quote": {
+         "type": "string"
+        }
+       }
+      },
+      "choice_needed": {
+       "type": "string"
+      }
+     }
+    },
+    "success": {
+     "type": "object",
+     "required": [
+      "rating"
+     ],
+     "properties": {
+      "rating": {
+       "type": "string",
+       "enum": [
+        "clear",
+        "partial",
+        "unclear",
+        "unsure"
+       ]
+      },
+      "anchor": {
+       "type": [
+        "object",
+        "null"
+       ],
+       "properties": {
+        "cite": {
+         "type": "string"
+        },
+        "source": {
+         "type": "string"
+        },
+        "quote": {
+         "type": "string"
+        }
+       }
+      },
+      "choice_needed": {
+       "type": "string"
+      }
+     }
+    }
+   }
+  },
+  "plan_decisions": {
+   "type": "array",
+   "items": {
+    "type": "object",
+    "required": [
+     "line",
+     "dimension",
+     "fit"
+    ],
+    "properties": {
+     "line": {
+      "type": "string"
+     },
+     "dimension": {
+      "type": "string"
+     },
+     "fit": {
+      "type": "string",
+      "enum": [
+       "fits",
+       "requires_reinterpretation",
+       "unsure"
+      ]
+     }
+    }
+   }
+  },
+  "untagged_premises": {
+   "type": "array",
+   "items": {
+    "type": "integer"
+   }
+  },
+  "close": {
+   "type": "object",
+   "required": [
+    "decide"
+   ],
+   "properties": {
+    "decide": {
+     "type": "string",
+     "enum": [
+      "none",
+      "completed",
+      "not_planned"
+     ]
+    },
+    "source": {
+     "type": [
+      "string",
+      "null"
+     ],
+     "enum": [
+      "plan_line",
+      "leader",
+      null
+     ]
+    },
+    "line": {
+     "type": "string"
+    }
+   }
+  },
+  "features": {
+   "type": "array",
+   "items": {
+    "type": "string"
+   }
+  },
+  "ac": {
+   "type": "array",
+   "items": {
+    "type": "object",
+    "required": [
+     "text"
+    ],
+    "properties": {
+     "text": {
+      "type": "string"
+     },
+     "priority": {
+      "type": "string"
+     },
+     "tag": {
+      "type": "string"
+     }
+    }
+   }
+  },
+  "work_type": {
+   "type": "string",
+   "enum": [
+    "feature",
+    "bug",
+    "refactor"
+   ]
+  },
+  "split_hint": {
+   "type": "boolean"
+  },
+  "cast": {
+   "type": "object",
+   "required": [
+    "participation",
+    "gates"
+   ],
+   "properties": {
+    "participation": {
+     "type": "array",
+     "items": {
+      "type": "string"
+     }
+    },
+    "gates": {
+     "type": "array",
+     "items": {
+      "type": "string"
+     }
+    },
+    "unresolved_gates": {
+     "type": "array",
+     "items": {
+      "type": "string"
+     }
+    },
+    "skipped": {
+     "type": "array",
+     "items": {
+      "type": "string"
+     }
+    }
+   }
+  },
+  "po": {
+   "type": "object",
+   "required": [
+    "convene"
+   ],
+   "properties": {
+    "convene": {
+     "type": "boolean"
+    },
+    "reason": {
+     "type": "string"
+    }
+   }
+  },
+  "ui_surface": {
+   "type": "boolean"
+  },
+  "safety_net_visual": {
+   "type": "boolean"
+  },
+  "areas": {
+   "type": "array",
+   "items": {
+    "type": "string"
+   }
+  },
+  "surface_to_human": {
+   "type": "object",
+   "required": [
+    "ask"
+   ],
+   "properties": {
+    "ask": {
+     "type": "boolean"
+    },
+    "question": {
+     "type": "string"
+    }
+   }
+  },
+  "needs_more": {
+   "type": "array",
+   "items": {
+    "type": "string"
+   }
+  },
+  "verdict": {
+   "type": "string",
+   "enum": [
+    "ready",
+    "not_ready",
+    "unsure"
+   ]
+  }
+ }
+}

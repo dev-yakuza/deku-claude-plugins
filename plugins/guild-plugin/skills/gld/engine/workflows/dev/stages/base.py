@@ -54,6 +54,7 @@ class RoleCall(object):
 
 class StageResult(object):
     ADVANCE, DONE, LOOPBACK, PAUSE, ASK, FAIL = "ADVANCE", "DONE", "LOOPBACK", "PAUSE", "ASK", "FAIL"
+    SPLIT = "SPLIT"                   # K4 design: `OK SPLIT: <N> children` (nxt = N)
 
     def __init__(self, kind, nxt=None, cause=None, line=None, qid=None, fail_class=None, notes=()):
         self.kind = kind
@@ -68,7 +69,9 @@ class StageResult(object):
         if self.kind == self.ADVANCE:
             return "OK ADVANCE: %s" % self.nxt
         if self.kind == self.DONE:
-            return "OK DONE"
+            return "OK DONE: %s" % self.line if self.line else "OK DONE"
+        if self.kind == self.SPLIT:
+            return "OK SPLIT: %s children" % self.nxt
         if self.kind == self.LOOPBACK:
             return "OK LOOPBACK: execute"
         if self.kind == self.PAUSE:
@@ -329,11 +332,13 @@ def pause(p, stage, cause_kind, line, token_cause, prose="", env_key=None, quest
     pz = PAUSE.Pause(cause_kind, line, prose, env_key, directive_line)
     if extra_labels or remove_labels:
         did = None
-        if question is not None:
-            did = p.decisions.record(question.pending_fields(stage=stage))
-            p.decisions.stamp_server_time(did)
         from guildcore.records import needs_human
         cause = needs_human.cause_line(cause_kind, line, env_key)
+        if question is not None:
+            f = question.pending_fields(stage=stage)
+            f["cause"] = cause
+            did = p.decisions.record(f)
+            p.decisions.stamp_server_time(did)
         answer = (int(did[1:]), [o["token"] for o in question.options]) if did else None
         c = p.writer.create_comment(p.issue, needs_human.render(cause, prose, directive_line, answer))
         if did:
@@ -401,6 +406,17 @@ def role_outcome(p, stage, role, res):
         return pause(p, stage, "defect", line, line) if p.unattended else \
             StageResult(StageResult.FAIL, line=line, fail_class="defect")
     return None
+
+
+def register_exact(p):
+    """K4 (P1): role text the stage posts is redacted by VALUE too — the `engine.effective.copy_ignored`
+    files' strings (K3r1-M4), scoped to this run."""
+    from guildcore.records import redact as RD
+    RD.clear_exact()
+    raw = getattr(p.config, "raw", None) or (p.config if isinstance(p.config, dict) else {})
+    lst = ((raw.get("engine") or {}).get("effective") or {}).get("copy_ignored") or []
+    if lst and p.root:
+        RD.register_exact_from_files(p.root, lst)
 
 
 def one_line(text, cap=300):

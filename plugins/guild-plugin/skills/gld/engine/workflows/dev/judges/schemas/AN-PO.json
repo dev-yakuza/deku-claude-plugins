@@ -1,0 +1,44 @@
+{
+ "type": "object",
+ "required": [
+  "action"
+ ],
+ "properties": {
+  "action": {
+   "type": "string",
+   "enum": [
+    "record",
+    "rerate_success",
+    "unsure"
+   ]
+  },
+  "rating": {
+   "type": "string",
+   "enum": [
+    "clear",
+    "partial",
+    "unclear"
+   ]
+  },
+  "anchor": {
+   "type": [
+    "object",
+    "null"
+   ],
+   "properties": {
+    "cite": {
+     "type": "string"
+    },
+    "source": {
+     "type": "string"
+    },
+    "quote": {
+     "type": "string"
+    }
+   }
+  },
+  "reason": {
+   "type": "string"
+  }
+ }
+}

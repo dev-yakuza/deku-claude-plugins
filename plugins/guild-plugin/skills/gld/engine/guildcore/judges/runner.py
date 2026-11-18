@@ -175,7 +175,7 @@ class JudgeRunner(object):
                                                  "guild-engine", "judges")
         d = os.path.join(root, "%s-%s" % (spec.group, uuid.uuid4().hex[:8]))
         for sub in ("in", "out"):
-            os.makedirs(os.path.join(d, sub), exist_ok=True)
+            os.makedirs(os.path.join(d, sub), exist_ok=True)  # fs-ok: engine-owned judge run dir (judges have no write tools)
         return d
 
     def _call(self, spec, model, system, brief, run_dir, tag, attempt=1):
@@ -195,7 +195,7 @@ class JudgeRunner(object):
                           judge=True)
         argv = C.judge_argv(model, system, spec.schema, sp, tools=spec.tools,
                             budget_usd=spec.budget_usd, effort=spec.effort, claude=self.claude)
-        with open(os.path.join(run_dir, "in", "%s.brief.md" % tag), "w", encoding="utf-8") as fh:
+        with open(os.path.join(run_dir, "in", "%s.brief.md" % tag), "w", encoding="utf-8") as fh:  # fs-ok: engine-owned judge run dir (judges have no write tools)
             fh.write(brief)
         out = os.path.join(run_dir, "out", "%s.json" % tag)
         cwd = spec.cwd if spec.tools and spec.cwd else os.path.join(run_dir, "in")

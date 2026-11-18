@@ -696,9 +696,9 @@ def materialize(root, rev, dest):
     import io
     import tarfile
     blob = G.run(root, "archive", "--format=tar", rev)
-    os.makedirs(dest, exist_ok=True)
+    os.makedirs(dest, exist_ok=True)  # fs-ok: fresh engine temp tree (mkdtemp) before materializing
     with tarfile.open(fileobj=io.BytesIO(blob)) as tf:
-        tf.extractall(dest, filter="data")
+        tf.extractall(dest, filter="data")  # fs-ok: tarfile filter='data' refuses links leaving the fresh temp tree (K3r7 (b))
 
 
 class TempTree(object):
@@ -801,7 +801,7 @@ class TempTree(object):
                 self._put(self.base, f, dst)
             elif full:
                 if os.path.lexists(dst):
-                    os.remove(dst)
+                    os.remove(dst)  # fs-ok: path checked by self._inside() (realpath inside the temp tree, K2-B4)
             else:
                 self._put("HEAD", f, dst)
 
@@ -825,7 +825,7 @@ class TempTree(object):
             if G.ok(self.root, "cat-file", "-e", "%s:%s" % (to, n)):
                 self._put(to, n, dst)
             elif os.path.lexists(dst) and not os.path.isdir(dst):
-                os.remove(dst)
+                os.remove(dst)  # fs-ok: path checked by self._inside() (realpath inside the temp tree, K2-B4)
         self.rev = to
 
     def _put(self, rev, f, dst):
@@ -893,7 +893,7 @@ class TempTree(object):
     def __exit__(self, *exc):
         if self.path:
             _LINKED.pop(os.path.realpath(self.path), None)
-            shutil.rmtree(self.path, True)
+            shutil.rmtree(self.path, True)  # fs-ok: the engine's own temp tree; rmtree never follows links
         return False
 
 
