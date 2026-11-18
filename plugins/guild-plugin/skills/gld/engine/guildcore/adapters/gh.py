@@ -37,6 +37,8 @@ _READ_FORMS = (
     # K4 (analyze A1.0 trust gate, P2): the Issue's own REST row — `author_association` is not in
     # `gh issue view --json`; a plan-decision / safety-net block is honoured only from a member's body
     re.compile(r"^gh api repos/[^/ ]+/[^/ ]+/issues/\d+ --jq "),
+    # K5 (K4r5-m2): the token's own login — an orphan / lost-reply candidate must be written by the engine
+    re.compile(r"^gh api user --jq \.login$"),
     # K4r3-B1: the REST issues LIST (database-backed, never the search index — `gh issue list --label`
     # is GraphQL IssueSearch) and the REST row by number; both are reads (GET, no -X / -f)
     re.compile(r"^gh api --paginate repos/[^/ ]+/[^/ ]+/issues\?[^ ]+ --jq "),
@@ -169,7 +171,8 @@ class GhCli(object):
     _ROW_JQ = ('{number, title, body, state: (.state | ascii_upcase), '
                'stateReason: ((.state_reason // "") | ascii_upcase), labels: [.labels[].name], '
                'created_at, updated_at, pr: (.pull_request != null), '
-               'repo: ((.repository_url // "") | sub("^.*/repos/"; ""))}')     # K4r4-m4: a transferred Issue
+               'repo: ((.repository_url // "") | sub("^.*/repos/"; "")), '      # K4r4-m4: a transferred Issue
+               'author: ((.user.login // "") | ascii_downcase)}')                 # K4r5-m2: who wrote it
 
     def issue_rows(self, label=None, state="all", since=None):
         """Every Issue (PRs dropped) with `label`, newest first, all pages; `since` = ISO time (GitHub
@@ -186,6 +189,13 @@ class GhCli(object):
                         "--jq", ".[] | " + self._ROW_JQ])
         rows = [json.loads(ln) for ln in out.split("\n") if ln.strip()]
         return [r for r in rows if not r.pop("pr", False)]
+
+    def viewer_login(self):
+        """The login of the token gh writes with ('' when the token has no user — an App installation)."""
+        try:
+            return self._gh(["gh", "api", "user", "--jq", ".login"]).strip().lower()
+        except GhError:
+            return ""
 
     def issue_row(self, n):
         """One Issue's REST row by number (`GET /repos/{o}/{r}/issues/N` — never an index)."""
@@ -341,7 +351,8 @@ class FakeGh(object):
                 "stateReason": (it.get("stateReason") or "").upper().replace(" ", "_"),
                 "labels": [lb["name"] if isinstance(lb, dict) else lb for lb in it.get("labels", [])],
                 "created_at": it.get("created_at"), "updated_at": it.get("updated_at") or it.get("created_at"),
-                "repo": it.get("repo")}
+                "repo": it.get("repo"),
+                "author": ((it.get("user") or {}).get("login") or "").lower()}
 
     def issue_rows(self, label=None, state="all", since=None):
         self.calls.append(("issue_rows", label, state, since))
@@ -359,6 +370,10 @@ class FakeGh(object):
                 continue
             rows.append(r)
         return rows
+
+    def viewer_login(self):
+        self.calls.append(("viewer_login",))
+        return (self.fx.get("viewer") or "guild-bot").lower()
 
     def issue_row(self, n):
         self.calls.append(("issue_row", n))
@@ -596,7 +611,8 @@ class FakeGhWrite(object):
                 "number": n, "title": title, "body": body, "state": "OPEN",
                 "labels": [{"name": l} for l in labels], "comments": [], "timeline": [],
                 "created_at": self._now(), "updated_at": self._now(),
-                "author_association": "OWNER"}          # the engine writes with the operator's token
+                "author_association": "OWNER",           # the engine writes with the operator's token
+                "user": {"login": self.actor}}
             if self.fake.index_lag is not None:
                 self.fake.unindexed[str(n)] = self.fake.index_lag     # search sees it only later (K4r3-B1)
         return {"number": n, "html_url": "https://github.com/%s/issues/%d" % (self.fake.repo, n)}

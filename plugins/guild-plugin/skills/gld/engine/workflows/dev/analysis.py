@@ -83,7 +83,8 @@ def unquoted(body):
     close grammar as an example, or pasting someone else's text, does not write a sprint decision.
     K4r4-m6: a block is ignored only when its OPENING line sits inside a fence. A fence that never closes
     (a pasted log cut short) ends at the next line that opens a plan-decision block — sprint plan appends
-    its block at the end of the body, after whatever the member pasted — or at EOF."""
+    its block at the end of the body, after whatever the member pasted — or at EOF. K4r5-m3: not at a block
+    that opens right after the fence line (nothing between) — that block is the fenced example."""
     lines = (body or "").split("\n")
     out, i = [], 0
     while i < len(lines):
@@ -92,8 +93,11 @@ def unquoted(body):
             fence = st[:3]
             close = next((j for j in range(i + 1, len(lines)) if lines[j].lstrip().startswith(fence)), None)
             if close is None:
-                close = next((j - 1 for j in range(i + 1, len(lines)) if lines[j].lstrip().startswith(PLAN_OPEN)),
-                             len(lines) - 1)
+                # K4r5-m3: the fence ends right before a block-opening line only when something non-blank stands
+                # between the fence and that line (a pasted log, then sprint plan's appended block); a block that
+                # opens RIGHT after the fence is the fenced example itself and stays blanked
+                close = next((j - 1 for j in range(i + 1, len(lines)) if lines[j].lstrip().startswith(PLAN_OPEN)
+                              and any(lines[k].strip() for k in range(i + 1, j))), len(lines) - 1)
             out.extend([""] * (close - i + 1))
             i = close + 1
             continue

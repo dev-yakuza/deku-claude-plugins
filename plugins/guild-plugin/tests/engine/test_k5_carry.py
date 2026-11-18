@@ -97,5 +97,158 @@ class Item16DesignResume(unittest.TestCase):
         self.assertEqual((n, created), (8, False))
 
 
+def orphan_h(case):
+    """Probe C of r4: #9 lands, its reply is a 502 and a person removed its label → abandoned → orphan stop."""
+    h = stale(split_h(case))
+    orig = h.w.create_issue
+
+    def drops_label(title, body, labels=()):
+        r = orig(title, body, labels)
+        if r["number"] == 9:
+            h.gh.fx["issues"]["9"]["labels"] = [{"name": "guild:analyze"}]
+            raise GhError("HTTP 502: Bad Gateway")
+        return r
+    h.w.create_issue = drops_label
+    D.run(h.p)
+    h.w.create_issue = orig
+    age_creates(h)
+    resume(h)
+    r = D.run(h.p)
+    case.assertIn("outside the engine's journal: 7-ui → #9", r.line)
+    return h
+
+
+def outsider_copy(h, n, src=9):
+    h.gh.fx["issues"][str(n)] = {"number": n, "title": "spam", "body": "copy:\n" + h.gh.fx["issues"][str(src)]["body"],
+                                 "state": "OPEN", "labels": [], "comments": [], "timeline": [],
+                                 "author_association": "NONE", "user": {"login": "mallory"},
+                                 "created_at": "2026-11-16T00:00:00Z", "updated_at": "2026-11-16T00:00:00Z"}
+
+
+class Item17Orphans(unittest.TestCase):
+    def test_outsider_copy_of_a_closed_orphan_does_not_stop_the_parent(self):
+        h = orphan_h(self)
+        h.gh.fx["issues"]["9"].update(state="CLOSED", stateReason="NOT_PLANNED")
+        outsider_copy(h, 20)
+        resume(h)
+        r = D.run(h.p)
+        self.assertEqual(r.kind, StageResult.SPLIT)
+        self.assertNotIn("#20", r.line or "")
+
+    def test_outsider_copy_is_never_the_candidate_even_while_the_orphan_is_open(self):
+        h = orphan_h(self)
+        outsider_copy(h, 20)
+        resume(h)
+        r = D.run(h.p)
+        self.assertIn("7-ui → #9", r.line)
+        self.assertNotIn("#20", r.line)
+
+    def test_a_settled_orphan_leaves_the_scan(self):
+        h = orphan_h(self)
+        h.gh.fx["issues"]["9"].update(state="CLOSED", stateReason="NOT_PLANNED")
+        resume(h)
+        self.assertEqual(D.run(h.p).kind, StageResult.SPLIT)
+        h.gh.calls[:] = []
+        self.assertEqual(h.p.writer.orphan_creates("7-"), [])
+        self.assertFalse([c for c in h.gh.calls if c[0] == "issue_rows"])    # no unfiltered list read any more
+
+    def test_the_scan_window_closes(self):
+        h = orphan_h(self)
+        for e in h.journal.entries:
+            if e.get("kind") == "done" and e.get("abandoned"):
+                e["t"] = "2026-11-01T00:00:00Z"
+        h.gh.calls[:] = []
+        self.assertEqual(h.p.writer.orphan_creates("7-"), [])
+        self.assertFalse([c for c in h.gh.calls if c[0] == "issue_rows"])
+
+    def test_lost_reply_never_adopts_a_copy_by_another_login(self):
+        from guildcore.adapters.gh import FakeGh, FakeGhWrite
+        from guildcore.records.write import GhWriter
+        gh = FakeGh({"repo": "o/r", "issues": {"7": {"number": 7, "title": "p", "body": "", "state": "OPEN"}}})
+        w = GhWriter(gh, FakeGhWrite(gh), sleep=lambda s: None)
+        gh.fx["issues"]["5"] = {"number": 5, "title": "x", "body": "<!-- guild:create-token abc -->", "state": "OPEN",
+                                "labels": [{"name": "guild:child"}], "user": {"login": "mallory"},
+                                "created_at": "2026-11-16T00:00:00Z", "updated_at": "2026-11-16T00:00:00Z"}
+        self.assertIsNone(w.find_by_token("abc", "guild:child", None, reads=1))
+        gh.fx["issues"]["5"]["user"] = {"login": "guild-bot"}
+        self.assertEqual(w.find_by_token("abc", "guild:child", None, reads=1), 5)
+
+
+class Item18Fence(unittest.TestCase):
+    def test_block_right_after_an_unclosed_fence_is_the_example(self):
+        from workflows.dev import analysis as AN
+        body = ("Implement the close form. Example of what sprint plan writes:\n```\n"
+                "<!-- guild:plan-decision -->\n- Goal: 범위? → close: not_planned — 예시\n<!-- /guild:plan-decision -->\n")
+        self.assertEqual(AN.plan_decisions(body), [])
+
+    def test_block_after_pasted_content_in_an_unclosed_fence_is_read(self):
+        from workflows.dev import analysis as AN
+        body = ("log:\n```\nerror at foo.dart:12\n\n"
+                "<!-- guild:plan-decision -->\n- Goal: 범위? → close: not_planned — 예시\n<!-- /guild:plan-decision -->\n")
+        self.assertEqual(len(AN.plan_decisions(body)), 1)
+
+
+class R5M4RestartCheck(unittest.TestCase):
+    def _w(self):
+        import tempfile
+        from _k1 import Clock
+        from guildcore.adapters.gh import FakeGh, FakeGhWrite
+        from guildcore.journal import Journal
+        from guildcore.records.write import GhWriter
+        d = tempfile.mkdtemp()
+        clock = Clock("2026-11-16T00:00:00Z")
+        gh = FakeGh({"repo": "o/r", "issues": {"7": {"number": 7, "title": "p", "body": "", "state": "OPEN",
+                                                     "comments": [], "labels": []}}})
+        fw = FakeGhWrite(gh)
+        j = Journal(d, 7, clock)
+        return gh, fw, GhWriter(gh, fw, journal=j, sleep=lambda s: None, clock=clock), j
+
+    def test_found_comment_is_recorded_as_own(self):
+        gh, fw, w, j = self._w()
+        orig = fw.create_comment
+
+        def lands_then_dies(issue, body):
+            orig(issue, body)
+            raise KeyboardInterrupt()
+        fw.create_comment = lands_then_dies
+        with self.assertRaises(KeyboardInterrupt):
+            w.create_comment(7, "<!-- guild:needs-human -->\nx")
+        self.assertEqual(j.own_comment_ids(), [])
+        self.assertEqual(j.verify_pending(w.verify_intent), [])
+        cid = gh.fx["issues"]["7"]["comments"][0]["id"]
+        self.assertIn(cid, j.own_comment_ids())
+
+    def test_unkeyed_create_is_never_a_redo(self):
+        gh, fw, w, j = self._w()
+        orig = fw.create_issue
+
+        def lands_then_dies(title, body, labels=()):
+            orig(title, body, labels)
+            raise KeyboardInterrupt()
+        fw.create_issue = lands_then_dies
+        with self.assertRaises(KeyboardInterrupt):
+            w.issue_create("t", "body")
+        self.assertEqual(j.verify_pending(w.verify_intent), [])        # found by its body hash — recorded
+        self.assertIn(8, [e["number"] for e in j.own_issues()])
+
+    def test_unkeyed_create_absent_and_young_is_ambiguous(self):
+        from guildcore.adapters.gh import GhWriteError
+        gh, fw, w, j = self._w()
+        fw.create_issue = lambda *a, **k: (_ for _ in ()).throw(KeyboardInterrupt())
+        with self.assertRaises(KeyboardInterrupt):
+            w.issue_create("t", "body")
+        with self.assertRaises(GhWriteError) as cm:
+            j.verify_pending(w.verify_intent)
+        self.assertEqual(cm.exception.kind, "ambiguous")
+
+    def test_pr_create_found_is_recorded_not_redone(self):
+        gh, fw, w, j = self._w()
+        j.intent(op="pr:create", target="feat/7", body_sha256="x", entry_id=None, stage=None, step_id=None, attempt=0)
+        self.assertEqual(len(j.verify_pending(w.verify_intent)), 1)    # absent: left to the stage's pr_create (find first)
+        gh.fx.setdefault("prs", []).append({"number": 30, "headRefName": "feat/7", "state": "OPEN"})
+        self.assertEqual(j.verify_pending(w.verify_intent), [])
+        self.assertIn(30, [e.get("number") for e in j.entries if e.get("op") == "pr"])
+
+
 if __name__ == "__main__":
     unittest.main()

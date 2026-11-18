@@ -183,7 +183,21 @@ class GhWriter(object):
         intent carries (K1-M2)."""
         op, tgt = it.get("op"), it.get("target")
         if op == "comment:create":
-            return self._find_comment(int(tgt), it.get("marker"), it.get("body_sha256")) is not None
+            # K4r5-m4: a found comment is RECORDED as the engine's own (its id) — under a bot / App token whose
+            # association is not a member's, `markers.trusted` would otherwise drop it and `upsert` make another
+            c = self._find_comment(int(tgt), it.get("marker"), it.get("body_sha256"))
+            if c is None:
+                return False
+            if self.journal is not None and c.get("id") not in self.journal.own_comment_ids():
+                self.journal.own_write("comment", comment_id=c["id"], target=int(tgt), recovered=True)
+            return True
+        if op == "pr:create":
+            # K4r5-m4: never a blind redo — found (an open PR on this head) → recorded; not found → False, and the
+            # stage's own `pr_create` (which looks the head up first) is the only path that sends it again
+            hits = [h for h in self.read.pr_for_head(tgt) if not h.get("isCrossRepository")]
+            if hits and self.journal is not None:
+                self.journal.own_write("pr", number=int(hits[0]["number"]), head=tgt, recovered=True)
+            return bool(hits)
         if op in ("comment:patch", "comment:append", "decisions:append", "decisions:amend"):
             issue = it.get("issue_n")
             c = self._comment(issue, int(tgt) if str(tgt).isdigit() else tgt) if issue else None
@@ -198,19 +212,39 @@ class GhWriter(object):
             return all(a in now for a in it.get("add") or []) and not any(r in now for r in it.get("remove") or [])
         if op == "pr:body":
             return _sha(self.read.pr(int(tgt)).get("body") or "") == it.get("body_sha256")
+        if op == "issue:create" and not it.get("token"):
+            return self._resolve_unkeyed(it)
         if op == "issue:create":
             # K4r3-B1: the journaled number, else the create token through the REST list (never search).
             # K4r4-m1: a found create is RECORDED with its number here (else the closed intent would hide
             # it from `resolve_creates` and the next `issue_create` would POST again); a settled absent one
             # is closed `abandoned`; a young absent one raises `ambiguous` — never False, because the
             # restart protocol's "redo" would be a second POST while the outcome is unknown.
-            if not it.get("token"):
-                return False
             if any(e.get("token") == it["token"] for e in self._ij().own_issues()):
                 return True
             self._resolve_one(it)
             return True
         return False
+
+    def _resolve_unkeyed(self, it):
+        """K4r5-m4: an unkeyed create's intent at restart is never a redo (a second POST while its outcome is
+        unknown). Its body hash is looked up in the REST list since the intent (engine-written rows only):
+        found → recorded; absent and SETTLE_S old → `abandoned`; absent and younger → `ambiguous`."""
+        j = self._ij()
+        rows = self._call("issue:find", lambda: self.read.issue_rows(label=None, state="all",
+                                                                      since=self._since(it.get("t"))))
+        for r in sorted(rows or [], key=lambda r: int(r["number"])):
+            if _sha(r.get("body") or "") == it.get("body_sha256") and self._by_engine(r):
+                j.own_write("issue", key=None, number=int(r["number"]), token=None, recovered=True)
+                j.done(it, number=int(r["number"]))
+                return True
+        age = _age_s(it.get("t"), j._now())
+        if age is not None and age >= self.SETTLE_S:
+            j.done(it, abandoned=True)
+            return True
+        raise GhWriteError("issue:create", "an Issue create (%s) may have landed and is not in the issue list yet — "
+                           "nothing is re-created while that is unknown; resume after %s"
+                           % (_one_line(it.get("target"), 60), self.settle_at(it)), "ambiguous")
 
     def _records(self, issue):
         """Record candidates only (K2-M5): never PATCH a stranger's comment that carries a marker."""
@@ -462,6 +496,22 @@ class GhWriter(object):
             return None
         return _iso(ts - self.SINCE_MARGIN_S)
 
+    def _viewer(self):
+        """The engine token's login (cached; '' when unknown — an App token has no user)."""
+        if getattr(self, "_viewer_login", None) is None:
+            fn = getattr(self.read, "viewer_login", None)
+            try:
+                self._viewer_login = (fn() or "").lower() if fn else ""
+            except GhError:
+                self._viewer_login = ""
+        return self._viewer_login
+
+    def _by_engine(self, row):
+        """K4r5-m2: a token-holding row counts only when the engine's own login wrote it (a person who copies a
+        public token cannot make their Issue the engine's). Unknown engine login → not checked."""
+        me = self._viewer()
+        return not me or (row.get("author") or "").lower() == me
+
     def find_by_token(self, token, label, since, reads=None):
         """The Issue whose body carries the create token — the REST issues LIST (database-backed:
         `GET /repos/{o}/{r}/issues?labels=…&since=…`, all pages), each candidate confirmed by number;
@@ -472,7 +522,7 @@ class GhWriter(object):
             rows = self._call("issue:find", lambda: self.read.issue_rows(label=label, state="all", since=since))
             for r in sorted((r for r in rows or [] if token in (r.get("body") or "")), key=lambda r: int(r["number"])):
                 row = self._call("issue:row", lambda: self.read.issue_row(int(r["number"])))
-                if token in (row.get("body") or ""):
+                if token in (row.get("body") or "") and self._by_engine(row):
                     return int(row["number"])
             if i + 1 < reads:
                 self.sleep(RETRY_DELAY_S * (2 ** i))
@@ -516,30 +566,50 @@ class GhWriter(object):
                            "(an absent create is settled as never landed %d minutes after it was sent)"
                            % (it.get("key"), self.settle_at(it), self.SETTLE_S // 60), "ambiguous")
 
+    ORPHAN_SCAN_S = 86400     # an abandoned create is looked for as an orphan for a day after it was given up
+
     def orphan_creates(self, prefix):
         """K4r4-m2: a create the engine gave up on (`abandoned` after SETTLE_S) that landed after all — a late
         server-side completion, a `guild:child` label a person removed during the pause, a host clock far
         ahead. Its token is looked up in ONE unfiltered REST list read (no label: a removed label must not
-        hide it) since the oldest such intent; each hit is confirmed by number. Returns [(key, number)] of
-        those still OPEN (a person closed it → settled) and not journaled as this engine's child. No read at
-        all when there is no abandoned create under `prefix`."""
+        hide it; `state=all`) since the oldest such intent. Returns [(key, number)] of the orphans still OPEN.
+        K4r5-m2: per token only the LOWEST-numbered row carrying it is the candidate (a copy can only be made
+        after the original is public — `find_by_token`'s rule), and only when the engine's own login wrote it;
+        a candidate a person closed is settled (journaled `orphan-settled`, out of every later scan), and an
+        abandoned create is scanned for ORPHAN_SCAN_S after it was given up, then settled — the scan window
+        closes. No read at all when no abandoned create under `prefix` is still in its window."""
         j = self._ij()
         known = set(e.get("token") for e in j.own_issues())
+        settled = set(e.get("token") for e in j.entries if e.get("kind") == "write" and e.get("op") == "orphan-settled")
         closed = dict((key_of_done(e), e) for e in j.entries if e.get("kind") == "done" and e.get("abandoned"))
-        aband = [it for it in j.entries if it.get("kind") == "intent" and it.get("op") == "issue:create"
-                 and it.get("token") and it.get("token") not in known
-                 and str(it.get("key") or "").startswith(prefix) and key_of_done(it) in closed]
+        now = j._now()
+        aband = []
+        for it in j.entries:
+            if not (it.get("kind") == "intent" and it.get("op") == "issue:create" and it.get("token")
+                    and it["token"] not in known and it["token"] not in settled
+                    and str(it.get("key") or "").startswith(prefix) and key_of_done(it) in closed):
+                continue
+            age = _age_s(closed[key_of_done(it)].get("t"), now)
+            if age is not None and age > self.ORPHAN_SCAN_S:
+                j.own_write("orphan-settled", key=it.get("key"), token=it["token"], why="scan window closed")
+                continue
+            aband.append(it)
         if not aband:
             return []
         since = min((it.get("since") or "") for it in aband) or None
-        rows = self._call("issue:find", lambda: self.read.issue_rows(label=None, state="open", since=since))
+        rows = self._call("issue:find", lambda: self.read.issue_rows(label=None, state="all", since=since))
         out = []
         for it in aband:
             for r in sorted((r for r in rows or [] if it["token"] in (r.get("body") or "")), key=lambda r: int(r["number"])):
                 row = self._call("issue:row", lambda: self.read.issue_row(int(r["number"])))
-                if it["token"] in (row.get("body") or "") and (row.get("state") or "").upper() != "CLOSED":
+                if it["token"] not in (row.get("body") or "") or not self._by_engine(row):
+                    continue                          # a copy by someone else is never the candidate
+                if (row.get("state") or "").upper() == "CLOSED":
+                    j.own_write("orphan-settled", key=it.get("key"), token=it["token"], number=int(row["number"]),
+                                why="closed by a person")
+                else:
                     out.append((str(it.get("key")), int(row["number"])))
-                    break
+                break                                 # the lowest engine-written holder only
         return sorted(set(out), key=lambda x: x[1])
 
     def issue_create(self, title, body, labels=(), key=None, key_kind="slice-key", members=None):
