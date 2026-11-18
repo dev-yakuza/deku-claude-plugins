@@ -136,6 +136,11 @@ class KickoffCoercions(unittest.TestCase):
         self.assertEqual(k.cast["participation"], [])
         self.assertEqual(k.cast["gates"], ["security"])
 
+    def test_cast_role_in_both_lists_once(self):
+        k = AN.coerce_kickoff(kickoff(cast={"participation": ["designer"], "gates": ["designer"]}).fields,
+                              main_root(self), {}, [], [], [], ["designer"])
+        self.assertEqual(k.cast["participation"] + k.cast["gates"], ["designer"])
+
     def test_anchor_must_be_tracked_and_inside(self):
         root = main_root(self)
         self.assertTrue(AN.verify_anchor(ANCHOR_OK, root, {}))

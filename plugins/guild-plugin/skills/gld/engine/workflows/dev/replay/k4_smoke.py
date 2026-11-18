@@ -70,7 +70,7 @@ def main(argv=None):
     def run_role(call):
         spec = PO.role_spec(call, ISSUE, ctx.clone, cfg, base="HEAD", unattended=True)
         spec.model = SM.QWEN
-        spec.timeout_s, spec.budget_usd = 1800, 100.0
+        spec.timeout_s, spec.budget_usd = 600, 100.0           # run 1: the explorer hit 1800 s on qwen — partial path
         t0 = time.time()
         r = runner.run_role(spec)
         calls["roles"].append({"role": call.role, "task": call.task, "status": r.status, "line": r.line,
@@ -78,6 +78,7 @@ def main(argv=None):
         return r
 
     def judge(spec):
+        tier = spec.model
         spec.model, spec.budget_usd = SM.QWEN, 100.0
         t0 = time.time()
         try:
@@ -86,7 +87,8 @@ def main(argv=None):
             calls["judges"].append({"group": spec.group, "error": "%s: %s" % (type(e).__name__, e),
                                     "secs": round(time.time() - t0, 1)})
             raise
-        calls["judges"].append({"group": spec.group, "choice": d.choice, "unsure": d.unsure, "coerced": d.coerced,
+        d.by = "judge:%s" % tier            # run 1: `judge:qwen3.8:27b` is not a §2.5 `by:` tier — record the tier it stands in for
+        calls["judges"].append({"group": spec.group, "model": SM.QWEN, "choice": d.choice, "unsure": d.unsure, "coerced": d.coerced,
                                 "secs": round(time.time() - t0, 1), "fields": d.fields})
         return d
     p = B.Ports(ISSUE, gh, writer, DecisionWriter(writer, ISSUE, clock), clock, cfg, ctx.clone, unattended=True,

@@ -342,7 +342,7 @@ def coerce_kickoff(fields, root, sources, net_lines, plan_lines, premise_unmet_d
         if r not in gates:
             gates.append(r)
             k.coerced.append("gate %s unresolved → convened" % r)
-    k.cast = {"participation": sorted(set(part)), "gates": sorted(set(gates)),
+    k.cast = {"participation": sorted(set(part) - set(gates)), "gates": sorted(set(gates)),   # K4 smoke: no `designer, designer`
               "skipped": [str(s)[:120] for s in cast.get("skipped") or []][:10]}
     po = f.get("po") or {}
     k.po = {"convene": bool(po.get("convene")) and "product-owner" in installed, "reason": str(po.get("reason") or "")}
