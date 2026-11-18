@@ -107,6 +107,8 @@ class Ports(object):
         self.branch, self.base = branch, base
         self.impl_files = impl_files      # developer result.json `impl_files` (execute's ctx)
         self.git_dir = git_dir
+        self.valves = {}                  # K5: the soft valves in force (guildcore.valves.effective), read at run start
+        self.directives = []              # K5: attended `dev note` texts of this Issue (by: human, point: directive)
         # the procedure replay's injection list (§10.2-2): legacy values that are not the
         # engine's to decide (loop-back reason/signature …). Empty in every live run.
         self.inject = {}
@@ -133,6 +135,10 @@ class Ports(object):
         return self.cfg("language", "en") or "en"
 
     def engine_cfg(self, key, default=None):
+        from guildcore import valves as VALVES
+        over = VALVES.engine_overlay(getattr(self, "valves", None))
+        if key in over:                   # §10.5: a valve beats the committed config
+            return over[key]
         eng = getattr(self.config, "engine", None)
         if isinstance(eng, dict) and key in eng:
             return eng[key]

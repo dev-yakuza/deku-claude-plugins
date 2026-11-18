@@ -6,11 +6,14 @@
     gld_engine.py status board [section] [--html]      /gld monitoring snapshot
     gld_engine.py status running [--all-repos]         live engine locks (downgrade runbook ①)
     gld_engine.py status directives --open             human directive blocks (runbook ①b)
+    gld_engine.py dev run --issue N [--attended|--unattended] [--detach] [--only STAGE]
+    gld_engine.py dev wait|answer|note|hold …          the attended driver's channel (dev.md)
+    gld_engine.py dev valve set|clear|halt|resume|show soft valves and the kill switch (§10.5)
+    gld_engine.py dev cost|health|grade|unattended-log measurement and records
     gld_engine.py version
 
-Milestones K0–K1: the CLI exposes only the read-only `status` workflow. K1's executor
-(`guildcore.roles/judges/…`, verified GitHub writes) has no CLI entry yet — the `dev` workflow and
-its drivers arrive in K2–K5. Nothing in the plugin invokes this file.
+K5: the `dev` workflow (workflows/dev/cli.py) — the attended driver (commands/dev.md), the supervisor
+and batch call it (§2.4).
 
 This shim uses only Python 3.6 syntax up to the version check (R6C-m4): an interpreter the
 engine cannot run on exits 6 with `halted: env python` before any engine module is imported.
@@ -47,7 +50,10 @@ def main(argv=None):
     if wf == "status":
         from workflows.status import cli
         return cli.main(rest)
-    sys.stderr.write("unknown workflow %r — available in this build: status\n" % wf)
+    if wf == "dev":
+        from workflows.dev import cli as dev_cli
+        return dev_cli.main(rest)
+    sys.stderr.write("unknown workflow %r — available in this build: status, dev\n" % wf)
     return 64
 
 

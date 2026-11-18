@@ -182,12 +182,20 @@ def spec(p, group, brief_parts, stage, step, point=None, model=None, cwd=None, n
     layer = LAYER.get(group, "SJ")
     tools = TOOLS.get(group, "")
     m = model
+    valves = dict(getattr(p, "valves", None) or {}) if p is not None else {}
+    if m is None and valves.get("judges.%s.model" % group):
+        m = valves["judges.%s.model" % group]                    # §10.5 tier valve
     if m is None and p is not None:
         m = ((p.engine_cfg("judges", {}) or {}).get(group) or {}).get("model")
+    notes = [d for d in (getattr(p, "directives", None) or []) if d.get("stage") in (None, stage)] if p else []
+    if notes:                                                     # §2.6 attended `dev note` — a human directive
+        brief_parts = list(brief_parts) + [("directive", "Human directives for this stage (attended `dev note`, "
+                                            "by: human — they take precedence over your own reading):\n" +
+                                            "\n".join("- %s: %s" % (d.get("id"), d.get("text")) for d in notes))]
     return JudgeSpec(group, m or TIERS[group], schema(group), system_parts(p, group), brief_parts,
                      point=point or group, tools=tools, no_elide=NO_ELIDE.get(group, ()),
                      choice_key=CHOICE.get(group, "verdict"), unsure_default=UNSURE[group],
                      coercions=COERCIONS.get(group, ()), budget_usd=BUDGET[layer],
                      cap_chars=CAPS[layer], needs_more_fn=needs_more_fn,
                      cwd=cwd if tools else None, issue=p.issue if p else None, stage=stage,
-                     step=step, plugin=p.plugin if p else None, effort=EFFORT.get(group))
+                     step=step, plugin=p.plugin if p else None, effort=EFFORT.get(group), valves=valves)

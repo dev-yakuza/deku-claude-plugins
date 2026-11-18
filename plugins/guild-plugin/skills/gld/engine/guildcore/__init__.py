@@ -15,4 +15,4 @@ permission rules, runner, scope check), `judges`, `ask`, `pause`, `journal` (wri
 engine, and `gld_engine.py` exposes no `dev` workflow yet (K5 wires the drivers).
 """
 
-ENGINE_MILESTONE = "K1"
+ENGINE_MILESTONE = "K5"

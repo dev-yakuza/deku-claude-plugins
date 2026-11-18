@@ -1214,8 +1214,20 @@ def fill_handoff(p, wt, base=None, default_branch=None):
     return p
 
 
+def directives_of(p, stage=None):
+    """K5 (§2.6): the attended `dev note` directives of this Issue — `by: human`, `point: directive` blocks not
+    resolved by a later block — for `stage` (or any stage)."""
+    from guildcore.decisions import DecisionLog
+    from guildcore.records import markers
+    from workflows.dev.stages import base as B
+    log = DecisionLog.load(B.records(p))
+    gone = log.resolved_ids()
+    return [{"id": b.id, "stage": b.get("stage"), "text": markers.unescape(b.get("reason") or "")}
+            for b in log.directives() if b.id not in gone and b.get("stage") in (None, stage)]
+
+
 def fsm_factory(main, config, clock, gh, gh_write, runner, judge_runner, unattended=True, push_url=None,
-                host=None, plugin=None, env=None, events=None, local_dev_py=None):
+                host=None, plugin=None, env=None, events=None, local_dev_py=None, valves=None):
     """`ports_for(issue, stage, variant=None)` for `workflows.dev.fsm.Driver`: analyze / design /
     children (and the FSM's own reads) on the main checkout, read-only; execute through
     `live_execute` (its own worktree) with the design specs installed from the engine's spec store;
@@ -1267,6 +1279,9 @@ def fsm_factory(main, config, clock, gh, gh_write, runner, judge_runner, unatten
         p.spec_store = os.path.join(common, "guild", "engine", str(int(n)), "specs")
         p.events = events
         p.config_note = note
+        p.valves = dict(valves or {})                  # K5 §10.5: read once at run start by the caller
+        if stage is not None:
+            p.directives = directives_of(p, stage)
         if stage == "execute" and p.root and os.path.realpath(p.root) != os.path.realpath(main):
             installed, _kept = RO.install(p.spec_store, p.root, n)
             if installed:

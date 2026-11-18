@@ -94,8 +94,11 @@ class Driver(object):
     """`ports_for(issue, stage, variant=None) -> Ports` (live: workflows.dev.ports.fsm_ports; tests: fakes).
     `stages` overrides the stage functions (tests)."""
 
-    def __init__(self, ports_for, unattended=True, plugin=None, stages=None, events=None):
+    def __init__(self, ports_for, unattended=True, plugin=None, stages=None, events=None, boundary=None):
         self.ports_for = ports_for
+        # K5: `boundary(n) -> Outcome | None`, asked before every stage run (also a child's in 2b) — the kill
+        # switch, the active plugin version and an attended `hold` stop the run at a step boundary (§2.4, §10.3)
+        self.boundary = boundary
         self.unattended = unattended
         self.plugin = plugin
         self.stages = stages or {}
@@ -179,6 +182,10 @@ class Driver(object):
             runs += 1
             if runs > MAX_STAGE_RUNS:
                 return self._defect(n, "engine stage loop limit (%d runs)" % MAX_STAGE_RUNS)
+            if self.boundary is not None:
+                stop = self.boundary(n)
+                if stop is not None:
+                    return stop
             issue = p0.gh.issue(n)
             state = ST.derive(issue.get("labels"))
             stage = state.stage
