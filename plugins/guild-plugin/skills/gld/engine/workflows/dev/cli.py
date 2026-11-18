@@ -9,7 +9,7 @@
     dev unattended-log --issue N
     dev cost [--by role|who|model|tier|local|arm|kind|stage|endpoint] [--issue N]
     dev health [--first-sprint] [--sprint T]
-    dev grade --sprint T [--import CSV] [--out DIR]
+    dev grade --sprint T [--import CSV] [--out DIR] [--grader [--pass 2]]
 
 `run` (every mode) before any stage: the kill switch (`HALT` → exit 6 `halted: kill-switch`), the ACTIVE
 plugin version (§10.3: mismatch → exit 6 `halted: plugin version mismatch`; none listed → exit 6
@@ -60,6 +60,7 @@ class Deps(object):
         self.spawn = W.start_detached
         self.driver_cls = None                  # tests: a fake Driver class
         self.ports_for = None                   # tests: a ready `ports_for`
+        self.grader_judge = None                # tests: a fake judge for `dev grade --grader` (no model call)
         self._ports = None                      # the run's `ports_for` (the boundary's budget ask writes through it)
 
     # git
@@ -942,6 +943,8 @@ def parser():
     g.add_argument("--issues")
     g.add_argument("--import", dest="import_csv")
     g.add_argument("--out")
+    g.add_argument("--grader", action="store_true")              # §9.5 the 2-call grader (K5r4)
+    g.add_argument("--pass", dest="pass_no", type=int, choices=(1, 2), default=1)
     return ap
 
 

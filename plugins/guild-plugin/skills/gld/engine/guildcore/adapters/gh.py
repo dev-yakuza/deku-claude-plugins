@@ -42,6 +42,9 @@ _READ_FORMS = (
     # K4r3-B1: the REST issues LIST (database-backed, never the search index — `gh issue list --label`
     # is GraphQL IssueSearch) and the REST row by number; both are reads (GET, no -X / -f)
     re.compile(r"^gh api --paginate repos/[^/ ]+/[^/ ]+/issues\?[^ ]+ --jq "),
+    # K5r4 (`dev grade` post-hoc evidence, §9.5): a PR's reviews (REST list) and its diff
+    re.compile(r"^gh api --paginate repos/[^/ ]+/[^/ ]+/pulls/\d+/reviews( |$)"),
+    re.compile(r"^gh pr diff \d+( |$)"),
 )
 _WRITE_FLAGS = re.compile(r"(^| )(-X|--method|-f|-F|--field|--raw-field|--input|"
                           r"--add-label|--remove-label|--body|--body-file)( |=|$)")
@@ -158,6 +161,14 @@ class GhCli(object):
             owner = (repo.get("owner") or {}).get("login") or ""
             rows.append({"number": r.get("number"), "repo": "%s/%s" % (owner, repo.get("name") or "")})
         return rows
+
+    def pr_reviews(self, n):
+        """`dev grade` post-hoc evidence (§9.5): [{state, body, user}] of a PR's reviews (REST list, not search)."""
+        return self._paged("repos/%s/pulls/%d/reviews" % (self.owner_repo(), int(n)))
+
+    def pr_diff(self, n):
+        """`dev grade` post-hoc evidence (§9.5): the PR's diff (the merged change, when merged)."""
+        return self._gh(["gh", "pr", "diff", str(int(n))] + self._repo_args())
 
     def pr_state(self, n):
         """{state, mergedAt} of a PR (dev 2b step 1b, 2c)."""
@@ -314,6 +325,14 @@ class FakeGh(object):
     def closed_by_prs(self, n):
         self.calls.append(("closed_by_prs", n))
         return [dict(r) for r in self._issue(n).get("closed_by_prs", [])]
+
+    def pr_reviews(self, n):
+        self.calls.append(("pr_reviews", n))
+        return list(self.fx.get("reviews", {}).get(str(int(n)), []))
+
+    def pr_diff(self, n):
+        self.calls.append(("pr_diff", n))
+        return self.fx.get("diffs", {}).get(str(int(n)), "")
 
     def pr_state(self, n):
         self.calls.append(("pr_state", n))
