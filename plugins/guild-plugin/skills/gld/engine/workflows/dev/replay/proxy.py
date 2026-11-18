@@ -197,6 +197,15 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
     def _forward(self, raw):
         url = self.server.upstream.rstrip("/") + self.path
+        if getattr(self.server, "model_override", None):
+            # K5 smoke: every tier name the engine asks for (sonnet / opus / haiku) goes to the one local model
+            try:
+                body = json.loads(raw.decode("utf-8"))
+                if isinstance(body, dict) and "model" in body:
+                    body["model"] = self.server.model_override
+                    raw = json.dumps(body).encode("utf-8")
+            except ValueError:
+                pass
         req = urllib.request.Request(url, data=raw, method="POST")
         for k, v in self.headers.items():
             if k.lower() not in ("host", "content-length", "connection", "accept-encoding"):
@@ -229,7 +238,7 @@ class Server(socketserver.ThreadingMixIn, http.server.HTTPServer):
 
 
 def make_server(port, logdir, mode="forward", upstream="http://127.0.0.1:11434", script=None,
-                ratelimit=None, status429=0):
+                ratelimit=None, status429=0, model_override=None):
     if mode == "forward" and not _loopback(upstream):
         raise SystemExit("proxy: upstream must be a loopback address (%s)" % upstream)
     os.makedirs(logdir, exist_ok=True)
@@ -239,6 +248,7 @@ def make_server(port, logdir, mode="forward", upstream="http://127.0.0.1:11434",
     srv.ratelimit = ratelimit
     srv.status429 = status429
     srv.n_main = 0
+    srv.model_override = model_override
     return srv
 
 

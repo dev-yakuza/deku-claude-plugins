@@ -31,7 +31,6 @@ on an `ask` or `terminal` event; `answer` records the person's choice (the drive
 import argparse
 import json
 import os
-import subprocess
 import sys
 import time
 
@@ -65,30 +64,51 @@ class Deps(object):
 
     # git
     def toplevel(self):
-        out = subprocess.run(["git", "rev-parse", "--show-toplevel"], cwd=self.cwd, stdout=subprocess.PIPE,
-                             stderr=subprocess.PIPE)
-        if out.returncode != 0:
+        from guildcore.adapters import git as G
+        out = G.run(self.cwd, "rev-parse", "--show-toplevel", check=False).decode().strip()
+        if not out:
             raise RuntimeError("not inside a git repository")
-        return out.stdout.decode().strip()
+        return out
 
     def common(self):
         from workflows.status.running import git_common_dir
         return git_common_dir(self.cwd)
 
     def push_url(self, main):
-        p = subprocess.run(["git", "remote", "get-url", "--push", "origin"], cwd=main, stdout=subprocess.PIPE,
-                           stderr=subprocess.PIPE)
-        return p.stdout.decode().strip() or None if p.returncode == 0 else None
+        from guildcore.adapters import git as G
+        return G.run(main, "remote", "get-url", "--push", "origin", check=False).decode().strip() or None
 
     def clock(self):
         from guildcore.adapters.clock import Clock
         return Clock()
 
+    def _fixture(self):
+        """Tests and the local smoke only: `GLD_ENGINE_TEST=1` + `GLD_ENGINE_GH_FIXTURE=<json>` serve a FILE-backed
+        fake GitHub (written back at the end of the command) — never honoured outside the test switch."""
+        if self.env.get("GLD_ENGINE_TEST") == "1" and self.env.get("GLD_ENGINE_GH_FIXTURE"):
+            if getattr(self, "_fake", None) is None:
+                from guildcore.adapters.gh import FakeGh
+                self._fake = FakeGh(self.env["GLD_ENGINE_GH_FIXTURE"])
+            return self._fake
+        return None
+
+    def save(self):
+        fake = getattr(self, "_fake", None)
+        if fake is not None:
+            J.atomic_write(self.env["GLD_ENGINE_GH_FIXTURE"], json.dumps(fake.fx, ensure_ascii=False, indent=1))
+
     def gh(self):
+        fake = self._fixture()
+        if fake is not None:
+            return fake
         from guildcore.adapters.gh import GhCli
         return GhCli(self.env.get("GLD_REPO") or None)
 
     def gh_write(self, repo):
+        fake = self._fixture()
+        if fake is not None:
+            from guildcore.adapters.gh import FakeGhWrite
+            return FakeGhWrite(fake, self.clock())
         from guildcore.adapters.gh import GhWriteCli
         return GhWriteCli(repo)
 
@@ -99,13 +119,17 @@ class Deps(object):
         except CF.ConfigError:
             return None
 
-    def runners(self, common, journal, halt_check, version):
+    def runners(self, common, journal, halt_check, version, config=None):
+        """The role and judge runners. A non-default model endpoint is allowed only when the repository lists it in
+        `config.engine.allowed_endpoints` (§5.1 — a local-model offload or the local smoke)."""
         from guildcore.judges.runner import JudgeRunner
         from guildcore.roles.runner import Runner
+        eng = ((getattr(config, "raw", None) or {}).get("engine") or {}) if config is not None else {}
+        allowed = list(eng.get("allowed_endpoints") or [])
         r = Runner(journal=journal, common_dir=common, parent_env=self.env, halt_check=halt_check, version=version,
-                   clock=self.clock())
+                   clock=self.clock(), allowed_endpoints=allowed)
         jr = JudgeRunner(journal=journal, common_dir=common, parent_env=self.env, halt_check=halt_check,
-                         version=version)
+                         version=version, allowed_endpoints=allowed)
         return r, jr
 
     def driver(self, ports_for, unattended, plugin, events, boundary):
@@ -250,6 +274,7 @@ class Run(object):
         from guildcore import cost as COST
         from workflows.dev.fsm import final_events
         usd = max(0.0, COST.spent(self.common, self.n, kind=None) - cost0)
+        self.d.save()
         _progress(self.common, self.n, "end: exit %d — %s" % (outcome.exit_code, outcome.line))
         if self.attended:
             res = outcome.result
@@ -336,8 +361,9 @@ class Run(object):
         repo = gh.owner_repo()
         clock = d.clock()
         halt_check = lambda: VALVES.halted(self.common)          # noqa: E731
-        runner, jr = d.runners(self.common, Journal(self.common, self.n, clock), halt_check, vlabel)
-        return PO.fsm_factory(self.main, d.config(self.main), clock, gh, d.gh_write(repo), runner, jr,
+        cfg = d.config(self.main)
+        runner, jr = d.runners(self.common, Journal(self.common, self.n, clock), halt_check, vlabel, cfg)
+        return PO.fsm_factory(self.main, cfg, clock, gh, d.gh_write(repo), runner, jr,
                               unattended=not self.attended, push_url=d.push_url(self.main), plugin=vlabel,
                               env=d.env, events=self.events if self.attended else None,
                               valves=VALVES.effective(self.common, d.env))
@@ -412,6 +438,7 @@ def cmd_answer(d, a):
     except ValueError as e:
         _sent(d, {"answered": False, "error": str(e)})
         return 64
+    d.save()
     _sent(d, {"answered": True, "qid": a.qid, "resolution": did, "choice": a.choice})
     return 0
 
@@ -433,6 +460,7 @@ def cmd_note(d, a):
     p = _ports_for_issue(d, n)
     did = p.decisions.record({"point": "directive", "by": "human", "stage": a.stage,
                               "reason": markers.value(a.text)[:2000]})
+    d.save()
     _sent(d, {"noted": True, "id": did})
     return 0
 
@@ -521,7 +549,7 @@ def cmd_unattended_log(d, a):
     from workflows.dev import unattended_log as UL
     p = _ports_for_issue(d, int(a.issue), attended=False)
     from workflows.dev.stages import base as B
-    d.out.write(UL.render(B.records(p)) if hasattr(UL, "render") else "")
+    d.out.write(UL.render(B.records(p)))
     return 0
 
 
