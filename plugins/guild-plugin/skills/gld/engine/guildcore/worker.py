@@ -196,7 +196,7 @@ def start_detached(argv, cwd, env, log_path):
     """Start the worker in its own session (survives the driver's death); stdout/stderr go to a
     side log. Returns the pid. The worker takes the IssueLock itself."""
     os.makedirs(os.path.dirname(log_path), exist_ok=True)
-    with open(log_path, "ab") as log, open(os.devnull, "rb") as nul:
+    with open(log_path, "ab") as log, open(os.devnull, "rb") as nul:  # fs-ok: engine-owned worker log
         p = subprocess.Popen(argv, cwd=cwd, env=env, stdin=nul, stdout=log, stderr=log,
                              start_new_session=True, close_fds=True)
     return p.pid

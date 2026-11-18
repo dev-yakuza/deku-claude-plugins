@@ -217,7 +217,10 @@ def check_env(role_env, tmp):
     os.makedirs(tmp, exist_ok=True)
     pyc = os.path.join(tmp, "pycache")
     os.makedirs(pyc, exist_ok=True)
-    e.update({"PYTHONDONTWRITEBYTECODE": "1", "PYTHONPYCACHEPREFIX": pyc, "TMPDIR": tmp})
+    e.update({"PYTHONDONTWRITEBYTECODE": "1", "PYTHONPYCACHEPREFIX": pyc, "TMPDIR": tmp,
+              # K3r6-m3: the suite's node_modules is the engine's (read-only) — tool caches go to the run tmp
+              "BABEL_CACHE_PATH": os.path.join(tmp, "babel-cache.json"), "XDG_CACHE_HOME": os.path.join(tmp, "cache"),
+              "npm_config_cache": os.path.join(tmp, "npm-cache")})
     tools = process_tools_dir()
     if tools:
         e["PATH"] = tools + os.pathsep + e.get("PATH", "")
@@ -230,10 +233,11 @@ def sandboxed(cmd, block, tmp, allow_ports=(), deny_ports=None):
     listening NOW are denied (K2r4-M2) unless the caller passes them explicitly."""
     if not os.path.exists(SANDBOX_EXEC):
         raise RuntimeError("no sandbox-exec on this host — checks refuse to run unconfined")
-    prof = os.path.join(tmp, "checks.sb")
-    with open(prof, "w") as fh:
-        fh.write(sandbox_profile(block, extra_write=[tmp], allow_ports=allow_ports,
-                                 deny_ports=listening_ports() if deny_ports is None else deny_ports))
+    # `tmp` is writable by the code the previous command of this check ran — a link planted there must
+    # not redirect the engine's write (K3r6-B1)
+    from guildcore import fsafe as FS
+    prof = FS.write_text(tmp, "checks.sb", sandbox_profile(block, extra_write=[tmp], allow_ports=allow_ports,
+                                                           deny_ports=listening_ports() if deny_ports is None else deny_ports))
     return "%s -f %s /bin/sh -c %s" % (SANDBOX_EXEC, _shq(prof), _shq(cmd))
 
 
@@ -537,14 +541,14 @@ def process_tools_dir(home=None):
         have = open(stamp).read().strip() if os.path.exists(stamp) else None
         if have != want or not os.path.exists(dst):
             tmp = dst + ".tmp"
-            _sh.copyfile(src, tmp)
+            _sh.copyfile(src, tmp)  # fs-ok: engine-owned ~/.cache/guild-engine/bin tool copies
             os.chmod(tmp, 0o755)
             p = subprocess.run(["codesign", "-s", "-", "--force", tmp], stdout=subprocess.DEVNULL,
                                stderr=subprocess.DEVNULL)
             if p.returncode != 0:
                 return None
-            os.replace(tmp, dst)
-            with open(stamp, "w") as fh:
+            os.replace(tmp, dst)  # fs-ok: engine-owned ~/.cache/guild-engine/bin tool copies
+            with open(stamp, "w") as fh:  # fs-ok: engine-owned ~/.cache/guild-engine/bin tool copies
                 fh.write(want + "\n")
     return base
 

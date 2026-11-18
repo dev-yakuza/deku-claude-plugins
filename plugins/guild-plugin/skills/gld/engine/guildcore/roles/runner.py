@@ -77,7 +77,7 @@ def result_contract():
 def write_env_file(path, values):
     import shlex
     os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, "w", encoding="utf-8") as fh:
+    with open(path, "w", encoding="utf-8") as fh:  # fs-ok: engine-owned run dir in/ (roles denyWrite) or engine home
         for k, v in sorted(values.items()):
             fh.write("export %s=%s\n" % (k, shlex.quote(str(v))))
     os.chmod(path, 0o444)
@@ -181,12 +181,12 @@ def stage_inputs(run_dir, inputs):
         dst = os.path.join(run_dir, "in", name)
         os.makedirs(os.path.dirname(dst), exist_ok=True)
         if isinstance(src, dict):
-            with open(dst, "w", encoding="utf-8") as fh:
+            with open(dst, "w", encoding="utf-8") as fh:  # fs-ok: engine-owned run dir in/ (roles denyWrite) or engine home
                 fh.write(src.get("text") or "")
         elif os.path.isdir(src):
-            shutil.copytree(src, dst)
+            shutil.copytree(src, dst)  # fs-ok: engine-owned run dir in/ (roles denyWrite) or engine home
         else:
-            shutil.copyfile(src, dst)
+            shutil.copyfile(src, dst)  # fs-ok: engine-owned run dir in/ (roles denyWrite) or engine home
         out[name] = dst
     return out
 
@@ -313,11 +313,11 @@ class Runner(object):
         p = self._baseline_path(worktree, issue)
         os.makedirs(os.path.dirname(p), exist_ok=True)
         tmp = p + ".tmp"
-        with open(tmp, "w", encoding="utf-8") as fh:
+        with open(tmp, "w", encoding="utf-8") as fh:  # fs-ok: engine-owned run dir in/ (roles denyWrite) or engine home
             json.dump(snap, fh, sort_keys=True)
             fh.flush()
             os.fsync(fh.fileno())
-        os.replace(tmp, p)
+        os.replace(tmp, p)  # fs-ok: engine-owned run dir in/ (roles denyWrite) or engine home
 
     def rebaseline(self, worktree, issue):
         """The engine's own step changed the worktree (commit, push, record move), or a human's

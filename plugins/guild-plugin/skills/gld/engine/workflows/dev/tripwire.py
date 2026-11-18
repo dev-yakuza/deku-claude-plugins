@@ -83,9 +83,10 @@ def readings(root, mb):
 
 
 def save(path, r):
+    from guildcore import fsafe as FS
     os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, "w") as fh:            # created before anything reads it (P35a.2 ordering)
-        json.dump(r, fh)
+    # created before anything reads it (P35a.2 ordering); never through a link (K3r6-B1)
+    FS.write_text(os.path.dirname(path), os.path.basename(path), json.dumps(r))
 
 
 def load(path):

@@ -187,7 +187,7 @@ class JudgeRunner(object):
         if "sandbox" in rendered.settings:
             settings["sandbox"] = rendered.settings["sandbox"]
         sp = os.path.join(run_dir, "in", "settings.json")
-        with open(sp, "w", encoding="utf-8") as fh:
+        with open(sp, "w", encoding="utf-8") as fh:  # fs-ok: engine-owned judge run dir (no role runs there)
             json.dump(settings, fh, indent=1, sort_keys=True)
         endpoint = C.endpoint_guard(self.parent_env, rendered.env, self.allow_local,
                                     self.allowed_endpoints)

@@ -37,6 +37,7 @@ import shutil
 import tempfile
 
 from guildcore import checks as CH
+from guildcore import fsafe as FS
 from guildcore.adapters import git as G
 
 BRACE = ("flutter", "dart", "jest", "vitest", "go")
@@ -678,6 +679,12 @@ _LINKED = {}                          # temp tree → main-checkout dirs it syml
 TEMP_PARENT = None                    # where temp trees go (None = the system temp dir; a harness sets it)
 
 
+def engine_owned(path):
+    base = os.environ.get("GLD_ENGINE_RUNS") or os.path.join(os.path.expanduser("~"), ".cache", "guild-engine")
+    b = os.path.realpath(base)
+    return path == b or path.startswith(b + os.sep)
+
+
 def linked_dirs(tree):
     return list(_LINKED.get(os.path.realpath(tree or ""), ()))
 
@@ -745,14 +752,12 @@ class TempTree(object):
             if bad or dst is None:
                 self.refused.append(raw)
                 continue
-            os.makedirs(os.path.dirname(dst), exist_ok=True)
-            if os.path.lexists(dst):
-                shutil.rmtree(dst, True) if os.path.isdir(dst) and not os.path.islink(dst) else os.remove(dst)
-            if os.path.isdir(src):
-                shutil.copytree(src, dst, symlinks=True,
-                                ignore=lambda d, names: [n for n in names if os.path.islink(os.path.join(d, n))])
-            else:
-                shutil.copy2(src, dst)
+            try:                                          # K3r6-B1: never through a link
+                FS.rmtree(self.path, rel)
+                FS.copytree_in(self.path, rel, src) if os.path.isdir(src) else FS.copy_in(self.path, rel, src)
+            except FS.UnsafePath:
+                self.refused.append(raw)
+                continue
             self.copied.append(rel)
             self.skipped_ignored = [x for x in self.skipped_ignored
                                     if x.rstrip("/") != rel and not rel.startswith(x.rstrip("/") + "/")]
@@ -829,12 +834,8 @@ class TempTree(object):
         if not ent or ent[0] not in ("100644", "100755"):
             raise ValueError("not a regular file at %s: %s" % (rev, f))
         data = G.run(self.root, "cat-file", "blob", "%s:%s" % (rev, f))
-        os.makedirs(os.path.dirname(dst), exist_ok=True)
-        if os.path.lexists(dst):
-            os.remove(dst)
-        with open(dst, "wb") as fh:
-            fh.write(data)
-        os.chmod(dst, 0o755 if ent[0] == "100755" else 0o644)
+        FS.remove(self.path, os.path.normpath(f))
+        FS.write_bytes(self.path, os.path.normpath(f), data, 0o755 if ent[0] == "100755" else 0o644)
 
     def _overlay(self):
         """Uncommitted tracked edits + untracked non-ignored files of the main worktree (regular
@@ -844,7 +845,7 @@ class TempTree(object):
         for rel in [x for x in gone.split("\0") if x]:
             dst = self._inside(os.path.normpath(rel))
             if dst and os.path.lexists(dst) and not os.path.isdir(dst):
-                os.remove(dst)
+                FS.remove(self.path, os.path.normpath(rel))
         for rel in sorted(set(x for x in mod.split("\0") if x)):
             n = os.path.normpath(rel)
             src = os.path.join(self.root, n)
@@ -853,10 +854,11 @@ class TempTree(object):
             dst = self._inside(n)
             if dst is None:
                 continue
-            os.makedirs(os.path.dirname(dst), exist_ok=True)
-            if os.path.lexists(dst):
-                os.remove(dst)
-            shutil.copy2(src, dst)
+            try:
+                FS.remove(self.path, n)
+                FS.copy_in(self.path, n, src)
+            except FS.UnsafePath:
+                continue
 
     def _ignored(self):
         lines = G.run(self.root, "ls-files", "-z", "--others", "--ignored", "--exclude-standard",
@@ -866,24 +868,26 @@ class TempTree(object):
             if rel.startswith("..") or os.path.isabs(rel):
                 continue
             src = os.path.join(self.root, rel)
+            base = os.path.basename(rel)
+            if base in DEP_DIRS and os.path.islink(src) and engine_owned(os.path.realpath(src)):
+                src = os.path.realpath(src)             # the engine's own node install (K3r5-M1), read-only
             dst = self._inside(rel)
             if dst is None or os.path.lexists(dst) or not os.path.exists(src) or os.path.islink(src):
                 continue
-            base = os.path.basename(rel)
             if not os.path.isdir(src):
                 self.skipped_ignored.append(rel)        # never copy an ignored file (secrets)
                 continue
-            os.makedirs(os.path.dirname(dst), exist_ok=True)
-            if base == ".dart_tool":
-                shutil.copytree(src, dst, symlinks=True,
-                                ignore=shutil.ignore_patterns("build", "flutter_build", "build_resolvers",
-                                                              "flutterfire"))
-            elif base in FRESH_DIRS:
-                os.makedirs(dst)
-            elif base in DEP_DIRS:
-                os.symlink(src, dst)                   # read-only: the check sandbox denies main writes
-                self.linked.append(os.path.realpath(src))
-            else:
+            try:
+                if base == ".dart_tool":
+                    FS.copytree_in(self.path, rel, src, skip=("build", "flutter_build", "build_resolvers", "flutterfire"))
+                elif base in FRESH_DIRS:
+                    FS.makedirs(self.path, rel)
+                elif base in DEP_DIRS:
+                    FS.symlink(self.path, rel, src)    # read-only: the check sandbox denies main writes
+                    self.linked.append(os.path.realpath(src))
+                else:
+                    self.skipped_ignored.append(rel + "/")
+            except FS.UnsafePath:
                 self.skipped_ignored.append(rel + "/")
 
     def __exit__(self, *exc):

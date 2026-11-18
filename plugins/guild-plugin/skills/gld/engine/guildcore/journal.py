@@ -128,11 +128,11 @@ def fsync_append(path, line):
 def atomic_write(path, text):
     os.makedirs(os.path.dirname(path), exist_ok=True)
     tmp = "%s.tmp.%d" % (path, os.getpid())
-    with open(tmp, "w", encoding="utf-8") as fh:
+    with open(tmp, "w", encoding="utf-8") as fh:  # fs-ok: engine-owned journal
         fh.write(text)
         fh.flush()
         os.fsync(fh.fileno())
-    os.replace(tmp, path)
+    os.replace(tmp, path)  # fs-ok: engine-owned journal
 
 
 def cache_key(point, inputs, tier, system_schema_sha, valves, plugin):

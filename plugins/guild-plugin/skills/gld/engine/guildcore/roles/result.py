@@ -148,4 +148,4 @@ def retire_result_json(run_dir, tag):
     """Move an earlier session's out/result.json aside before a fresh spawn (K1-m2)."""
     p = os.path.join(run_dir, "out", "result.json")
     if os.path.exists(p):
-        os.replace(p, p + "." + tag)
+        os.replace(p, p + "." + tag)  # fs-ok: renames the role out/ entry itself (a link is renamed, never followed)

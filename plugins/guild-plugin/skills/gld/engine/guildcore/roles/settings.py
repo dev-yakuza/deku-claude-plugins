@@ -423,8 +423,8 @@ def export_tree_readonly(worktree, base_sha, rel_dir, dest):
             os.chmod(fp, 0o555 if os.access(fp, os.X_OK) else 0o444)
         os.chmod(base, 0o555)
     os.makedirs(os.path.dirname(dest), exist_ok=True)
-    os.replace(tmp, dest)
-    with open(stamp, "w") as fh:
+    os.replace(tmp, dest)  # fs-ok: engine home export / run dir in/ (roles denyWrite)
+    with open(stamp, "w") as fh:  # fs-ok: engine home export / run dir in/ (roles denyWrite)
         fh.write(digest + "\n")
     return dest, digest
 
@@ -465,7 +465,7 @@ def render_gitconfig(worktree, dest):
         lines.append("[%s]" % sec)
         lines += ["\t%s = %s" % (k, v.replace("\\", "\\\\").replace('"', '\\"')) for k, v in kvs]
     os.makedirs(os.path.dirname(dest), exist_ok=True)
-    with open(dest, "w", encoding="utf-8") as fh:
+    with open(dest, "w", encoding="utf-8") as fh:  # fs-ok: engine home export / run dir in/ (roles denyWrite)
         fh.write("\n".join(lines) + "\n")
     return {"GIT_CONFIG_GLOBAL": dest, "GIT_CONFIG_NOSYSTEM": "1"}
 
@@ -576,8 +576,8 @@ def export_gates_readonly(worktree, base_sha):
             os.chmod(os.path.join(base, f), 0o444 if not os.access(os.path.join(base, f), os.X_OK) else 0o555)
         os.chmod(base, 0o555)
     os.makedirs(os.path.dirname(dest), exist_ok=True)
-    os.replace(tmp, dest)
-    with open(stamp, "w") as fh:
+    os.replace(tmp, dest)  # fs-ok: engine home export / run dir in/ (roles denyWrite)
+    with open(stamp, "w") as fh:  # fs-ok: engine home export / run dir in/ (roles denyWrite)
         fh.write(digest + "\n")
     return dest, digest
 
@@ -666,7 +666,7 @@ def render(role, task=None, worktree=None, base=None, run_dir=None, issue=None, 
         if run_dir and out.get("sandbox") and os.path.exists(SANDBOX_EXEC):
             prof = os.path.join(run_dir, "in", "hook-sandbox.sb")
             os.makedirs(os.path.dirname(prof), exist_ok=True)
-            with open(prof, "w") as fh:
+            with open(prof, "w") as fh:  # fs-ok: engine home export / run dir in/ (roles denyWrite)
                 fh.write(sandbox_profile(out["sandbox"]))
             os.chmod(prof, 0o444)
             hk = out.setdefault("hooks", {})
@@ -698,7 +698,7 @@ def render(role, task=None, worktree=None, base=None, run_dir=None, issue=None, 
     if run_dir:
         os.makedirs(os.path.join(run_dir, "in"), exist_ok=True)
         path = os.path.join(run_dir, "in", "settings.json")
-        with open(path, "w", encoding="utf-8") as fh:
+        with open(path, "w", encoding="utf-8") as fh:  # fs-ok: engine home export / run dir in/ (roles denyWrite)
             json.dump(out, fh, ensure_ascii=False, indent=1, sort_keys=True)
             fh.write("\n")
     return Rendered(out, merged_env, meta, path)

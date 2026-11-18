@@ -18,6 +18,7 @@ import shlex
 import subprocess
 
 from guildcore import capture as CAP
+from guildcore import fsafe as FS
 from guildcore import checks as CH
 from guildcore.adapters import claude as C
 from guildcore.adapters import git as G
@@ -143,8 +144,10 @@ def warm_in_place(root, tree, run_dir, env, issue=None, proxy_hosts=None, extra_
                 if n.startswith("..") or os.path.isabs(n) or os.path.lexists(dst) or \
                         not os.path.realpath(dst).startswith(os.path.realpath(tree) + os.sep):
                     continue
-                os.makedirs(os.path.dirname(dst), exist_ok=True)
-                open(dst, "wb").close()
+                try:
+                    FS.write_bytes(tree, n, b"")              # K3r6-B1: never through a link
+                except FS.UnsafePath:
+                    continue
                 placeholders.append(n)
             r, px2 = CH.deps_step(["flutter test --no-pub %s" % rel], tree, sb, tmp, env=env, hosts=proxy_hosts)
             for k, v in px2.items():
@@ -161,8 +164,8 @@ def warm_in_place(root, tree, run_dir, env, issue=None, proxy_hosts=None, extra_
         shutil.rmtree(os.path.join(tree, "build", "unit_test_assets"), True)
         for n in placeholders:
             try:
-                os.remove(os.path.join(tree, n))
-            except OSError:
+                FS.remove(tree, n)
+            except (OSError, FS.UnsafePath):
                 pass
 
 
@@ -247,10 +250,10 @@ def suite_in_tree(worktree, base, cmds, owner, timeout_s, run_dir, env, copy_lis
             rel = os.path.relpath(img, tt.path) if os.path.isabs(img) else img
             src = tt._inside(os.path.normpath(rel)) if not rel.startswith("..") else None
             if src and os.path.isfile(src) and not os.path.islink(src) and rel.endswith(".png"):
-                dst = os.path.join(worktree, rel)
-                if os.path.realpath(dst).startswith(os.path.realpath(worktree) + os.sep):
-                    os.makedirs(os.path.dirname(dst), exist_ok=True)
-                    shutil.copyfile(src, dst)
+                try:
+                    FS.copy_in(worktree, rel, src)            # K3r6-B1
+                except FS.UnsafePath:
+                    pass
         r.missing_ignored = [] if r.passed else PF.missing_ignored(r.raw, worktree, tt.skipped_ignored, tt.path)
         # Option A safety net (K2r6-B1): a red offline run with a dependency-resolution/download
         # signature is an environment problem, not a test failure
@@ -384,12 +387,7 @@ def link_node_modules(worktree, nd):
     """Replace whatever `node_modules` the worktree has (a role may have changed it) by a symlink to
     the engine's prepared dir."""
     import shutil as _sh
-    dst = os.path.join(worktree, "node_modules")
-    if os.path.isdir(dst) and not os.path.islink(dst):
-        _sh.rmtree(dst, True)
-    tmp = "%s.engine-%d-%d" % (dst, os.getpid(), id(nd))
-    os.symlink(os.path.join(nd, "node_modules"), tmp)
-    os.replace(tmp, dst)                              # atomic swap of the link
+    FS.symlink(worktree, "node_modules", os.path.join(nd, "node_modules"))   # atomic, never through a link
 
 
 def install_check_tools(worktree, run_dir, env, mans, tools, copy_list=(), issue=None, timeout_s=1800, kind="tools"):
@@ -401,7 +399,7 @@ def install_check_tools(worktree, run_dir, env, mans, tools, copy_list=(), issue
     import tempfile
     nd = node_dir(worktree, mans, tools, kind)
     os.makedirs(os.path.dirname(nd), exist_ok=True)
-    with open(nd + ".lock", "w") as lk:
+    with open(nd + ".lock", "w") as lk:      # fs-ok: engine cache dir, no role writes there
         fcntl.flock(lk, fcntl.LOCK_EX)
         try:
             if os.path.exists(os.path.join(nd, ".complete")):
@@ -433,7 +431,7 @@ def install_check_tools(worktree, run_dir, env, mans, tools, copy_list=(), issue
             open(os.path.join(tmp, ".complete"), "w").close()
             if os.path.exists(nd):
                 _sh.rmtree(nd, True)
-            os.rename(tmp, nd)
+            os.rename(tmp, nd)                    # fs-ok: engine cache dir
             return r, px, os.path.join(nd, "node_modules", ".bin")
         finally:
             fcntl.flock(lk, fcntl.LOCK_UN)
@@ -509,6 +507,8 @@ def role_spec(call, issue, worktree, config, base=None, branch=None, unattended=
 def live(issue, worktree, base, branch, config, clock, gh, writer, decisions, runner, judge_runner,
          journal=None, unattended=True, push_url=None, host=None, plugin=None, impl_files=None):
     root_env = dict(runner.parent_env)
+    if worktree and os.path.isdir(worktree):
+        recover_check_backup(worktree)       # K3r6-m2: any stage's entry repairs an interrupted 1L check swap
 
     def run_role(call):
         return runner.run_role(role_spec(call, issue, worktree, config, base, branch, unattended))
@@ -756,15 +756,15 @@ def live_execute(issue, main, variant, config, clock, gh, writer, decisions, run
 
         def base_export(path):
             n = os.path.normpath(path)
-            dst = os.path.join(base_dir, n)
-            os.makedirs(os.path.dirname(dst), exist_ok=True)
-            with open(dst, "wb") as fh:
-                fh.write(G.run(worktree, "show", "%s:%s" % (base_sha, n)))
-            os.chmod(dst, 0o555)
-            return dst
+            os.makedirs(base_dir, exist_ok=True)
+            return FS.write_bytes(base_dir, n, G.run(worktree, "show", "%s:%s" % (base_sha, n)), 0o555)
         checks, dropped = base_checks()
-        restore = base_check_configs(worktree, base_sha, p, tools_node,     # K3r4-m3 / K3r5: <base> configs
-                                     getattr(state["deps"], "suite_node", None))   # and <base> tools for the checks
+        try:
+            restore = base_check_configs(worktree, base_sha, p, tools_node,     # K3r4-m3 / K3r5: <base> configs
+                                         getattr(state["deps"], "suite_node", None))   # and <base> tools for the checks
+        except CheckConfigLink as e:                                            # K3r6-B1
+            SB.record_code(p, "execute", "check-config-link", "refused", refs=e.rel, reason=str(e))
+            return False, str(e)
         try:
             refused = run_checks(p, worktree, checks, staged, node_bin, base_has, base_export, sb, env, rd)
         finally:
@@ -881,6 +881,18 @@ CHECK_CONFIGS = (".remarkrc", ".remarkrc.json", ".remarkrc.js", ".remarkrc.cjs",
                  ".editorconfig")
 
 
+WORDLIST_MAX_BYTES = 2 * 1024 * 1024
+WORDLIST_MAX_LINES = 200000
+
+
+class CheckConfigLink(Exception):
+    """A check config (or a word list) the engine would swap sits on a symlink / is not a plain file."""
+
+    def __init__(self, rel, why):
+        Exception.__init__(self, "check config is not a plain in-tree file: %s (%s)" % (rel, why))
+        self.rel = rel
+
+
 CSPELL_JSON = ("cspell.json", ".cspell.json", "cspell.config.json", ".cspell.config.json")
 
 
@@ -901,22 +913,24 @@ def recover_check_backup(worktree):
     with open(bp) as fh:
         rec = json.load(fh)
     done = []
-    for ent in rec.get("files") or []:
-        dst = os.path.join(worktree, ent["rel"])
-        if ent["data"] is None:
-            if os.path.exists(dst):
-                os.remove(dst)
-        else:
-            with open(dst, "wb") as fh:
-                fh.write(base64.b64decode(ent["data"]))
-        done.append(ent["rel"])
+    for ent in rec.get("files") or []:              # K3r6-B1: restores go through fsafe as well
+        try:
+            if ent["data"] is None:
+                FS.remove(worktree, ent["rel"])
+            else:
+                FS.write_bytes(worktree, ent["rel"], base64.b64decode(ent["data"]))
+            done.append(ent["rel"])
+        except FS.UnsafePath:
+            pass                                    # a link planted since: left alone, never followed
     if "node_link" in rec:
-        nm = os.path.join(worktree, "node_modules")
-        if os.path.islink(nm):
-            os.remove(nm)
-        if rec["node_link"]:
-            os.symlink(rec["node_link"], nm)
-        done.append("node_modules")
+        try:
+            if rec["node_link"]:
+                FS.symlink(worktree, "node_modules", rec["node_link"])
+            else:
+                FS.remove(worktree, "node_modules")
+            done.append("node_modules")
+        except FS.UnsafePath:
+            pass
     os.remove(bp)
     return done
 
@@ -951,13 +965,27 @@ def base_check_configs(worktree, base_sha, p=None, tools_node=None, suite_node=N
             from workflows.dev.stages import base as SB
             SB.record_code(p, "execute", point, "base-used", refs=rel, reason=reason)
     dict_files = []
+    def read_branch(rel):
+        """K3r6-B1: the branch's bytes, read only when no component of the path is a symlink — a link
+        anywhere refuses the whole swap (CheckConfigLink → the 1L commit is refused)."""
+        try:
+            dst = FS.resolve(worktree, rel)
+        except FS.UnsafePath as e:
+            raise CheckConfigLink(rel, str(e))
+        if not os.path.lexists(dst):
+            return None
+        if not os.path.isfile(dst):
+            raise CheckConfigLink(rel, "not a regular file")
+        if os.path.getsize(dst) > WORDLIST_MAX_BYTES:
+            raise CheckConfigLink(rel, "larger than %d bytes" % WORDLIST_MAX_BYTES)
+        with open(dst, "rb") as fh:
+            return fh.read()
     for rel in CHECK_CONFIGS:
-        dst = os.path.join(worktree, rel)
         at_base = G.ok(worktree, "cat-file", "-e", "%s:%s" % (base_sha, rel))
-        here = os.path.isfile(dst) and not os.path.islink(dst)
+        cur = read_branch(rel)
+        here = cur is not None
         if not at_base and not here:
             continue
-        cur = open(dst, "rb").read() if here else None
         base_bytes = G.run(worktree, "show", "%s:%s" % (base_sha, rel)) if at_base else None
         if rel in CSPELL_JSON and base_bytes is not None:
             try:
@@ -977,24 +1005,29 @@ def base_check_configs(worktree, base_sha, p=None, tools_node=None, suite_node=N
         if want == cur:
             continue
         files.append({"rel": rel, "data": base64.b64encode(cur).decode() if cur is not None else None})
-        swaps.append((dst, want))
+        swaps.append((rel, want))
         note("check-config-changed", rel, "the branch %s %s; the 1L checks ran with <base>'s%s" % (
             "added" if not at_base else ("removed" if not here else "changed"), rel,
             " (+ its added dictionary words)" if rel in CSPELL_JSON else ""))
     for rel in dict_files:                         # word-list files: <base> + lines the branch ADDED
-        dst = os.path.join(worktree, rel)
-        if rel.startswith("..") or not G.ok(worktree, "cat-file", "-e", "%s:%s" % (base_sha, rel)) or \
-                not os.path.isfile(dst) or os.path.islink(dst):
+        if rel.startswith("..") or not G.ok(worktree, "cat-file", "-e", "%s:%s" % (base_sha, rel)):
+            continue
+        cur = read_branch(rel)
+        if cur is None:
             continue
         base_bytes = G.run(worktree, "show", "%s:%s" % (base_sha, rel))
-        cur = open(dst, "rb").read()
         if cur == base_bytes:
             continue
-        bl = base_bytes.decode("utf-8", "replace").split("\n")
-        added = [w for w in cur.decode("utf-8", "replace").split("\n") if w.strip() and w not in bl]
+        bl = set(base_bytes.decode("utf-8", "replace").split("\n"))        # K3r6-m1: linear, capped
+        lines = cur.decode("utf-8", "replace").split("\n")
+        if len(lines) > WORDLIST_MAX_LINES:
+            added = []
+            note("check-dictionary-words", rel, "word list over %d lines — <base>'s list used" % WORDLIST_MAX_LINES)
+        else:
+            added = [w for w in lines if w.strip() and w not in bl]
         want = (base_bytes.decode("utf-8", "replace").rstrip("\n") + "\n" + "\n".join(added) + "\n").encode("utf-8")
         files.append({"rel": rel, "data": base64.b64encode(cur).decode()})
-        swaps.append((dst, want))
+        swaps.append((rel, want))
         if added:
             note("check-dictionary-words", rel, "words the branch added, kept for the checks: %s" % ", ".join(added[:40]))
     rec = {"files": files}
@@ -1003,15 +1036,14 @@ def base_check_configs(worktree, base_sha, p=None, tools_node=None, suite_node=N
         rec["node_link"] = os.readlink(nm) if os.path.islink(nm) else (suite_node or None)
     bp = check_backup_path(worktree)
     os.makedirs(os.path.dirname(bp), exist_ok=True)
-    with open(bp + ".tmp", "w") as fh:
+    with open(bp + ".tmp", "w") as fh:            # fs-ok: engine cache (the journal)
         json.dump(rec, fh)
-    os.replace(bp + ".tmp", bp)                     # journaled BEFORE the worktree is touched
-    for dst, want in swaps:
+    os.replace(bp + ".tmp", bp)                     # fs-ok: journaled BEFORE the worktree is touched
+    for rel, want in swaps:
         if want is None:
-            os.remove(dst)
+            FS.remove(worktree, rel)
         else:
-            with open(dst, "wb") as fh:
-                fh.write(want)
+            FS.write_bytes(worktree, rel, want)
     if tools_node:
         link_node_modules(worktree, tools_node)
 

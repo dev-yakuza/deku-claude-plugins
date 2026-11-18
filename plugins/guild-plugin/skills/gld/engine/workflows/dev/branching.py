@@ -21,6 +21,7 @@ import re
 import shutil
 
 from guildcore import checks as CH
+from guildcore import fsafe as FS
 from guildcore.adapters import git as G
 
 RELEASE_RE = re.compile(r"^(release|support|hotfix|maint(enance)?)/|^v?\d+(\.\d+)+$")
@@ -185,13 +186,11 @@ def copy_ignored(main, dest, paths):
         if bad:
             refused.append(raw)
             continue
-        os.makedirs(os.path.dirname(dst), exist_ok=True)
-        if os.path.isdir(src):
-            if os.path.lexists(dst):
-                shutil.rmtree(dst, True)
-            shutil.copytree(src, dst, symlinks=True,
-                            ignore=lambda d, names: [x for x in names if os.path.islink(os.path.join(d, x))])
-        else:
-            shutil.copy2(src, dst)
+        try:                                              # K3r6-B1: never through a link
+            FS.rmtree(dest, rel)
+            FS.copytree_in(dest, rel, src) if os.path.isdir(src) else FS.copy_in(dest, rel, src)
+        except FS.UnsafePath:
+            refused.append(raw)
+            continue
         copied.append(rel)
     return copied, refused

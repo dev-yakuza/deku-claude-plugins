@@ -291,7 +291,7 @@ def run_process(argv, env, cwd, stdin_text, stdout_path, stderr_path, timeout_s,
     file. `on_start({pid,pgid,start_time})` journals the group before we wait (§2.7). On
     timeout or `halt_check()` truthy the group is killed (TERM → 10 s → KILL)."""
     t0 = time.time()
-    with open(stdout_path, "wb") as out, open(stderr_path, "wb") as err:
+    with open(stdout_path, "wb") as out, open(stderr_path, "wb") as err:  # fs-ok: stdout/stderr files the engine creates before the session
         p = subprocess.Popen(argv, cwd=cwd, env=env, stdin=subprocess.PIPE, stdout=out, stderr=err,
                              start_new_session=True)
         pgid = os.getpgid(p.pid)
