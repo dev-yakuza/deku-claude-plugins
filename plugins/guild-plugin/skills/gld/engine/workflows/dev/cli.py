@@ -715,19 +715,35 @@ def cmd_answer(d, a):
                                "`dev answer --issue %d --qid #%d/%s`" % (bare, n, owner, owner, owner, bare)})
             return 64
     target = qi if qi is not None else n
-    p = _ports_for_issue(d, target)
-    login = None
+    # K5r4-m3 (r1-M1 "only the lock holder writes that Issue"): the answer writes the target's decision log, labels
+    # and journal epoch — so it holds the target's IssueLock while it does; a live run holding it (an unattended
+    # run, a parent driving it, a worker not yet ended) → busy, nothing written
+    lk = W.IssueLock(d.common(), target)
     try:
-        login = p.gh.viewer_login() if hasattr(p.gh, "viewer_login") else None
-    except Exception:                                            # noqa: BLE001
+        lk.acquire("attended")
+    except W.Busy as b:
+        info = b.holder or {}
+        why = ("#%d is driven by #%d's run" % (target, info["driven_by"]) if info.get("driven_by") is not None
+               else "an %s run holds #%d" % (info.get("mode") or "engine", target))
+        _sent(d, {"answered": False, "busy": True,
+                  "error": "%s — answer once it stops (`dev wait --issue %d`)" % (why, n)})
+        return EXIT_BUSY
+    try:
+        p = _ports_for_issue(d, target)
         login = None
-    try:
-        did = ASK.answer(p.decisions, p.writer, p.issue, bare, a.choice, journal=p.journal, login=login,
-                         text=a.text)
-    except ValueError as e:
-        _sent(d, {"answered": False, "error": str(e)})
-        return 64
-    d.save()
+        try:
+            login = p.gh.viewer_login() if hasattr(p.gh, "viewer_login") else None
+        except Exception:                                            # noqa: BLE001
+            login = None
+        try:
+            did = ASK.answer(p.decisions, p.writer, p.issue, bare, a.choice, journal=p.journal, login=login,
+                             text=a.text)
+        except ValueError as e:
+            _sent(d, {"answered": False, "error": str(e)})
+            return 64
+        d.save()
+    finally:
+        lk.release()
     out = {"answered": True, "qid": ASK.qualify(target, bare), "issue": target, "resolution": did,
            "choice": a.choice}
     if target != n:

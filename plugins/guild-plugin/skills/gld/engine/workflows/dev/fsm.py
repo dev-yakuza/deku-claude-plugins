@@ -356,7 +356,7 @@ class Driver(object):
                 f = {"point": blk.get("point"), "kind": blk.get("kind"), "stage": blk.get("stage"),
                      "by": "code", "status": "superseded", "reason": why}
                 if self.unattended:
-                    st0, ans, _rej = D.accepted_answer(blk, comments, timeline, True, assoc)
+                    st0, ans, _rej = D.accepted_answer(blk, comments, timeline, True, assoc, issue=n)
                     if st0 == "answered":
                         f["reason"] = "%s — answer `%s` by %s read, not applied (the question is stale)" % (
                             why, ans.token, ans.author)

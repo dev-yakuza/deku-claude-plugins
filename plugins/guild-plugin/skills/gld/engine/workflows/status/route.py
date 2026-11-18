@@ -119,7 +119,7 @@ def route_snapshot(gh, snap, cfg=None, unattended=False, own_writes=()):
             alive, _why = dec.live(b, st, timeline, own_writes)
             if not alive:
                 continue
-            st_a, ans, rej = dec.accepted_answer(b, snap.comments, timeline, unattended, assoc)
+            st_a, ans, rej = dec.accepted_answer(b, snap.comments, timeline, unattended, assoc, issue=n)
             conflicts = [{"comment_id": a.comment_id, "token": a.token, "author": a.author}
                          for a, why in rej if why == "conflicting answers"]
             r.pending.append({"id": b.id, "kind": b.get("kind"), "point": b.get("point"),

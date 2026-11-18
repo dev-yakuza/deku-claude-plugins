@@ -125,7 +125,7 @@ def live(block, state, timeline, own_writes=()):
 
 
 def accepted_answer(block, comments, timeline, unattended=True, associations=DEFAULT_ASSOCIATIONS,
-                    kind=None):
+                    kind=None, issue=None):
     """§2.5 channel 1. Returns (status, answer|None, rejected[(answer, why)]) with status
     `answered` | `none` | `conflict` (K0-m15). A `conflict` is NOT "no valid answer": rule 2(d)
     must not re-judge it — the block stays pending for a human to settle.
@@ -146,6 +146,12 @@ def accepted_answer(block, comments, timeline, unattended=True, associations=DEF
         if a.k != k:
             continue
         why = None
+        if a.issue is not None:          # K5r4-m4: `#N/D<k>` — only for this Issue
+            here = issue if issue is not None else answer_rec.comment_issue(a.comment)
+            if here is None or int(here) != a.issue:
+                rejected.append((a, "answer names Issue #%d" % a.issue if here is not None
+                                 else "qualified answer, Issue unknown"))
+                continue
         if a.association not in associations:
             why = "author_association %s" % (a.association or "none")
         elif a.created_at <= since:

@@ -11,12 +11,16 @@ import re
 
 from guildcore.records import markers
 
-ANSWER_RE = re.compile(r"^guild-answer: D(\d+) ([a-z0-9:_-]+)[ \t]*$")
+# K5r4-m4: the issue-qualified id the attended driver shows (`#8/D2`) is accepted too — only for that same Issue
+# (`decisions.accepted_answer` rejects one that names another Issue)
+ANSWER_RE = re.compile(r"^guild-answer: (?:#?(\d+)/)?D(\d+) ([a-z0-9:_-]+)[ \t]*$")
+ISSUE_URL_RE = re.compile(r"/issues/(\d+)$")
 
 
 class Answer(object):
-    def __init__(self, k, token, comment):
+    def __init__(self, k, token, comment, issue=None):
         self.k = k
+        self.issue = issue            # the Issue a qualified id names (`#8/D2` → 8), else None
         self.token = token
         self.comment = comment
         self.comment_id = comment.get("id")
@@ -40,8 +44,14 @@ def parse(comment):
             continue
         m = ANSWER_RE.match(ln)
         if m:
-            out.append(Answer(int(m.group(1)), m.group(2), comment))
+            out.append(Answer(int(m.group(2)), m.group(3), comment, int(m.group(1)) if m.group(1) else None))
     return out
+
+
+def comment_issue(comment):
+    """The Issue number a REST comment belongs to (`issue_url`), or None."""
+    m = ISSUE_URL_RE.search(str(comment.get("issue_url") or ""))
+    return int(m.group(1)) if m else None
 
 
 def from_comments(comments):

@@ -198,7 +198,7 @@ def settle(decisions, writer, issue, block, comments, timeline, unattended=True,
            associations=D.DEFAULT_ASSOCIATIONS, journal=None):
     """§2.5 channel 1 for one live pending block → ('answered', did) | ('none', None) |
     ('conflict', [answers])."""
-    status, ans, rejected = D.accepted_answer(block, comments, timeline, unattended, associations)
+    status, ans, rejected = D.accepted_answer(block, comments, timeline, unattended, associations, issue=issue)
     noted = set(str(b.get("answer_comment")) for b in decisions._log().blocks
                 if b.get("point") == "rejected-answer")
     for a, why in rejected:
