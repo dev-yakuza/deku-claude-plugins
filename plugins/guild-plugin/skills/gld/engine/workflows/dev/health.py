@@ -48,7 +48,8 @@ def metrics(blocks_by_issue):
         paused = looped = False
         for b in blocks:
             pt, ch = (b.get("point") or ""), (b.get("raw_choice") or b.get("choice") or "")
-            judged = (b.get("by") or "").startswith(("judge:", "leader:"))
+            # a first-sprint HANDOFF shadow is monitoring (§10.4) — never a flow decision in these rates
+            judged = (b.get("by") or "").startswith(("judge:", "leader:")) and b.get("shadow") != "true"
             if pt.startswith("EX-ARB") and judged:
                 add("exarb_dismiss", "dismiss" in ch)
             if pt == "KICKOFF" and judged:

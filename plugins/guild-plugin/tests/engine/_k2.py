@@ -14,7 +14,9 @@ from guildcore.records.write import GhWriter
 from guildcore.roles.runner import RoleResult
 from workflows.dev.stages.base import Ports
 
-CFG = {"version": "0.101.0", "language": "ko",
+# K5r4: the K2–K4 fixtures test the steady state — first-sprint mode (§10.4: auto = on until a recorded go) changes
+# asks, EX-ARB dismissals and HANDOFF shadows, so it is off here and tested on purpose (test_k5_r4_first_sprint)
+CFG = {"version": "0.101.0", "language": "ko", "engine": {"first_sprint_mode": "off"},
        "commands": {"test": "flutter test", "e2e": "flutter test integration_test/app_test.dart", "vrt": None},
        "visual": {"baselines": ["test/**/goldens/**"], "tests": [], "config_files": [],
                   "runnable": True, "env": "macOS arm64 local"}}

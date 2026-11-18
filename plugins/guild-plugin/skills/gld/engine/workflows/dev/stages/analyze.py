@@ -38,6 +38,8 @@ from guildcore.records import markers
 from guildcore.records import outputs as OUT
 from workflows.dev import analysis as AN
 from workflows.dev import arbitration as ARB
+from workflows.dev import firstsprint as FS
+from workflows.dev import handoff as HO
 from workflows.dev import judging as JG
 from workflows.dev import roleout as RO
 from workflows.dev import predict as PF
@@ -417,7 +419,7 @@ def run(p, only=None, config_present=True):
             q = ASK.Question("readiness", what, opts, recommended=k.chosen if k.chosen in [o["token"] for o in opts] else None,
                              recommended_by=d.by, stakes="high" if k.high & set(unclear) else None, aliases=k.aliases)
             return B.ask(p, STAGE, q, what)
-        surf = k.surface.get("ask") or p.engine_cfg("attended_confirm_interpretation", False)
+        surf = k.surface.get("ask") or FS.confirm_interpretation(p)        # §10.4: on in the first sprint
         if surf and "interpretation-surface" not in answers and "readiness" not in answers:
             what = k.surface.get("question") or "해석 확인: %s" % k.chosen
             # K5r3-M1: KICKOFF is high-risk → this ask is predict-first; its neutral wording never names the chosen one
@@ -496,6 +498,8 @@ def run(p, only=None, config_present=True):
         line = "analyze 출력 간극 — %s" % "; ".join(bad)
         q = ASK.Question("escalation", line, [{"token": "stop", "label": "stop"}])
         return B.ask(p, STAGE, q, line, {"cause_kind": "ambiguity", "line": line, "token_cause": "ambiguity: %s" % line})
+    HO.shadow(p, STAGE, "analyze→design", [("analysis", out[:8000])],                   # §10.4 first sprint
+              "\n".join("%s: %s" % (a["id"], a["text"]) for a in k.ac), issue.get("title") or "", "A8")
     B.transition(p, e, "design")
     return B.StageResult(B.StageResult.ADVANCE, nxt="design")
 

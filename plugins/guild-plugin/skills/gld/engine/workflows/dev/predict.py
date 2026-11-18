@@ -107,10 +107,29 @@ def go_recorded(p):
                         from guildcore import journal as J
                         os.makedirs(os.path.dirname(path), exist_ok=True)  # fs-ok: engine cache under <git-common-dir>/guild/engine
                         J.atomic_write(path, json.dumps({"tracker": int(r["number"]), "comment": c.get("id")}))
+                    inherit_no_dismiss(p, int(r["number"]))
                     return True
     except Exception:                                            # noqa: BLE001 — unknown = the mode stays on
         return False
     return False
+
+
+def inherit_no_dismiss(p, tracker):
+    """§10.4: the go turns first-sprint mode off but `exarb.no_unattended_dismiss` stays — carried by the valve in
+    the `auto` area (a person-released valve is not re-applied — `valves.auto_set`). Best effort: a failed write
+    leaves the valve unset and is journaled (the first-sprint coercion is then gone — `dev health` shows valves)."""
+    c = _common(p)
+    if not c:
+        return
+    from guildcore import valves as VALVES
+    try:
+        if VALVES.auto_set(c, "exarb.no_unattended_dismiss", True, "first-sprint go on #%d — inherited (§10.4)" % tracker):
+            v = getattr(p, "valves", None)
+            if isinstance(v, dict):
+                v.setdefault("exarb.no_unattended_dismiss", True)
+    except Exception as e:                                       # noqa: BLE001
+        if getattr(p, "journal", None) is not None:
+            p.journal.append("event", what="no-dismiss-inherit-failed", why=str(e)[:200])
 
 
 def first_sprint(p):

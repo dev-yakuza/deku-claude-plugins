@@ -160,3 +160,35 @@ def judge(p, stage, boundary, failed, artifacts, ac_text, issue_summary, step="H
                              "signature": d.fields.get("signature") or None,
                              "fixable_by_execute": d.fields.get("fixable_by_execute") if d.choice == "upstream_gap" else None})
     return d
+
+
+def shadow(p, stage, boundary, artifacts, ac_text, issue_summary, step="HO"):
+    """§3.6 / §10.4 first-sprint HANDOFF shadow: the same SJ-HANDOFF brief at a boundary whose contract check passed,
+    recorded as `HANDOFF-SHADOW` (cost kind `monitoring`, §9.3) and NEVER acted on (no loop-back, no pause, no
+    assumption). A shadow that cannot be judged (no judge, a failed call) is skipped with a journal note; a rate limit
+    or the kill switch still stops the run. Returns the Decision or None."""
+    from workflows.dev import firstsprint as FS
+    if getattr(p, "judge", None) is None or not FS.handoff_shadow(p):
+        return None
+    from guildcore.judges.runner import Halted, RateLimited
+    from workflows.dev import judging as JG
+    from workflows.dev.stages import base as B
+    parts = [("boundary", boundary), ("contract", CONTRACTS.get(boundary, "")),
+             ("failed", "(none — shadow: the contract check passed)"),
+             ("ac", ac_text or "(none)"), ("issue", issue_summary or "")] + list(artifacts)
+    try:
+        spec = JG.spec(p, "HANDOFF", parts, stage, step, point="HANDOFF-SHADOW")
+        spec.kind = "monitoring"
+        d = p.judge(spec)
+    except (RateLimited, Halted):
+        raise
+    except Exception as e:                                       # noqa: BLE001 — a shadow never changes the flow
+        if getattr(p, "journal", None) is not None:
+            p.journal.append("event", what="handoff-shadow-skipped", boundary=boundary, why=str(e)[:200])
+        return None
+    B.record_judgment(p, stage, "HANDOFF-SHADOW", "J-DEV-02", d, choice=d.choice,
+                      reason=(d.fields.get("line") or d.fields.get("reason") or "")[:300],
+                      extra={"boundary": boundary, "shadow": "true",
+                             "assumption": d.fields.get("line") if d.choice == "ok_with_assumption" else None,
+                             "signature": d.fields.get("signature") or None})
+    return d

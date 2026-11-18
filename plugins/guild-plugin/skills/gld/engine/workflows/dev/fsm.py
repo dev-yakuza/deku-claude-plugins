@@ -301,6 +301,13 @@ class Driver(object):
         bad = HO.execute_to_test(comments, p.gh.pr_search(n), n, cfg)
         always = p.engine_cfg("handoff_judge", "default") == "always"
         if not bad and not always:
+            from workflows.dev import firstsprint as FS
+            if FS.handoff_shadow(p):                     # §10.4 first sprint: judged as a shadow, never acted on
+                from workflows.dev import analysis as AN
+                from guildcore.records import outputs as OUT
+                so = OUT.find(comments, "analyze:output")
+                ac = "\n".join("%s: %s" % (a["id"], a["text"]) for a in (AN.parse_output(so.body).ac if so else []))
+                HO.shadow(p, "test", "execute→test", [], ac, B.title_text(p, p.gh.issue(n), n), "X→T")
             return None
         from workflows.dev import analysis as AN
         from guildcore.records import outputs as OUT

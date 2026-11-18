@@ -29,6 +29,7 @@ from guildcore.records import markers
 from guildcore.records import outputs as OUT
 from workflows.dev import analysis as AN
 from workflows.dev import arbitration as ARB
+from workflows.dev import firstsprint as FS
 from workflows.dev import handoff as HO
 from workflows.dev import judging as JG
 from workflows.dev import roleout as RO
@@ -280,7 +281,13 @@ def run(p, only=None, config_present=True):
         if hd.choice == "upstream_gap":
             return _gap(p, "design 산출물 간극(HANDOFF) — %s" % B.one_line(hd.fields.get("reason") or "", 200))
         if hd.choice == "ok_with_assumption":
+            if FS.assumption_pauses(p):                     # §10.4: first sprint — an artifact gap is a person's
+                return _gap(p, "design 산출물 간극(HANDOFF ok_with_assumption, first sprint) — %s" % B.one_line(
+                    hd.fields.get("line") or "", 200))
             assumptions.append(hd.fields.get("line") or "")
+    else:
+        HO.shadow(p, STAGE, "design→execute", [("skeleton", sk_text[:6000]), ("test_cases", tc_text[:6000])],
+                  ac_md, issue.get("title") or "", "E4")
 
     if split.get("split"):
         return do_split(p, e, rec, split, sk_text, children, is_leaf, answers, rows, assumptions, concerns,
@@ -343,6 +350,9 @@ def artifact(p, role, call, rel, check, reinvoked, ctx, body, irr, ac_md, extra=
         if d.choice == "ok":
             return text, res, notes
         if d.choice == "ok_with_assumption":
+            if FS.assumption_pauses(p):                     # §10.4: first sprint — an artifact gap is a person's
+                return _gap(p, "design 산출물 간극(%s, HANDOFF ok_with_assumption, first sprint) — %s" % (
+                    role, B.one_line(d.fields.get("line") or "; ".join(bad), 200)))
             return text, res, notes + [d.fields.get("line") or ""]
         return _gap(p, "design 산출물 간극(%s) — %s" % (role, "; ".join(bad)[:200]))
 

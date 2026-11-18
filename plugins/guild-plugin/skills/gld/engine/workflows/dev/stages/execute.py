@@ -32,6 +32,7 @@ from guildcore.records import outputs as OUT
 from guildcore.records import prbody as PB
 from guildcore import state as ST
 from workflows.dev import exec_audit as XA
+from workflows.dev import firstsprint as FS
 from workflows.dev import judging as JG
 from workflows.dev import tripwire as TW
 from workflows.dev import unattended_log as UL
@@ -959,10 +960,25 @@ def arbitrate_step(p, cx, attempt, scan, scan_ran, head, untracked, role_trigger
         ex = {k: v for k, v in ex.items() if k in asked}
         route = d.fields.get("developer_route") if dev_route else None
         addendum = d.fields.get("addendum")
+        # §10.4: unattended, a BLOCKER/MAJOR dismiss/dispute is forced to accept in the first sprint (and after the
+        # go while the `exarb.no_unattended_dismiss` valve holds) — the judge's own pick stays as `would-dismiss`
+        would = []
+        why = FS.no_dismiss(p) if p.unattended else None
+        if why:
+            for k, _c in new_bm:
+                if (ex.get(k) or {}).get("verdict") in ("dismiss", "dispute"):
+                    would.append(k)
+                    ex[k] = {"verdict": "accept", "reason": "%s (would-dismiss: %s)" % (
+                        "first-sprint" if why == "first-sprint" else "exarb.no_unattended_dismiss",
+                        ex[k].get("reason") or "")}
+        extra = {"coerced": "true"} if coerced else {}
+        if would:
+            extra.update(coerced="true", coerced_by=why, raw_choice=",".join(
+                "%s:%s" % (k, "would-dismiss" if k in would else (ex.get(k) or {}).get("verdict", "accept"))
+                for k, _c in new_bm))
         B.record_judgment(p, STAGE, "EX-ARB", ",".join(k for k, _c in new_bm) or "developer", d,
                           choice=",".join("%s:%s" % (k, (ex.get(k) or {}).get("verdict", "accept")) for k, _c in new_bm)
-                          or (route or "-"), reason=d.fields.get("summary"),
-                          extra={"coerced": "true"} if coerced else None)
+                          or (route or "-"), reason=d.fields.get("summary"), extra=extra or None)
     if dev_route is not None:
         if route == "reinvoke" and not cx.reinvoked:
             cx.reinvoked = True
