@@ -300,7 +300,7 @@ def budget_stop(d, p, n, spent, budget, attended, stopped=False):
         blk = prior[-1]
         if attended and p.events is not None:
             q = ASK.Question("budget", blk.get("question") or line, [{"token": t, "label": t} for t in blk.options()])
-            p.events.emit("ask", p.now(), **q.event(blk.id))
+            p.events.emit("ask", p.now(), **q.event(blk.id, p.issue))
             return Outcome(B.StageResult(B.StageResult.ASK, line=line, qid=blk.id), 0)
         return _budget_hold(p, "%s — question %s for this ceiling is still unanswered (guild-answer: %s continue|stop)"
                             % (line, blk.id, blk.id), attended)
@@ -390,7 +390,7 @@ class Run(object):
         _progress(self.common, self.n, "end: exit %d — %s" % (outcome.exit_code, outcome.line))
         res = outcome.result
         if not self.attended or res is None or res.kind != "ASK":
-            self.events.emit("terminal", time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            self.events.emit("terminal", time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), issue=self.n,
                              exit_code=outcome.exit_code, line=emit.one_line(outcome.line),
                              token=res.token() if res is not None else None, cost_usd=round(usd, 6),
                              halted=outcome.halted, mode="attended" if self.attended else "unattended",
@@ -500,8 +500,11 @@ class Run(object):
                 if info.get("driven_by") is not None:
                     # K5r2-m4: the parent's run drives this child — its asks / terminal arrive on the PARENT's events
                     msg["driven_by"] = info["driven_by"]
-                    msg["hint"] = "#%d is driven by #%d's run — wait / hold / note on #%d" % (
-                        self.n, info["driven_by"], info["driven_by"])
+                    # K5r3-M2: its questions are issue-qualified there (`#<child>/D<n>`) and answered on the child
+                    par = info["driven_by"]
+                    msg["hint"] = ("#%d is driven by #%d's run — wait / hold / note on #%d; #%d's questions arrive "
+                                   "there as `#%d/D<n>` — answer them with `dev answer --issue %d --qid #%d/D<n>`"
+                                   % (self.n, par, par, self.n, self.n, self.n, self.n))
                 _sent(self.d, msg)
                 return 0
             except LookupError:
@@ -675,22 +678,60 @@ def _ports_for_issue(d, n, attended=True):
                  journal=j, git_dir=common)
 
 
-def cmd_answer(d, a):
+def _child_of_bare(common, n, bare):
+    """K5r3-M2: the Issue whose question a bare `D<k>` answered on #n's driver most recently asked — #n's own, or a
+    child #n's attended run drove (its ask arrived on #n's event stream)."""
     from guildcore import ask as ASK
-    p = _ports_for_issue(d, int(a.issue))
+    for e in reversed(W.Events(common, n).read()):
+        if e.get("type") != "ask":
+            continue
+        try:
+            qi, b = ASK.parse_qid(e.get("qid"))
+        except ValueError:
+            continue
+        qi = e.get("issue") if e.get("issue") is not None else qi
+        if b == bare:
+            return int(qi) if qi is not None else n
+    return n
+
+
+def cmd_answer(d, a):
+    """`dev answer --issue N --qid <qid>`. K5r3-M2: `qid` is issue-qualified as the ask event gave it (`#8/D2`) —
+    a child's question asked on its parent's driver is answered on the CHILD (routed, `routed_to`); a bare `D<k>`
+    that #N's driver last saw as a child's question is refused with a hint naming the child — it never lands on a
+    question of #N with the same number."""
+    from guildcore import ask as ASK
+    try:
+        qi, bare = ASK.parse_qid(a.qid)
+    except ValueError as e:
+        _sent(d, {"answered": False, "error": str(e)})
+        return 64
+    n = int(a.issue)
+    if qi is None:
+        owner = _child_of_bare(d.common(), n, bare)
+        if owner != n:
+            _sent(d, {"answered": False, "child": owner,
+                      "error": "%s on #%d's driver is child #%d's question — answer it with "
+                               "`dev answer --issue %d --qid #%d/%s`" % (bare, n, owner, owner, owner, bare)})
+            return 64
+    target = qi if qi is not None else n
+    p = _ports_for_issue(d, target)
     login = None
     try:
         login = p.gh.viewer_login() if hasattr(p.gh, "viewer_login") else None
     except Exception:                                            # noqa: BLE001
         login = None
     try:
-        did = ASK.answer(p.decisions, p.writer, p.issue, a.qid, a.choice, journal=p.journal, login=login,
+        did = ASK.answer(p.decisions, p.writer, p.issue, bare, a.choice, journal=p.journal, login=login,
                          text=a.text)
     except ValueError as e:
         _sent(d, {"answered": False, "error": str(e)})
         return 64
     d.save()
-    out = {"answered": True, "qid": a.qid, "resolution": did, "choice": a.choice}
+    out = {"answered": True, "qid": ASK.qualify(target, bare), "issue": target, "resolution": did,
+           "choice": a.choice}
+    if target != n:
+        out["routed_to"] = target
     try:                                    # K6 predict-first: the recommendation is revealed only now, after the answer
         res = p.decisions._log().by_id(did)
         if res is not None and res.get("recommended") is not None:

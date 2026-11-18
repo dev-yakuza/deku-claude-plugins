@@ -370,7 +370,7 @@ class Driver(object):
                                  if blk.get("recommended") in blk.options() else None,
                                  predict_first=bool(blk.get("recommended_sha") or blk.get("predict_first")))
                 if p.events is not None:
-                    p.events.emit("ask", p.now(), **q.event(blk.id))
+                    p.events.emit("ask", p.now(), **q.event(blk.id, p.issue))
                 return Outcome(B.StageResult(B.StageResult.ASK, line=blk.get("question") or "-", qid=blk.id), 0)
             st, _x = ASK.settle(p.decisions, p.writer, n, blk, comments, timeline, True, assoc, journal=p.journal)
             if st == "answered":

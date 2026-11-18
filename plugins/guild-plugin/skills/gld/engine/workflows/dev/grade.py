@@ -252,8 +252,5 @@ def _go_recorded(gh, tracker):
     if not tracker:
         return False
     from guildcore.records import markers
-    for c in markers.trusted(gh.comments(int(tracker)), ()):
-        b = markers.body_of(c)
-        if b.startswith("<!-- guild:note -->") and "first-sprint go/no-go" in b and "result: go" in b:
-            return True
-    return False
+    from workflows.dev.predict import is_go_note
+    return any(is_go_note(markers.body_of(c)) for c in markers.trusted(gh.comments(int(tracker)), ()))

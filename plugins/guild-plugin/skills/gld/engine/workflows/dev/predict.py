@@ -15,6 +15,11 @@ Only these answers count as a human judgment in §9.5 (G1, graduation, release).
               answer's resolution block reveals `recommended` + `nonce` (`dev answer` prints the reveal)
   unattended  the pause comment shows evidence, question, options and the reasons — never the token; the pending
               block carries `recommended_sha`; the nonce is journaled BEFORE the commitment is written (crash-safe)
+  wording     (K5r3-M1) the question is rendered from its neutral wording (`Question.neutral`), options in the
+              canonical order (label, token; `stop` last); `apply` — the one enforcement point — REFUSES a blind
+              answer (`predict_first_refused`, recommendation shown openly, never a §9.5 human judgment) when the
+              question, its options, the text going out with it or this stage's decision-log free text names the
+              recommendation, or when the kind states it by being asked (close-decided)
   KICKOFF     its decision block carries `chosen_sha` instead of `chosen` (the chosen interpretation IS the readiness
               question's recommendation); analyze:output names it once the stage goes on
 
@@ -26,6 +31,7 @@ the source stays GitHub); a read that fails keeps the mode ON (the conservative 
 
 import json
 import os
+import re
 
 HIGH_RISK = ("KICKOFF", "STAKES", "EX-ARB:dismiss", "ESCALATE", "SPLIT", "INTEGRATE")
 OPTION_KINDS = ("readiness", "disputed-blocker", "loopback")
@@ -71,6 +77,16 @@ def _go_cache(p):
     return os.path.join(J.engine_dir(c), GO_CACHE) if c else None
 
 
+GO_LINE = re.compile(r"^[ \t]*result:[ \t]*go[ \t]*\r?$", re.M)
+
+
+def is_go_note(body):
+    """K5r3-m7: THE go predicate (predict + grade) — a `<!-- guild:note -->` `first-sprint go/no-go` note whose own
+    line reads `result: go` (anchored: `result: go-later` / `result: no-go` / a quote mid-line is not a go)."""
+    b = str(body or "")
+    return b.startswith("<!-- guild:note -->") and "first-sprint go/no-go" in b and bool(GO_LINE.search(b))
+
+
 def go_recorded(p):
     """True only when a trusted `first-sprint go/no-go` note with `result: go` exists on a sprint tracker."""
     path = _go_cache(p)
@@ -82,7 +98,7 @@ def go_recorded(p):
         for r in rows:
             for c in markers.trusted(p.gh.comments(int(r["number"])), ()):
                 b = markers.body_of(c)
-                if b.startswith("<!-- guild:note -->") and "first-sprint go/no-go" in b and "result: go" in b:
+                if is_go_note(b):
                     if path:
                         from guildcore import journal as J
                         os.makedirs(os.path.dirname(path), exist_ok=True)  # fs-ok: engine cache under <git-common-dir>/guild/engine
@@ -123,13 +139,106 @@ def forced(p, q, stage=None):
     return None
 
 
-def apply(p, q, stage=None):
-    """Turn `q.predict_first` on when it is forced; records why on the question (`pf_why`). Returns q."""
+# K5r3-M1: kinds whose question exists only because the engine proposes one answer — asking it states the
+# recommendation (close-decided is asked only when the judge proposes closing), so it is never a blind judgment
+INHERENT = {"close-decided": "the question is asked only when the judge proposes closing"}
+# words that mark an option as the recommended one
+MARKERS = re.compile(r"권장|추천|recommend|\(rec\)|\bchosen\b", re.I)
+LABEL_MIN = 6                    # a label shorter than this is too generic to search for (e.g. "go")
+LOG_FIELDS = ("reason", "question", "line", "about_to_take")
+
+
+def canonical(options):
+    """K5r3-M1 / r3-m3: a stable order that never depends on the recommendation or on the judge's ranking —
+    by label, then token; `stop` last."""
+    rest = [o for o in options if o["token"] != "stop"]
+    stop = [o for o in options if o["token"] == "stop"]
+    return sorted(rest, key=lambda o: (str(o.get("label") or "").casefold(), o["token"])) + stop
+
+
+def _token_re(tok):
+    return re.compile(r"(?<![A-Za-z0-9_])%s(?![A-Za-z0-9_])" % re.escape(tok))
+
+
+def _strip_enumeration(text, options):
+    """An enumeration of EVERY option (`i1 = A | i2 = B`) names the recommendation no more than the others."""
+    for o in options:
+        text = text.replace("%s = %s" % (o["token"], o.get("label") or ""), " ")
+    return text
+
+
+def leak(p, q, stage=None, texts=()):
+    """Where the rendered question would show its recommendation, or None. Looks at the question text, the
+    context lines, every other text that goes out with it (`texts`: the needs-human line, the pause prose, the
+    cause …), the option labels, and the free-text fields this Issue's decision log already shows for the stage
+    (a STAKES / KICKOFF `reason` that names the chosen interpretation — r3-m1/m2)."""
+    rec = q.recommended
+    if rec is None:
+        return None
+    tre = _token_re(rec)
+    rlabel = next((str(o.get("label") or "") for o in q.options if o["token"] == rec), "")
+    rlabel = rlabel if len(rlabel) >= LABEL_MIN and rlabel != rec else ""
+
+    def names(t):
+        t = _strip_enumeration(str(t or ""), q.options)
+        return bool(tre.search(t)) or bool(rlabel and rlabel.casefold() in t.casefold()) or bool(MARKERS.search(t))
+    if names(q.text):
+        return "question"
+    for i, t in enumerate(list(q.context_lines) + [x for x in texts if x]):
+        if names(t):
+            return "text"
+    for o in q.options:
+        lb = str(o.get("label") or "")
+        if MARKERS.search(lb) or (o["token"] != rec and tre.search(lb)):
+            return "options"
+    try:
+        log = p.decisions._log()
+    except Exception:                                            # noqa: BLE001 — no log to read: nothing shown yet
+        return None
+    for b in log.blocks:
+        if stage is not None and b.get("stage") != stage:
+            continue
+        if b.get("chosen") == rec or (b.get("recommended") == rec and b.get("kind") == q.kind):
+            return "decision-log %s" % b.id
+        for f in LOG_FIELDS:
+            v = b.get(f)
+            if v and (tre.search(str(v)) or (rlabel and rlabel.casefold() in str(v).casefold())):
+                if f == "question" and b.get("status") == "pending-human" and b.get("recommended_sha"):
+                    continue                                     # an earlier blind question passed this same check
+                return "decision-log %s" % b.id
+    return None
+
+
+def swap(q, s):
+    """A text that repeated the question's own (non-neutral) wording, with the neutral wording in its place."""
+    orig = getattr(q, "original", None)
+    if not getattr(q, "neutralized", False) or not orig or not s:
+        return s
+    return q.text if s == orig else str(s).replace(orig, q.text)
+
+
+def apply(p, q, stage=None, texts=()):
+    """THE predict-first enforcement point (`B.ask` and `B.pause` only). Turns `q.predict_first` on when it is
+    forced (records why: `pf_why`); a predict-first question is then rendered from its neutral wording
+    (`q.neutral`) with its options in the canonical order, and refused — `blind_refused`, the block carries
+    `recommended` openly plus `predict_first_refused` — when the question, its options or any text going out
+    with it (`texts`) still shows the recommendation, or when its kind states it by being asked (INHERENT). A
+    refused question is never counted as a blind human judgment (§9.5). Returns q."""
     if not q.predict_first and q.recommended is not None:     # nothing to withhold → the answer is blind anyway
         why = forced(p, q, stage)
         if why:
             q.predict_first = True
             q.pf_why = why
+    if not q.predict_first or q.recommended is None:
+        return q
+    if q.neutral and q.text != q.neutral:
+        q.original, q.text, q.neutralized = q.text, q.neutral, True
+    q.options = canonical(q.options)
+    texts = [swap(q, t) for t in texts]
+    where = ("inherent: %s" % INHERENT[q.kind]) if q.kind in INHERENT else leak(p, q, stage, texts)
+    if where:
+        q.predict_first, q.blind_refused = False, "%s (%s)" % (where, q.pf_why or "requested")
+        q.pf_why = None
     return q
 
 

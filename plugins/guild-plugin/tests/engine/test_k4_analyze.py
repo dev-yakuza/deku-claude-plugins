@@ -235,7 +235,9 @@ class Attended(unittest.TestCase):
         r = A.run(h.p)
         self.assertEqual(r.kind, StageResult.ASK)
         ask = [e for e in h.events if e[0] == "ask"][0][1]
-        self.assertEqual([o["token"] for o in ask["options"]], ["i1", "i2", "stop"])
+        # K5r3-m3: a predict-first ask lists its options in the canonical order (label, token; stop last) — never
+        # the judge's ranking (i1 = the judge's chosen "show the count")
+        self.assertEqual([o["token"] for o in ask["options"]], ["i2", "i1", "stop"])
         # K6 predict-first (§2.6, R5J-M4): KICKOFF is a high-risk group — the person answers before seeing
         # the recommendation; the pending block commits to it (`recommended_sha`), the KICKOFF block seals `chosen`
         self.assertTrue(ask["predict_first"])

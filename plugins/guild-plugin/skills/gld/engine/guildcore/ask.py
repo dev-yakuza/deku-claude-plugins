@@ -31,7 +31,7 @@ parse_guild_answer = answer_rec.parse
 class Question(object):
     def __init__(self, kind, text, options, recommended=None, recommended_by=None,
                  context_lines=(), predict_first=False, point=None, refs=None, stakes=None, waits_at=None,
-                 group=None):
+                 group=None, neutral=None):
         if kind not in ASK_KINDS:
             raise ValueError("ask kind must be one of the §2.6 set: %s" % kind)
         toks = [o["token"] for o in options]
@@ -50,6 +50,12 @@ class Question(object):
         self.group = group                # the §9.5 group the recommendation comes from (workflows.dev.predict)
         self.pf_why = None                # why predict_first is on (workflows.dev.predict.apply) — recorded
         self.nonce = None
+        # K5r3-M1: the wording used when the question is predict-first — it must not state the recommendation
+        # (workflows.dev.predict.apply swaps it in); `blind_refused` = why a forced predict-first was refused
+        # (the rendered text would show the recommendation) — the answer is then NOT a blind human judgment
+        self.neutral = neutral
+        self.neutralized = False
+        self.blind_refused = None
 
     def commitment(self):
         if self.recommended is None:
@@ -70,15 +76,33 @@ class Question(object):
             f["predict_first"] = self.pf_why or "true"     # §9.5: only these answers count as a human judgment
         else:
             f["recommended"] = self.recommended
+            if self.blind_refused:
+                f["predict_first_refused"] = self.blind_refused   # §9.5: NOT a blind answer — never counted as one
         return f
 
-    def event(self, qid):
-        ev = {"qid": qid, "kind": self.kind, "question": self.text, "options": self.options,
-              "context_lines": self.context_lines, "predict_first": self.predict_first}
+    def event(self, qid, issue=None):
+        """K5r3-M2: the event names the Issue the question belongs to — an attended parent drives its children on
+        ITS event stream, so `qid` is issue-qualified (`#8/D2`) and `issue` / `id` carry the parts."""
+        ev = {"qid": qualify(issue, qid), "id": qid, "issue": issue, "kind": self.kind, "question": self.text,
+              "options": self.options, "context_lines": self.context_lines, "predict_first": self.predict_first}
         if not self.predict_first:
             ev["recommended"] = self.recommended
             ev["recommended_by"] = self.recommended_by
         return ev
+
+
+def qualify(issue, qid):
+    """`#<issue>/<D-id>` (K5r3-M2); the bare id when the Issue is unknown."""
+    return "#%d/%s" % (int(issue), qid) if issue is not None and qid else qid
+
+
+def parse_qid(s):
+    """(issue or None, bare D-id) of `#8/D2` | `8/D2` | `D2`; ValueError on anything else."""
+    import re
+    m = re.match(r"^\s*(?:#?([0-9]+)/)?(D[0-9]+)\s*$", str(s or ""))
+    if not m:
+        raise ValueError("%r is not a question id (D<n> or #<issue>/D<n>)" % (s,))
+    return (int(m.group(1)) if m.group(1) else None), m.group(2)
 
 
 def journal_nonce(journal, question):
@@ -114,7 +138,7 @@ def surface(question, attended, decisions, events=None, clock=None, writer=None,
         decisions.stamp_server_time(qid)
         journal_qid(journal, token, qid)
         if events is not None:
-            events.emit("ask", clock.now(), **question.event(qid))
+            events.emit("ask", clock.now(), **question.event(qid, issue))
         return qid
     from guildcore import pause as P
     res = P.pause(writer, decisions, issue, pause_line, question=question, stage=stage)
@@ -133,8 +157,21 @@ def _reveal(journal, qid):
     return {}
 
 
+def _reveal_fields(journal, blk):
+    """The reveal for a predict-first block; K5r3-m4: when the journal cannot reveal it (another clone, a crash
+    between the block and `journal_qid`) the resolution says `reveal: unavailable` — §9.5 must not count it."""
+    out = _reveal(journal, blk.id)
+    if not out and blk.get("recommended_sha"):
+        out = {"reveal": "unavailable"}
+    return out
+
+
 def answer(decisions, writer, issue, qid, choice, journal=None, login=None, text=None):
-    """Attended `dev answer`. Returns the resolution block id."""
+    """Attended `dev answer`. Returns the resolution block id. `qid` may be issue-qualified (`#8/D2`); a qualified
+    id of another Issue is refused — it never lands on this Issue's question with the same number (K5r3-M2)."""
+    qi, qid = parse_qid(qid)
+    if qi is not None and int(qi) != int(issue):
+        raise ValueError("#%d/%s belongs to #%d, not #%d" % (qi, qid, qi, int(issue)))
     log = decisions._log()
     blk = log.by_id(qid)
     if blk is None or blk.get("status") != "pending-human":
@@ -145,7 +182,7 @@ def answer(decisions, writer, issue, qid, choice, journal=None, login=None, text
         raise ValueError("%s is not one of %s" % (choice, "|".join(blk.options())))
     fields = {"point": blk.get("point"), "kind": blk.get("kind"), "stage": blk.get("stage"),
               "by": "human", "choice": choice, "answered_by": login, "reason": text}
-    fields.update(_reveal(journal, qid))
+    fields.update(_reveal_fields(journal, blk))
     did = decisions.resolve(qid, fields)
     if choice != "stop":
         writer.labels_apply(issue, remove=["guild:needs-human"])
@@ -171,7 +208,7 @@ def settle(decisions, writer, issue, block, comments, timeline, unattended=True,
         fields = {"point": block.get("point"), "kind": block.get("kind"),
                   "stage": block.get("stage"), "by": "human", "choice": ans.token,
                   "answered_by": ans.author, "answer_comment": ans.comment_id}
-        fields.update(_reveal(journal, block.id))
+        fields.update(_reveal_fields(journal, block))
         did = decisions.resolve(block.id, fields)
         if journal is not None:
             journal.bump_epoch("answer %s" % block.id)

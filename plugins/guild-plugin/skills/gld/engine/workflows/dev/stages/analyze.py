@@ -418,8 +418,10 @@ def run(p, only=None, config_present=True):
         surf = k.surface.get("ask") or p.engine_cfg("attended_confirm_interpretation", False)
         if surf and "interpretation-surface" not in answers and "readiness" not in answers:
             what = k.surface.get("question") or "해석 확인: %s" % k.chosen
+            # K5r3-M1: KICKOFF is high-risk → this ask is predict-first; its neutral wording never names the chosen one
             q = ASK.Question("interpretation-surface", what, opts,
-                             recommended=k.chosen if k.chosen in [o["token"] for o in opts] else None, recommended_by=d.by)
+                             recommended=k.chosen if k.chosen in [o["token"] for o in opts] else None, recommended_by=d.by,
+                             neutral="#%d: 어느 해석으로 진행할까요?" % p.issue)
             return B.ask(p, STAGE, q, what)
         if p.events is not None:                          # JR-M10 — the person can hold/note
             p.events.emit("progress", p.now(), line="analyze #%d: %s · %s · cast %s" % (
@@ -444,9 +446,10 @@ def run(p, only=None, config_present=True):
             opts.append({"token": "stop", "label": "stop"})
             q = ASK.Question("readiness", line, opts, recommended=k.chosen if k.chosen in [o["token"] for o in opts] else None,
                              recommended_by=d.by, stakes="high")
+            # K5r3-m3: the enumeration in the canonical order (never the judge's ranking)
             return B.pause(p, STAGE, "ambiguity", line, "ambiguity: %s" % line, question=q,
-                           prose="선택지: " + " | ".join("%s = %s" % (i["id"], B.one_line(i["summary"], 80))
-                                                        for i in k.interpretations))
+                           prose="선택지: " + " | ".join("%s = %s" % (o["token"], o["label"])
+                                                        for o in PF.canonical(opts) if o["token"] != "stop"))
         for dim in open_dims:
             assumptions.append("%s %s (stakes %s): %s — %s 로 진행" % (AN.DIM_KEY[dim], k.readiness[dim], stakes[dim],
                                                                     k.choice_needed.get(dim) or "-", k.chosen))

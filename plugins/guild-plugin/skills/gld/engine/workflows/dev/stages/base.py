@@ -341,14 +341,16 @@ def pause(p, stage, cause_kind, line, token_cause, prose="", env_key=None, quest
     """Unattended pause (guildcore.pause order: decision block → needs-human comment → label).
     `extra_labels`/`remove_labels` ride in the SAME label write (test's pending regeneration
     moves guild:test → guild:execute together with guild:needs-human)."""
-    pz = PAUSE.Pause(cause_kind, line, prose, env_key, directive_line)
     token = None
     if question is not None:
         # K6 predict-first (§2.6, R5J-M4): forced on → the pending block carries `recommended_sha` only, the nonce
-        # journaled first; the pause comment never names the recommendation
+        # journaled first; the pause comment never names the recommendation. K5r3-M1: the one enforcement point
+        # also checks every text that goes out with the question (refused → not a blind answer)
         from workflows.dev import predict as PF
-        PF.apply(p, question, stage)
+        PF.apply(p, question, stage, texts=(line, prose, directive_line, token_cause))
+        line, token_cause = PF.swap(question, line), PF.swap(question, token_cause)
         token = ASK.journal_nonce(p.journal, question)
+    pz = PAUSE.Pause(cause_kind, line, prose, env_key, directive_line)
     if extra_labels or remove_labels:
         did = None
         from guildcore.records import needs_human
@@ -376,14 +378,17 @@ def ask(p, stage, question, needs_human_line, pause_args=None):
     if not p.unattended:
         from guildcore.records import needs_human
         from workflows.dev import predict as PF
-        PF.apply(p, question, stage)                       # K6 predict-first: the ask event hides the recommendation
         pa = pause_args or {}
+        # K6 predict-first: the ask event hides the recommendation; K5r3-M1: the one enforcement point checks every
+        # text that goes out with the question (the event, the pending block's cause) — refused → not a blind answer
+        PF.apply(p, question, stage, texts=(needs_human_line, pa.get("line"), pa.get("prose")))
+        needs_human_line = PF.swap(question, needs_human_line)
         try:
-            cause = needs_human.cause_line(pa.get("cause_kind") or "ambiguity", pa.get("line") or needs_human_line,
-                                           pa.get("env_key"))
+            cause = needs_human.cause_line(pa.get("cause_kind") or "ambiguity",
+                                           PF.swap(question, pa.get("line")) or needs_human_line, pa.get("env_key"))
         except ValueError:
             cause = needs_human.cause_line("ambiguity", needs_human_line)
-        qid = ASK.surface(question, True, p.decisions, events=p.events, clock=p.clock,
+        qid = ASK.surface(question, True, p.decisions, events=p.events, clock=p.clock, issue=p.issue,
                           stage=stage, journal=p.journal, cause=cause)
         return StageResult(StageResult.ASK, line=needs_human_line, qid=qid)
     return pause(p, stage, question=question, **(pause_args or {}))

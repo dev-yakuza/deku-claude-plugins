@@ -129,10 +129,11 @@ class M1EngineScope(unittest.TestCase):
         asks = [kw for what, kw in e.h.events if what == "ask"]
         evs = [ev for ev in __import__("guildcore.worker", fromlist=["Events"]).Events(e.common, 7).read()
                if ev.get("type") == "ask"]
-        self.assertEqual([a["qid"] for a in asks + evs][-1], qid)     # the SAME question, not a hold
+        self.assertEqual([a["qid"] for a in asks + evs][-1], "#7/" + qid)     # the SAME question, not a hold
+        self.assertEqual(([a["id"] for a in asks + evs][-1], [a["issue"] for a in asks + evs][-1]), (qid, 7))
         self.assertEqual(self.ran, [])
         self.assertFalse([b for b in blocks(e) if b.get("status") == "superseded"])
-        rc = CLI.main(["answer", "--issue", "7", "--qid", qid, "--choice", "continue"], e.d)
+        rc = CLI.main(["answer", "--issue", "7", "--qid", "#7/" + qid, "--choice", "continue"], e.d)   # as dev.md
         self.assertEqual(rc, 0, e.out.getvalue())
         self.assertEqual(e.run("--attended", "--worker"), 0)
         self.assertEqual(self.ran, [7])
