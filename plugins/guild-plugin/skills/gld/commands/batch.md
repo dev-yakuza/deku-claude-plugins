@@ -90,7 +90,7 @@ cleanup() {
 trap cleanup EXIT INT TERM
 
 BATCH_START=$(date +%s)
-SUCCEEDED=0; FAILED=0; PAUSED=0; INCOMPLETE=0; FAILED_ISSUES=(); INCOMPLETE_ISSUES=(); BUSY_SKIPPED=()
+SUCCEEDED=0; FAILED=0; PAUSED=0; INCOMPLETE=0; FAILED_ISSUES=(); INCOMPLETE_ISSUES=(); BUSY_SKIPPED=(); UNSETTLED=()
 # `set -u` + an EMPTY array: bash 3.2 (the macOS default /bin/bash) aborts an unguarded
 # "${ISSUES[@]}" expansion with `ISSUES[@]: unbound variable` — verified. Phase 1 can
 # legitimately select nothing (e.g. every open Issue is already guild:done), so exit cleanly
@@ -116,7 +116,7 @@ while [ ${#QUEUE[@]} -gt 0 ]; do
   ATTEMPT=0
   echo "[$PROCESSED/$TOTAL] Issue #$ISSUE → $LOG_DIR/issue-${ISSUE}-${TIMESTAMP}-attempt*.log"
 
-  RESUME_TRIES=0; RL_TRIES=0; BUSY_TRIES=0
+  RESUME_TRIES=0; RL_TRIES=0; BUSY_TRIES=0; SETTLE_TRIES=0; SERVICE_TRIES=0
   while true; do
     ATTEMPT=$((ATTEMPT + 1))
     # Each attempt gets its OWN file (not overwritten by a retry) — a rate-limit wait or a
@@ -172,7 +172,34 @@ WAIT_MAX=14400   # 4h ceiling on any single rate-limit wait; the shared region c
       echo "[batch] ⛔ the engine stopped the batch at #$ISSUE: ${ENGINE_HALT:-exit $EXIT_CODE} — fix it, then re-run this script"
       exit 1
     fi
-
+    # 75 with a `rate_limit_info.reason` is NOT a rate limit, each on its OWN budget (6 waits — never RL_TRIES):
+    # `create-settle` (an Issue create's landing is unknown; the engine re-checks it after its settle time) → spent:
+    # reported `create-unsettled #N` (needs-human stays); `gh-service` (GitHub unavailable, no pause written) → spent:
+    # reported `gh-unavailable #N`. Never "FAILED (rate limited …)", never a failure.
+    ENG_WAIT=""; ENG_AT=""
+    if [ "$EXIT_CODE" -eq 75 ]; then
+      ENG_WAIT=$(jq -r -R 'fromjson? | objects | select(.type == "rate_limit_event") | .rate_limit_info | objects | select(.reason == "create-settle" or .reason == "gh-service") | (.reason + " " + ((.resetsAt // "") | tostring))' "$LOG" 2>/dev/null | tail -1 || true)
+      ENG_AT="${ENG_WAIT#* }"; ENG_WAIT="${ENG_WAIT%% *}"
+    fi
+    if [ -n "$ENG_WAIT" ]; then
+      case "$ENG_WAIT" in
+        create-settle) SETTLE_TRIES=$((SETTLE_TRIES + 1)); W_TRIES="$SETTLE_TRIES"; W_END=create-unsettled
+                       W_WHAT="an Issue create's landing is unknown" ;;
+        *)             SERVICE_TRIES=$((SERVICE_TRIES + 1)); W_TRIES="$SERVICE_TRIES"; W_END=gh-unavailable
+                       W_WHAT="GitHub is unavailable" ;;
+      esac
+      if [ "$W_TRIES" -gt 6 ]; then
+        echo "  ⏭ Issue #$ISSUE — $W_WHAT after 6 waits ($W_END)"
+        UNSETTLED+=("$W_END #$ISSUE"); break
+      fi
+      case "$ENG_AT" in ''|*[!0-9]*|??????????????*) ENG_AT="" ;; esac
+      if [ -n "$ENG_AT" ]; then WAIT=$((ENG_AT - $(date +%s) + 5)); else WAIT=900; fi
+      if [ "$WAIT" -lt 60 ]; then WAIT=60; fi
+      if [ "$WAIT" -gt 1800 ]; then WAIT=1800; fi
+      echo "  ⏳ Issue #$ISSUE — $W_WHAT; waiting $((WAIT/60))m (not a rate limit) ($W_TRIES/6)"
+      sleep "$WAIT"
+      continue
+    fi
     # ⚠ In THIS file the fence and its handler sit ABOVE the `[ "$EXIT_CODE" -eq 0 ]` guard.
     # They used to sit below it, and every arm inside that guard ends in `break` or `continue`,
     # so on exit 0 the whole region was DEAD CODE: a rate-limited session that ended cleanly
@@ -459,6 +486,11 @@ fi
 if [ ${#BUSY_SKIPPED[@]} -gt 0 ]; then
   echo "  busy-skipped (another engine run held them — re-run to continue):"
   for BI in "${BUSY_SKIPPED[@]}"; do echo "    busy-skipped $BI"; done
+fi
+if [ ${#UNSETTLED[@]} -gt 0 ]; then
+  echo "  waited out, not failed (create-unsettled: an Issue create's landing stayed unknown, needs-human;"
+  echo "  gh-unavailable: GitHub was down) — re-run to continue:"
+  for UI in "${UNSETTLED[@]}"; do echo "    $UI"; done
 fi
 echo "  Time: $((BATCH_ELAPSED/60))m $((BATCH_ELAPSED%60))s  Cost: \$${TOTAL_COST}"
 echo "  Tokens: in $TOTAL_IN · out $TOTAL_OUT · cache read $TOTAL_CR · create $TOTAL_CC"

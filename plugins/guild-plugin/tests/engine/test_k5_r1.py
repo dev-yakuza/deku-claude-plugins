@@ -290,12 +290,28 @@ class M4SetupErrors(unittest.TestCase):
         self.assertEqual(e.run("--unattended"), 0)
         self.assertIn("defect: engine FAIL — ValueError", e.h.body_with("needs-human"))
 
-    def test_setup_failure_before_ports_is_exit_1_with_a_result_line(self):
+    def test_setup_outage_before_ports_is_a_service_wait(self):
         e = Env(self)
 
         class Broken(object):
             def owner_repo(self):
                 raise GhError("HTTP 503: Service Unavailable")
+        e.d.ports_for = None
+        e.d.gh = lambda: Broken()
+        # K5r2-m8: a TRANSIENT GitHub failure with no writable pause is a service wait (exit 75, reason
+        # gh-service) — never a member failure; a non-transient one stays exit 1 (below)
+        self.assertEqual(e.run("--unattended"), 75)
+        ls = e.lines()
+        self.assertEqual(len(ls), 2)
+        self.assertEqual(json.loads(ls[0])["rate_limit_info"]["reason"], "gh-service")
+        self.assertIn("pause not written", json.loads(ls[1])["result"])
+
+    def test_setup_defect_before_ports_is_exit_1_with_a_result_line(self):
+        e = Env(self)
+
+        class Broken(object):
+            def owner_repo(self):
+                raise ValueError("no remote")
         e.d.ports_for = None
         e.d.gh = lambda: Broken()
         self.assertEqual(e.run("--unattended"), 1)
@@ -390,6 +406,10 @@ class Decision2AutoResume(unittest.TestCase):
 
     def test_resume_after_the_settle_time_takes_back_needs_human_and_runs(self):
         e = Env(self, labels=("guild:design", "guild:needs-human"))
+        # K5r2-m7: the label is the engine's own pause write (its timeline event journaled as an own write)
+        e.h.issue()["timeline"].append({"id": 501, "event": "labeled", "label": {"name": "guild:needs-human"},
+                                        "created_at": "2026-11-18T00:00:00Z", "actor": {"login": "owner"}})
+        J.Journal(e.common, 7).own_write("label", event_id=501, event="labeled", label="guild:needs-human", target=7)
         J.Journal(e.common, 7).append("event", what="retry-after", at=int(time.time()) - 5)
         self.assertEqual(e.run("--unattended"), 0)
         self.assertNotIn("guild:needs-human", e.h.labels())

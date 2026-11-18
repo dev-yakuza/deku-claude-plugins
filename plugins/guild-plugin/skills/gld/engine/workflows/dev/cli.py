@@ -435,7 +435,7 @@ class Run(object):
         """K5r1-M1: the lock a parent takes on a child before driving it or touching its journal."""
         lk = W.IssueLock(self.common, c)
         try:
-            lk.acquire(self.mode())
+            lk.acquire(self.mode(), driven_by=self.n)
         except W.Busy as b:
             return None, b.holder
         return lk, None
@@ -496,7 +496,13 @@ class Run(object):
         if lk.held_by_other():
             try:
                 info, ro = W.attach(self.common, self.n, want_control=True)
-                _sent(self.d, {"attached": True, "mode": info.get("mode"), "read_only": ro, "issue": self.n})
+                msg = {"attached": True, "mode": info.get("mode"), "read_only": ro, "issue": self.n}
+                if info.get("driven_by") is not None:
+                    # K5r2-m4: the parent's run drives this child — its asks / terminal arrive on the PARENT's events
+                    msg["driven_by"] = info["driven_by"]
+                    msg["hint"] = "#%d is driven by #%d's run — wait / hold / note on #%d" % (
+                        self.n, info["driven_by"], info["driven_by"])
+                _sent(self.d, msg)
                 return 0
             except LookupError:
                 pass
@@ -520,7 +526,8 @@ class Run(object):
         clock = d.clock()
         halt_check = lambda: VALVES.halted(self.common)          # noqa: E731
         cfg = d.config(self.main)
-        runner, jr = d.runners(self.common, Journal(self.common, self.n, clock), halt_check, vlabel, cfg)
+        self.run_journal = Journal(self.common, self.n, clock)
+        runner, jr = d.runners(self.common, self.run_journal, halt_check, vlabel, cfg)
         return PO.fsm_factory(self.main, cfg, clock, gh, d.gh_write(repo), runner, jr,
                               unattended=not self.attended, push_url=d.push_url(self.main), plugin=vlabel,
                               env=d.env, events=self.events if self.attended else None,
@@ -570,7 +577,9 @@ class Run(object):
                 if not self.attended and getattr(stop, "retry_at", None):
                     out = F.retry_outcome(stop, stop.retry_at)
                 return self.finish(self._note_retry(out), cost0)
-            self.clear_retry(p0)
+            kept = self.clear_retry(p0)
+            if kept is not None:
+                return self.finish(kept, cost0)
             budget = p0.engine_cfg("budget_usd_per_issue", None)
         except Exception as ex:                                   # noqa: BLE001 — §2.4: every end has a result line
             drv0 = F.Driver(holder["ports_for"], unattended=not self.attended)
@@ -579,25 +588,49 @@ class Run(object):
         boundary = make_boundary(d, self.common, self.main, self.attended, self.events, budget, self.n)
         drv = d.driver(ports_for, not self.attended, vlabel, self.events if self.attended else None, boundary)
         drv.child_lock = self.child_lock
+        if getattr(self, "run_journal", None) is None:          # injected ports (tests): the ports' journal
+            self.run_journal = getattr(ports_for(self.n, None), "journal", None)
+        drv.on_active = self.mirror_pids
         out = drv.run(self.n, self.a.only)
         return self.finish(self._note_retry(out), cost0)
+
+    def mirror_pids(self, n):
+        """K5r2-m1: while the parent drives child #n, every role / judge pid record also lands in J<n> (the
+        child's own journal) — the child's restart check (under ITS lock) then sees a crashed parent's orphan."""
+        j = getattr(self, "run_journal", None)
+        if j is None:
+            return
+        j.pid_mirror = None if (n is None or int(n) == self.n) else J.Journal(self.common, int(n), j.clock)
 
     def clear_retry(self, p0):
         """Decision 2: the supervisor's own resume after `retry_at` — the restart check has just settled the
         unknown create (found → recorded, absent → never landed, created again by its stage) — takes back the
         `guild:needs-human` that pause put on, once (`retry-cleared`)."""
         if self.attended:
-            return
+            return None
         j = J.Journal(self.common, self.n)
         ev = [e for e in j.entries if e.get("kind") == "event" and e.get("what") in ("retry-after", "retry-cleared")]
         if not ev or ev[-1].get("what") != "retry-after":
-            return
+            return None
         from guildcore import state as ST
+        from workflows.dev.fsm import Outcome
         from workflows.dev.stages import base as B
         if B.NEEDS_HUMAN in ST.label_names(p0.gh.issue(self.n).get("labels")):
+            # K5r2-m7: take back ONLY the engine's own label — the LAST `labeled guild:needs-human` must be a write the
+            # engine journaled (server event id); a person who put it back (or a label nobody can attribute) keeps it
+            adds = [ev for ev in (p0.gh.timeline(self.n) or []) if ev.get("event") == "labeled"
+                    and ((ev.get("label") or {}).get("name") if isinstance(ev.get("label"), dict) else ev.get("label"))
+                    == B.NEEDS_HUMAN]
+            if not adds or adds[-1].get("id") is None or adds[-1].get("id") not in set(j.own_label_writes()):
+                j.append("event", what="retry-cleared", kept="needs-human")
+                line = ("guild:needs-human was put on by someone other than the engine during the settle wait — "
+                        "left to them (the unknown create is re-checked when they remove it)")
+                _progress(self.common, self.n, line)
+                return Outcome(B.StageResult(B.StageResult.PAUSE, cause=line), 0)
             p0.writer.labels_apply(self.n, remove=[B.NEEDS_HUMAN])
         j.append("event", what="retry-cleared")
         _progress(self.common, self.n, "auto-resume after the unknown create's settle time — needs-human taken back")
+        return None
 
     def _note_retry(self, out):
         at = getattr(out, "retry_at", None)
@@ -692,7 +725,9 @@ def cmd_hold(d, a):
         _sent(d, {"held": False, "error": "no running worker for #%d" % n})
         return 0
     if ro:
-        _sent(d, {"held": False, "error": "an unattended run owns #%d — hold is attended only" % n})
+        why = ("#%d is driven by #%d's run — hold #%d" % (n, _info["driven_by"], _info["driven_by"])
+               if _info.get("driven_by") is not None else "an unattended run owns #%d — hold is attended only" % n)
+        _sent(d, {"held": False, "error": why})
         return EXIT_BUSY
     W.Events(common, n).request_hold()
     _sent(d, {"held": True, "issue": n})

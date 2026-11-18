@@ -180,6 +180,9 @@ class Journal(JournalView):
         except IOError:
             pass
         JournalView.__init__(self, entries, torn)
+        # K5r2-m1: while a parent drives a child (2b), the runners' pid records are ALSO written to the child's
+        # own journal — a person's `/gld dev <child>` after a parent crash reaps the orphan from J<child>
+        self.pid_mirror = None
 
     def _now(self):
         if self.clock is not None:
@@ -288,8 +291,13 @@ class Journal(JournalView):
     def record_pid(self, who, pid, pgid, start_time, session_id=None):
         # K5r1-M1: the engine process that started the group (pid + its own start time) rides along — a
         # restart reaps a group only when that owner is provably dead (a crashed run), never a live run's
-        return self.append("pid", who=who, pid=pid, pgid=pgid, start_time=start_time,
-                           session_id=session_id, owner=os.getpid(), owner_start=_own_start())
+        rec = self.append("pid", who=who, pid=pid, pgid=pgid, start_time=start_time,
+                          session_id=session_id, owner=os.getpid(), owner_start=_own_start())
+        m = self.pid_mirror
+        if m is not None and m is not self:
+            m.append("pid", who=who, pid=pid, pgid=pgid, start_time=start_time, session_id=session_id,
+                     owner=os.getpid(), owner_start=_own_start(), via=self.issue)
+        return rec
 
     def pids(self):
         return [e for e in self.entries if e["kind"] == "pid"]

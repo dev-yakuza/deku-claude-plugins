@@ -51,7 +51,7 @@ class IssueLock(object):
         self.fd = None
         self.clock = clock
 
-    def acquire(self, mode):
+    def acquire(self, mode, driven_by=None):
         if mode not in MODES:
             raise ValueError("lock mode must be attended|unattended")
         os.makedirs(os.path.dirname(self.flock_path), exist_ok=True)  # fs-ok: engine lock/log under <git-common-dir>/guild/engine (no role can write there)
@@ -68,6 +68,8 @@ class IssueLock(object):
         now = (self.clock or Clock()).now()
         info = {"mode": mode, "pid": os.getpid(), "pgid": os.getpgid(0), "started": now,
                 "pstart": process_start(os.getpid()), "issue": self.issue}
+        if driven_by is not None:           # K5r2-m4: a parent's run holds this child's lock (its events are the parent's)
+            info["driven_by"] = int(driven_by)
         J.atomic_write(self.info_path, json.dumps(info, sort_keys=True))
         return info
 
@@ -209,7 +211,8 @@ def attach(common_dir, issue, want_control):
     info = lk.holder()
     if not lk.held_by_other() or not holder_alive(info):
         raise LookupError("no running worker for #%s" % issue)
-    read_only = info.get("mode") == "unattended" and want_control
+    # K5r2-m4: a child driven by its parent's run is read-only too — its events, hold and notes are the parent's
+    read_only = (info.get("mode") == "unattended" or info.get("driven_by") is not None) and want_control
     return info, read_only
 
 

@@ -199,6 +199,8 @@ The classes the supervisor writes — **this list is the code's, verbatim**:
 | `dependency-blocked` · `base-unresolved` · `branch-ambiguous` · `account-rate-limited` | **차단** — 의존이 아직 랜딩되지 않았거나, 후보 브랜치가 둘 이상이거나, 계정 한도의 리셋이 4시간 넘게 남았다. 실패로 렌더하지 말 것 — **재실행이 큐를 이어받는다** |
 | `branch-assumed` | **정보** — 실패도 차단도 아니다. 이슈 번호가 맞는 브랜치가 하나뿐이어서 그것으로 재개했다는 기록. 소유를 증명한 것은 아니므로 사람이 확인할 수 있게 남긴다 |
 | `split-stalled` | **미완**(실패로 집계) — 분할 부모의 자식 오케스트레이션이 전진을 멈췄다 |
+| `create-settle-wait` · `create-unsettled` | **대기 / 차단**(0.102) — 엔진의 이슈 생성 착지가 불명(종료 75, `reason: create-settle` — rate limit 아님). `create-settle-wait` 는 settle 시각까지의 제자리 대기 기록(자체 한도 6회), `create-unsettled` 는 6회가 지나도 불명이라 needs-human 으로 남김. 실패로 렌더하지 말 것, `account-rate-limited` 로도 렌더하지 말 것 — **재실행이 이어받는다** |
+| `gh-service-wait` · `gh-unavailable` | **대기 / 차단**(0.102) — GitHub 장애로 엔진이 `env: service` pause 조차 쓰지 못함(종료 75, `reason: gh-service`). 자체 한도 6회 대기 후 `gh-unavailable` 로 남김. 실패가 아니다(하류 차단 없음) — **재실행이 이어받는다** |
 | `busy` · `busy-skipped` | **미처리**(0.102) — 다른 엔진 실행이 그 이슈를 잡고 있었다(종료 4). `busy` 는 제자리 대기 기록, `busy-skipped` 는 두 번 기다려도 잡혀 있어 이번 실행에서 건너뜀. 실패도 차단도 아니다 — **재실행이 이어받는다** |
 
 ⚠ `base-decision-failed`와 `base-unresolved`는 **다른 일**이다. 앞은 base 결정 자체가 실패한
@@ -433,12 +435,16 @@ Sprint #99 — 결제 흐름 안정화      (시작 3일 전 · state: rate-limi
   as a dead run. ⚠ Render the `state` token as the supervisor writes it and translate for the
   human beside it — the shapes are `running` · `installing-deps` ·
   `rate-limited-until-<epoch-seconds>` · `rate-limited-remaining-<n>s` ·
+  `create-settle-until-<epoch-seconds>` · `create-settle-remaining-<n>s` (0.102 — an Issue create's landing is
+  unknown and the engine re-checks it after its settle time; **not** a rate limit — say *"이슈 생성 확인 대기 — 예상 재개 14:20"*) ·
+  `gh-service-until-<epoch-seconds>` · `gh-service-remaining-<n>s` (0.102 — GitHub unavailable; say *"GitHub 장애 대기 — 예상 재개 14:20"*) ·
   **`waiting-for-window-<HHMM>`** · `finished` · `halted:<reason>` (ASCII, `_handoff.md`
   Section K). `rate-limited-until-1790000000` becomes *"rate-limited — 예상 재개 14:20"*;
   `waiting-for-window-2200` becomes *"창 밖 대기 중 — 22:00에 재개"* (the `HHMM` in the token
   **is** the next window opening); do **not** invent a shape the supervisor never writes.
   ⚠ **`halted:<reason>`**: `interrupted` · `window-invalid` · `marker-unwritable` ·
-  `container-lost` · `sigTERM` · `sigHUP` · `plan-hash-mismatch`. `halted:marker-unwritable`
+  `container-lost` · `sigTERM` · `sigHUP` · `plan-hash-mismatch` · (0.102, the engine) `engine-kill-switch` ·
+  `plugin-version-changed` · `engine-gh-auth` · `engine-env-<reason>` · `engine-env-missing`. `halted:marker-unwritable`
   is the one whose reason may exist **only** in `.sprint-logs/<tracker>/dag/ledger.json` —
   the marker write is what failed.
 - **How to stop it.** ⚠ For any live state, print the marker's `pid` with the command:

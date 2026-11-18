@@ -110,6 +110,9 @@ class Driver(object):
         self.events = events
         self.depth = 0
         self.active = None              # the Issue whose stage is running (a child's, inside 2b)
+        # K5r2-m1: `on_active(n)` — told which Issue's stages run now (a child while 2b drives it, the parent
+        # after); the CLI mirrors the runners' pid records into that child's own journal
+        self.on_active = None
 
     # -- the process end -------------------------------------------------------------------------
     def run(self, n, only=None):
@@ -145,8 +148,12 @@ class Driver(object):
                 return Outcome(None, 3, "gh auth failed — %s" % B.one_line(str(ex), 160))
             if kind == "ratelimit":
                 return Outcome(None, 75, "GitHub rate limit — %s" % B.one_line(str(ex), 120))
+            if self.unattended and kind in ("transient", "unknown", "ambiguous"):
+                return service_wait(reason, ex)
             return Outcome(None, 1, "engine FAIL — %s (pause not written: %s)" % (reason, B.one_line(str(ex), 80)))
         except Exception as ex:                                       # noqa: BLE001
+            if self.unattended and cls == "transient":                # e.g. `gh repo view` 502 before any port
+                return service_wait(reason, ex)
             return Outcome(None, 1, "engine FAIL — %s (pause not written: %s)" % (reason, B.one_line(str(ex), 80)))
 
     def _fn(self, stage):
@@ -247,10 +254,14 @@ class Driver(object):
                 raise ChildEnded(Outcome(B.StageResult(B.StageResult.HOLD, line=line), 4, line))
         self.depth += 1
         parent = self.active
+        if self.on_active is not None:
+            self.on_active(c)
         try:
             out = self._run(c, None)
         finally:
             self.depth -= 1
+            if self.on_active is not None:
+                self.on_active(parent)
             if lock is not None:
                 lock.release()
         self.active = parent            # an exception leaves `active` on the child: its pause lands there
@@ -395,10 +406,28 @@ def retry_outcome(result, at):
     """Exit 75 with `resetsAt` = `at`: the supervisor's wait-and-rerun path (bounded there — 6 waits, then
     `account-rate-limited` blocked, never failed). The result line says what it is: not a rate limit."""
     import time as _t
-    line = "env: service — an Issue create's landing is unknown; the supervisor resumes after %s and re-checks " \
+    line = "create-settle-wait: an Issue create's landing is unknown; the supervisor resumes after %s and re-checks " \
            "it (found → go on, absent → create again) — not a rate limit" % _t.strftime("%Y-%m-%dT%H:%M:%SZ", _t.gmtime(int(at)))
     o = Outcome(result, 75, line, rl=_Reset(at))
     o.retry_at = int(at)
+    o.wait_reason = "create-settle"          # K5r2-m2: the stdout event names it — never read as a rate limit
+    return o
+
+
+SERVICE_WAIT_S = 900
+
+
+def service_wait(reason, ex):
+    """K5r2-m8: GitHub is unavailable AND the `env: service` pause could not be written either (or nothing to
+    write it with existed yet) — the member is not failed (§2.4 r1-M4: a transient is never a failure): exit 75
+    with `reason: gh-service` and `resetsAt = now + 15 min`; the supervisor / batch wait on their own budget,
+    then leave the member blocked `gh-unavailable` (re-run picks it up) — never `child-session-failed`."""
+    import time as _t
+    at = int(_t.time()) + SERVICE_WAIT_S
+    line = "gh-service-wait: GitHub unavailable — %s (pause not written: %s) — retry after %s; not a rate limit" % (
+        B.one_line(reason, 160), B.one_line(str(ex), 80), _t.strftime("%Y-%m-%dT%H:%M:%SZ", _t.gmtime(at)))
+    o = Outcome(None, 75, line, rl=_Reset(at))
+    o.wait_reason = "gh-service"
     return o
 
 
@@ -439,7 +468,8 @@ def final_events(outcome, cost_usd=0.0, out=None):
     if outcome.exit_code == 75:
         import time
         resets = getattr(outcome.rl, "resets_at", None) if outcome.rl is not None else None
-        emit.rate_limit_event("rejected", resets or int(time.time()) + 900, out=out)   # §2.4: else now+15 min
+        emit.rate_limit_event("rejected", resets or int(time.time()) + 900, out=out,   # §2.4: else now+15 min
+                              reason=getattr(outcome, "wait_reason", None))
     else:
         emit.rate_limit_event("allowed", None, out=out)
     emit.stream_result(cost_usd, outcome.exit_code not in (0,), outcome.line, out=out)

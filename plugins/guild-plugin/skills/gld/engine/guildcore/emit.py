@@ -48,7 +48,14 @@ def stream_result(cost_usd, is_error, line, usage=None, out=None):
     return text
 
 
-def rate_limit_event(status, resets_at=None, out=None):
+WAIT_REASONS = ("create-settle", "gh-service")
+
+
+def rate_limit_event(status, resets_at=None, out=None, reason=None):
+    """`reason` (K5r2-m2) — a rejected verdict that is NOT a rate limit names why the run waits:
+    `create-settle` = an Issue create's landing is unknown, resume after its settle time (user decision 2);
+    `gh-service` = GitHub unavailable and no pause could be written (K5r2-m8). The
+    supervisor and batch read it before their rate-limit fence (own wait, own budget, own labels)."""
     if status not in ("allowed", "rejected"):
         raise ValueError("status must be allowed|rejected")
     info = {"status": status}
@@ -56,6 +63,10 @@ def rate_limit_event(status, resets_at=None, out=None):
         if resets_at is None:
             raise ValueError("a rejected verdict always carries resetsAt (§2.4)")
         info["resetsAt"] = int(resets_at)
+        if reason is not None:
+            if reason not in WAIT_REASONS:
+                raise ValueError("unknown wait reason %r" % reason)
+            info["reason"] = reason
     obj = {"type": "rate_limit_event", "rate_limit_info": info}
     text = dumps(obj) + "\n"
     (out or sys.stdout).write(text)

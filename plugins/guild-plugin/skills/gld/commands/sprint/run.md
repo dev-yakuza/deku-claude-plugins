@@ -746,6 +746,10 @@ nothing. Match on the wildcard and name the action for each:
 | `halted:sigTERM` / `halted:sigHUP` | Someone stopped it. The member that was running finished first; re-run to continue |
 | `halted:interrupted` | An abnormal exit that named no reason (SIGKILL cannot; power loss, battery, a forced reboot). ⚠ **A card may be stuck on `In progress`** — say so |
 | `halted:plan-hash-mismatch` | The tracker body changed. Re-plan or accept, per Phase 1 step 4 |
+| `halted:engine-kill-switch` | (0.102) `gld_engine.py dev valve halt` is in force. Find out why (`dev valve show`), `dev valve resume` when it is safe, then call `run` again |
+| `halted:plugin-version-changed` | (0.102) The active Guild plugin version changed under the running supervisor. Call `run` again — it regenerates the supervisor for the new version |
+| `halted:engine-gh-auth` | (0.102) The engine's `gh` auth failed (exit 3) — every member would fail the same way. `gh auth login`, then call `run` again |
+| `halted:engine-env-<reason>` | (0.102) The engine refused its environment (`endpoint` · `python` · `uninitialized` · `plugin-not-listed` · `ignored-missing` · `build-inputs-changed` · `missing` — the engine file is gone from the plugin cache · `unknown`). Fix it per `_handoff.md`'s `halted:<reason>` list, then call `run` again |
 
 ⚠ **Never report a `halted:*` run with the normal counts alone.** `done 0 / failed 0` over a
 run that refused to start is the class of report this arm exists to remove.

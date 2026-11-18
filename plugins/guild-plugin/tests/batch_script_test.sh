@@ -262,10 +262,38 @@ run_case "공백 있는 status → 리셋을 살려낸다"             "(10m " "
 printf '{"type":"rate_limit_event","rate_limit_info":{"status":"allowed"}}\n{"type":"rate_limit_event","rate_limit_info":{"status":"rejected","resetsAt":%s}}{"type":"assistant","m":1}\n' "$FUT" > "$WORK/limitfirst.log"
 run_case "한도가 먼저인 겹친 줄 → 감지"                   "SLEEP=" "$WORK/limitfirst.log"
 
+# K5r2-m2: exit 75 with `reason: create-settle` is NOT a rate limit — its own budget (6), never "FAILED (rate limited …)",
+# reported `create-unsettled #N`; a real rate limit afterwards still has all six of its own waits.
+mkdir -p "$WORK/st/bin" && ( cd "$WORK/st" && git init -q . )
+cat > "$WORK/st/eng.py" <<'ENG'
+import os, sys, time
+n = sys.argv[sys.argv.index("--issue") + 1]
+open(os.environ["ST_LOG"], "a").write("S %s\n" % n)
+if n == "1":
+    print('{"type":"rate_limit_event","rate_limit_info":{"status":"rejected","resetsAt":%d,"reason":"create-settle"}}' % (int(time.time()) + 600))
+    print('{"type":"result","is_error":true,"result":"create-settle-wait: not a rate limit","total_cost_usd":0,"usage":{}}')
+    sys.exit(75)
+print('{"type":"rate_limit_event","rate_limit_info":{"status":"allowed"}}')
+print('{"type":"result","is_error":false,"result":"OK DONE","total_cost_usd":0,"usage":{}}')
+ENG
+printf '#!/bin/bash\ncase "$*" in "repo view"*) echo o/r ;; "issue view"*) echo guild:done ;; *) : ;; esac\n' > "$WORK/st/bin/gh"
+printf '#!/bin/bash\nexit 0\n' > "$WORK/st/bin/sleep"
+chmod +x "$WORK/st/bin/gh" "$WORK/st/bin/sleep"
+sed "s|^ENGINE=.*|ENGINE='$WORK/st/eng.py'|" "$WORK/batch.sh" > "$WORK/st/b.sh"
+ST_OUT="$(cd "$WORK/st" && PATH="$WORK/st/bin:$PATH" ST_LOG="$WORK/st/starts" "$SH" b.sh 2>&1)"
+ST_N="$(grep -c '^S 1$' "$WORK/st/starts" 2>/dev/null || true)"
+case "$ST_OUT" in
+  *"rate limited"*|*"Rate limited"*) bad "create-settle 대기 ≠ rate limit (batch)" "no rate-limit wording" "$(printf '%s' "$ST_OUT" | grep -i 'rate limited' | head -1)" ;;
+  *"create-unsettled #1"*"Failed: 0"*|*"Failed: 0"*"create-unsettled #1"*)
+    if [ "$ST_N" = 7 ]; then ok "create-settle 대기: 자체 한도 6회 → create-unsettled #1, 실패 아님 (batch)"
+    else bad "create-settle 대기 횟수 (batch)" "7 starts" "$ST_N"; fi ;;
+  *) bad "create-settle 대기 (batch)" "create-unsettled #1, Failed: 0" "$(printf '%s' "$ST_OUT" | grep -E 'Total:|create-unsettled|⏳' | head -3 | tr '\n' ' ')" ;;
+esac
+
 # ⚠ A floor. Without it an argument-count error or an unbalanced quote truncates the run and the
 # suite reports success on a fraction of its checks. This file now carries four invariants that
 # no other suite sees: the COMPLETED gate, the jq preflight, the priority gate, the reporting jq.
-BAT_MIN_CHECKS=33
+BAT_MIN_CHECKS=34
 if [ "$((PASS + FAIL))" -lt "$BAT_MIN_CHECKS" ]; then
   printf '\nFAIL  ran only %d checks (floor %d) — the run was truncated.\n' \
     "$((PASS + FAIL))" "$BAT_MIN_CHECKS"

@@ -1176,13 +1176,14 @@ hb_sleep() {
   # A non-numeric or negative argument would make the arithmetic below either abort under
   # `set -e` or loop on a nonsense value. Callers clamp, but this is the last line of defence.
   case "$1" in ''|*[!0-9]*) return 0 ;; esac
-  local remain="$1" chunk
+  # $2 = the wait's state prefix (default rate-limited; K5r2-m2: create-settle for an engine create-settle wait)
+  local remain="$1" chunk what="${2:-rate-limited}"
   while [ "$remain" -gt 0 ]; do
     chunk="$HEARTBEAT_EVERY"
     [ "$remain" -lt "$chunk" ] && chunk="$remain"
     sleep "$chunk"
     remain=$((remain - chunk))
-    heartbeat "rate-limited-remaining-${remain}s"
+    heartbeat "${what}-remaining-${remain}s"
   done
 }
 
@@ -2116,7 +2117,7 @@ while [ ${#QUEUE[@]} -gt 0 ]; do
   fi
   heartbeat "running"
 
-  RESUME_TRIES=0; RL_TRIES=0; RL_ZEROWAIT=0; ATTEMPT=0; BUSY_TRIES=0
+  RESUME_TRIES=0; RL_TRIES=0; RL_ZEROWAIT=0; ATTEMPT=0; BUSY_TRIES=0; SETTLE_TRIES=0; SERVICE_TRIES=0
   # A value no child count can equal, so the first pass always reads as progress without
   # SPLIT_PREV having to double as a sentinel (that dual role was BLOCKER B1).
   SPLIT_PREV=999999; SPLIT_STALL=0; SPLIT_PASSES=0
@@ -2211,6 +2212,7 @@ while [ ${#QUEUE[@]} -gt 0 ]; do
       fi
       echo "  ⏭ Issue #$ISSUE — still held by another engine run; left unprocessed"
       record_event "$ISSUE" busy-skipped "another engine run still holds #$ISSUE — unprocessed, the next run picks it up"
+      board_col "$ISSUE" ready                     # K5r2-m5: unprocessed — not left In progress
       break
     fi
     if [ "$EXIT_CODE" -eq 3 ] || [ "$EXIT_CODE" -eq 6 ] || [ "$EXIT_CODE" -eq 126 ] || [ "$EXIT_CODE" -eq 127 ]; then
@@ -2229,6 +2231,43 @@ while [ ${#QUEUE[@]} -gt 0 ]; do
       echo "  ⛔ Issue #$ISSUE — the engine stopped the sprint: halted:$HALT_REASON"
       marker_write "halted:$HALT_REASON" 2>/dev/null || true
       exit 1
+    fi
+    #   75 with a `rate_limit_info.reason` (K5r2-m2/m8) — NOT a rate limit, each on its OWN budget (6 waits, never
+    #     RL_TRIES), heartbeat `<reason>-until-<epoch>`, never account-rate-limited, never failed.txt:
+    #     `create-settle` — an Issue create's landing is unknown (user decision 2): events create-settle-wait /
+    #       create-unsettled, board `blocked create-unsettled` (needs-human stays);
+    #     `gh-service` — GitHub unavailable and no pause could be written: events gh-service-wait / gh-unavailable,
+    #       board `blocked gh-unavailable` — the member is paused for this run, the re-run picks it up.
+    ENG_WAIT=""; ENG_AT=""
+    if [ "$EXIT_CODE" -eq 75 ]; then
+      ENG_WAIT=$(jq -r -R 'fromjson? | objects | select(.type == "rate_limit_event") | .rate_limit_info | objects | select(.reason == "create-settle" or .reason == "gh-service") | (.reason + " " + ((.resetsAt // "") | tostring))' "$LOG" 2>/dev/null | tail -1 || true)
+      ENG_AT="${ENG_WAIT#* }"; ENG_WAIT="${ENG_WAIT%% *}"
+    fi
+    if [ -n "$ENG_WAIT" ]; then
+      case "$ENG_WAIT" in
+        create-settle) SETTLE_TRIES=$((SETTLE_TRIES + 1)); W_TRIES="$SETTLE_TRIES"; W_END=create-unsettled
+                       W_WHAT="an Issue create's landing is unknown" ;;
+        *)             SERVICE_TRIES=$((SERVICE_TRIES + 1)); W_TRIES="$SERVICE_TRIES"; W_END=gh-unavailable
+                       W_WHAT="GitHub is unavailable (no pause could be written)" ;;
+      esac
+      if [ "$W_TRIES" -gt 6 ]; then
+        echo "  ⏭ Issue #$ISSUE — $W_WHAT after 6 waits; left for the re-run ($W_END)"
+        record_event "$ISSUE" "$W_END" "$W_WHAT after 6 waits — not a failure; re-run picks it up"
+        board_col "$ISSUE" blocked "$W_END"
+        BLOCKED=$((BLOCKED + 1)); BLOCKED_ISSUES+=("#$ISSUE ($W_END)")
+        break
+      fi
+      case "$ENG_AT" in ''|*[!0-9]*|??????????????*) ENG_AT="" ;; esac
+      NOW=$(date +%s)
+      if [ -n "$ENG_AT" ]; then WAIT=$((ENG_AT - NOW + 5)); else WAIT=900; fi
+      if [ "$WAIT" -lt 60 ]; then WAIT=60; fi
+      if [ "$WAIT" -gt 1800 ]; then WAIT=1800; fi
+      echo "  ⏳ Issue #$ISSUE — $W_WHAT; waiting $((WAIT/60))m (not a rate limit) ($W_TRIES/6)"
+      record_event "$ISSUE" "${ENG_WAIT}-wait" "$W_WHAT — the engine re-checks after ${WAIT}s ($W_TRIES/6)"
+      heartbeat "${ENG_WAIT}-until-$(( $(date +%s) + WAIT ))"
+      hb_sleep "$WAIT" "$ENG_WAIT"
+      heartbeat "running"
+      continue
     fi
     # <!-- /guild:supervisor-core:engineexit -->
 
@@ -2648,6 +2687,8 @@ if [ -n "$BOARD_NUMBER" ]; then
              *"(branch-ambiguous)"*)  board_col "$BOARD_BI" blocked branch-ambiguous ;;
              *"(base-unresolved"*)    board_col "$BOARD_BI" blocked base-unresolved ;;
              *"(account-rate-limited)"*) board_col "$BOARD_BI" blocked account-rate-limited ;;
+             *"(create-unsettled)"*)  board_col "$BOARD_BI" blocked create-unsettled ;;
+             *"(gh-unavailable)"*)    board_col "$BOARD_BI" blocked gh-unavailable ;;
              *)                       board_col "$BOARD_BI" blocked dep-unresolved ;;
            esac ;;
     esac

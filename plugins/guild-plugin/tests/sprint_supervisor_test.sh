@@ -1391,6 +1391,20 @@ if mode == "envnet":
     sys.exit(6)
 if mode == "py":
     sys.exit(127)
+if mode in ("settle101", "settleonce") and n == "101":
+    cnt = os.environ["K5_SPAWN"] + ".settle"
+    k = int(open(cnt).read()) if os.path.exists(cnt) else 0
+    open(cnt, "w").write(str(k + 1))
+    if mode == "settle101" or k == 0:
+        import time
+        print('{"type":"rate_limit_event","rate_limit_info":{"status":"rejected","resetsAt":%d,"reason":"create-settle"}}' % (int(time.time()) + 600))
+        print('{"type":"result","is_error":true,"result":"create-settle-wait: an Issue create\'s landing is unknown — not a rate limit","total_cost_usd":0,"usage":{}}')
+        sys.exit(75)
+if mode == "svc101" and n == "101":
+    import time
+    print('{"type":"rate_limit_event","rate_limit_info":{"status":"rejected","resetsAt":%d,"reason":"gh-service"}}' % (int(time.time()) + 900))
+    print('{"type":"result","is_error":true,"result":"gh-service-wait: GitHub unavailable — not a rate limit","total_cost_usd":0,"usage":{}}')
+    sys.exit(75)
 if mode == "busy" or (mode == "busy101" and n == "101"):
     print('{"type":"result","is_error":true,"result":"busy: #%s is held by an unattended run","total_cost_usd":0,"usage":{}}' % n)
     sys.exit(4)
@@ -1469,6 +1483,34 @@ if [ "$K5_RC" -eq 0 ] && [ "$K5_N" = 2 ] && _has "version-check-unavailable" "$K
   ok "K5g: an unavailable version check warns and the sprint goes on"
 else
   bad "K5g: unavailable check" "rc=$K5_RC starts=$K5_N out=[$(printf '%s' "$K5_OUT" | grep -E 'Total:|Done:|⚠' | head -3 | tr '\n' ' ')]"
+fi
+# K5r2-m2: exit 75 + reason create-settle is NOT a rate limit — its own wait (6, never RL_TRIES), its own
+# heartbeat/events/board token, never account-rate-limited, never failed; the next member still runs
+k5_run k5settle settle101
+if [ "$K5_N" = 8 ] && grep -q '"create-unsettled"' "$K5_D/failures.jsonl" 2>/dev/null \
+   && [ "$(grep -c '"create-settle-wait"' "$K5_D/failures.jsonl" 2>/dev/null)" = 6 ] \
+   && ! grep -q 'account-rate-limited' "$K5_D/failures.jsonl" 2>/dev/null && ! _has "Rate limited" "$K5_OUT" \
+   && _has "not a rate limit" "$K5_OUT" && k5_nofail && _has "Done: 1" "$K5_OUT"; then
+  ok "K5h: create-settle waits on its own budget (6), then create-unsettled — never rate-limited, never failed"
+else
+  bad "K5h: create-settle wait" "starts=$K5_N events=[$(grep -o '"class": *"[a-z-]*"' "$K5_D/failures.jsonl" 2>/dev/null | sort | uniq -c | tr '\n' ' ')] out=[$(printf '%s' "$K5_OUT" | grep -E 'Total:|Done:|⏭|⏳' | head -4 | tr '\n' ' ')]"
+fi
+k5_run k5settle1 settleonce
+if [ "$K5_N" = 3 ] && [ "$(grep -c '"create-settle-wait"' "$K5_D/failures.jsonl" 2>/dev/null)" = 1 ] \
+   && ! grep -q 'create-unsettled\|account-rate-limited' "$K5_D/failures.jsonl" 2>/dev/null && _has "Done: 2" "$K5_OUT"; then
+  ok "K5i: one create-settle wait, then the rerun finishes the member"
+else
+  bad "K5i: create-settle once" "starts=$K5_N out=[$(printf '%s' "$K5_OUT" | grep -E 'Total:|Done:|⏳' | head -3 | tr '\n' ' ')]"
+fi
+# K5r2-m8: a GitHub outage the engine could not even pause on → exit 75 `gh-service`: waits, then gh-unavailable —
+# never child-session-failed, the next member still runs
+k5_run k5svc svc101
+if [ "$K5_N" = 8 ] && grep -q '"gh-unavailable"' "$K5_D/failures.jsonl" 2>/dev/null \
+   && [ "$(grep -c '"gh-service-wait"' "$K5_D/failures.jsonl" 2>/dev/null)" = 6 ] \
+   && ! grep -q 'account-rate-limited' "$K5_D/failures.jsonl" 2>/dev/null && k5_nofail && _has "Done: 1" "$K5_OUT"; then
+  ok "K5j: a GitHub outage (gh-service) waits on its own budget, then gh-unavailable — never failed"
+else
+  bad "K5j: gh-service wait" "starts=$K5_N events=[$(grep -o '"class": *"[a-z-]*"' "$K5_D/failures.jsonl" 2>/dev/null | sort | uniq -c | tr '\n' ' ')]"
 fi
 rm -f "$H/bin/sleep"
 fi

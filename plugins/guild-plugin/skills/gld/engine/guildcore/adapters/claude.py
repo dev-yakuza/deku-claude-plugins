@@ -299,15 +299,24 @@ def isolated_config_dir(cfg):
         return False
     home = os.path.realpath(os.path.expanduser("~"))
     real = os.path.realpath(cfg)
-    return not (real == home or (os.path.basename(real).startswith(".claude") and os.path.dirname(real) == home))
+    if real == home:
+        return False
+    # K5r2-m6: a ~/.claude* directory OR anything inside one (`~/.claude/sub`) is the person's real config
+    rel = os.path.relpath(real, home)
+    top = rel.split(os.sep)[0]
+    return not (not rel.startswith("..") and top.startswith(".claude"))
 
 
 def test_isolation_guard(argv, env):
     if (env or {}).get("GLD_ENGINE_TEST") != "1" and os.environ.get("GLD_ENGINE_TEST") != "1":
         return
-    if not argv or os.path.basename(str(argv[0])) != "claude":
+    if not argv or not os.path.basename(str(argv[0])).lower().startswith("claude"):
         return
     e = env or {}
+    # K5r2-m6: a cloud-provider switch routes to a paid endpoint whatever ANTHROPIC_BASE_URL says
+    for k in ("CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX", "CLAUDE_CODE_USE_FOUNDRY"):
+        if (e.get(k) or "").strip() not in ("", "0", "false"):
+            raise TestIsolation("GLD_ENGINE_TEST=1: %s routes a claude child to a cloud endpoint" % k)
     base = _norm_url(e.get("ANTHROPIC_BASE_URL"))
     m = re.match(r"^https?://([^/:]+|\[[^\]]+\])(:\d+)?(/|$)", base)
     if not isolated_config_dir(e.get("CLAUDE_CONFIG_DIR")) or not m or m.group(1) not in _LOCAL_HOSTS:
