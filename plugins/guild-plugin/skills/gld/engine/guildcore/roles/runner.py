@@ -448,6 +448,11 @@ class Runner(object):
         if tools:
             # non-setuid ps first on PATH — setuid binaries cannot run in the sandbox (K1r5)
             gitenv["PATH"] = tools + os.pathsep + env.get("PATH", "")
+        if spec.base and rendered.meta.get("project_base_sha"):
+            # user decision (2026-11-18): the role's commit hook reads <base>'s lefthook config
+            lh = S.base_lefthook_env(spec.worktree, rendered.meta["project_base_sha"], os.path.join(run_dir, "in"))
+            gitenv.update(lh)
+            env.update(lh)
         if rendered.meta.get("gates_dir"):
             # K3: a hook manager's gate (lefthook `guild-gate`) reads the BASE config too
             gitenv["GUILD_GATE_CONFIG"] = S.gate_config_path(rendered.meta["gates_dir"])

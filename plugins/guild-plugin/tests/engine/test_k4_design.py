@@ -52,7 +52,7 @@ class Single(unittest.TestCase):
                      "spec: docs/specs/7/ux.md", "- designer (게이트): DONE"):
             self.assertIn(line, out)
         order = [(c.role, c.task) for c in h.calls["roles"]]
-        self.assertEqual(order, [("tester", "cases"), ("tech-lead", "design"), ("designer", "design")])
+        self.assertEqual(order, [("tester", "spec-cases"), ("tech-lead", "design"), ("designer", "design")])
         tin = h.calls["roles"][0].inputs
         self.assertEqual(sorted(tin), ["ac.md", "visual.txt"])                 # the tester sees only the AC
         self.assertIn("VISUAL = yes", tin["visual.txt"]["text"])
@@ -185,16 +185,31 @@ class Split(unittest.TestCase):
         self.assertIn("분할: 2개 자식 — #8, #9", h.body_with("design:output"))
 
     def test_resume_creates_only_missing_keys(self):
-        existing = {"8": {"number": 8, "title": "[Guild子] data layer", "state": "OPEN",
-                          "body": "x\n\nParent Issue: #7\n\n<!-- guild:slice-key 7-data -->\n",
-                          "labels": [{"name": "guild:child"}, {"name": "guild:analyze"}], "comments": []}}
+        # K4r1-M2: the first run stops after child 1; the resume re-runs NO role and NO L0-SPLIT (a
+        # different judgment now would be ignored) and creates only the missing key from the stored plan
         h = design_h(self, cast="", ui="false", roles=[tester_ok(self, (1, 2)), techlead_ok(self, SPLIT)],
-                     judges={"SPLIT": split_dec()}, issues=existing)
+                     judges={"SPLIT": split_dec()})
+        orig = h.w.create_issue
+        calls = {"n": 0}
+
+        def flaky(title, body, labels=()):
+            calls["n"] += 1
+            if calls["n"] == 2:
+                from guildcore.adapters.gh import GhError
+                raise GhError("HTTP 422: Validation Failed")
+            return orig(title, body, labels)
+        h.w.create_issue = flaky
+        self.assertEqual(D.run(h.p).kind, StageResult.PAUSE)
+        h.w.create_issue = orig
+        h.p.writer.labels_apply(7, remove=["guild:needs-human"])
+        n_roles, n_judge = len(h.calls["roles"]), len(h.calls.get("judges") or [])
+        h.judges["SPLIT"] = split_dec([dict(SPLIT["slices"][0], key="model"), dict(SPLIT["slices"][1], key="view")])
         r = D.run(h.p)
         self.assertEqual(r.token(), "OK SPLIT: 2 children")
-        self.assertEqual([c for c in h.w.calls if c[0] == "create_issue"], [("create_issue", "[Guild子] screen")])
-        self.assertIn("existing-children.md", h.calls["roles"][1].inputs)
-        self.assertIn("#8 [Guild子] data layer", h.calls["roles"][1].inputs["existing-children.md"]["text"])
+        self.assertEqual(len(h.calls["roles"]), n_roles)                   # no tester / tech-lead again
+        self.assertEqual([c for c in h.w.calls if c[0] == "create_issue"],
+                         [("create_issue", "[Guild子] data layer"), ("create_issue", "[Guild子] screen")])
+        self.assertTrue(h.decisions_of("split-resume"))
 
     def test_leaf_cannot_resplit(self):
         h = design_h(self, cast="", ui="false", labels=("guild:design", "guild:child"),
@@ -231,9 +246,11 @@ class Split(unittest.TestCase):
             return orig(title, body, labels)
         h.w.create_issue = flaky
         r = D.run(h.p)
-        self.assertEqual(r.kind, StageResult.FAIL)
-        self.assertIn("child creation failed after 1/2", r.line)
+        self.assertEqual(r.kind, StageResult.PAUSE)                         # K4r1-M3: through B.fail
+        self.assertIn("child creation failed at slice ui (1/2)", r.line)
         self.assertIn("guild:design", h.labels())
+        self.assertIn("guild:needs-human", h.labels())
+        self.assertIn("defect: engine FAIL — child creation failed", h.body_with("needs-human"))
         self.assertIsNone(h.body_with("children:output"))
 
 

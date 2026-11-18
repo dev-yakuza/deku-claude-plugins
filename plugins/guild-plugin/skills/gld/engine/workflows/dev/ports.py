@@ -235,7 +235,7 @@ def suite_in_tree(worktree, base, cmds, owner, timeout_s, run_dir, env, copy_lis
             return r
         sb = tree_sandbox(tt.path, run_dir, worktree, issue, extra_roots)
         reports = [os.path.join(run_dir, "tmp", "report-%d.jsonl" % i) for i in range(len(cmds))]
-        os.makedirs(os.path.join(run_dir, "tmp"), exist_ok=True)  # fs-ok: engine-owned path (run dir tmp / engine cache / check-backup journal), no role writes there
+        os.makedirs(os.path.join(run_dir, "tmp"), exist_ok=True)  # fs-ok: this check's run dir tmp/ (new_run_dir, outside the worktree; the role sandbox gets it only as scratch)
         r = CH.run_command([with_json_report(c, rp) for c, rp in zip(cmds, reports)], timeout_s, cwd=tt.path,
                            env=env, journal=journal, who="check-%s" % owner, sandbox=sb, tmp=os.path.join(run_dir, "tmp"))
         texts = []
@@ -401,7 +401,7 @@ def install_check_tools(worktree, run_dir, env, mans, tools, copy_list=(), issue
     import shutil as _sh
     import tempfile
     nd = node_dir(worktree, mans, tools, kind)
-    os.makedirs(os.path.dirname(nd), exist_ok=True)  # fs-ok: engine-owned path (run dir tmp / engine cache / check-backup journal), no role writes there
+    os.makedirs(os.path.dirname(nd), exist_ok=True)  # fs-ok: parent of the engine node_modules home (node_dir — engine cache outside every role's allowWrite)
     with open(nd + ".lock", "w") as lk:      # fs-ok: engine cache dir, no role writes there
         fcntl.flock(lk, fcntl.LOCK_EX)
         try:
@@ -409,7 +409,7 @@ def install_check_tools(worktree, run_dir, env, mans, tools, copy_list=(), issue
                 return None, {}, os.path.join(nd, "node_modules", ".bin")
             tmp = tempfile.mkdtemp(prefix=os.path.basename(nd) + ".tmp", dir=os.path.dirname(nd))
             for f, data in mans.items():
-                with open(os.path.join(tmp, f), "wb") as fh:  # fs-ok: engine-owned path (run dir tmp / engine cache / check-backup journal), no role writes there
+                with open(os.path.join(tmp, f), "wb") as fh:  # fs-ok: the engine node_modules home's temp install dir (engine cache, renamed into place atomically)
                     fh.write(data)
             pkg = {}
             try:
@@ -429,11 +429,11 @@ def install_check_tools(worktree, run_dir, env, mans, tools, copy_list=(), issue
             r, px = CH.deps_step(cmds, tmp, sb, os.path.join(run_dir, "tmp"), env=env,
                                  hosts=REGISTRY_HOSTS["package.json"], timeout_s=timeout_s)
             if not (r.passed and os.path.isdir(os.path.join(tmp, "node_modules"))):
-                _sh.rmtree(tmp, True)  # fs-ok: engine-owned path (run dir tmp / engine cache / check-backup journal), no role writes there
+                _sh.rmtree(tmp, True)  # fs-ok: removing the failed temp install dir of the engine node_modules home (engine cache)
                 return r, px, None
-            open(os.path.join(tmp, ".complete"), "w").close()  # fs-ok: engine-owned path (run dir tmp / engine cache / check-backup journal), no role writes there
+            open(os.path.join(tmp, ".complete"), "w").close()  # fs-ok: the `.complete` stamp of the engine node_modules temp install (engine cache)
             if os.path.exists(nd):
-                _sh.rmtree(nd, True)  # fs-ok: engine-owned path (run dir tmp / engine cache / check-backup journal), no role writes there
+                _sh.rmtree(nd, True)  # fs-ok: replacing a stale engine node_modules home (engine cache, under the install lock)
             os.rename(tmp, nd)                    # fs-ok: engine cache dir
             return r, px, os.path.join(nd, "node_modules", ".bin")
         finally:
@@ -508,7 +508,7 @@ def role_spec(call, issue, worktree, config, base=None, branch=None, unattended=
                        result_schema=call.schema or (RESULT_SCHEMAS.get(call.schema_role) if call.role != "designer" else None),
                        allowed_status=call.allowed_status or RR.R.STATUSES,
                        language=getattr(config, "language", "en"), unattended=unattended,
-                       toolchain=("test",) if call.role in ("tester", "qa") else (),
+                       toolchain=("test",) if call.role in ("tester", "qa") and call.task != "spec-cases" else (),
                        pre_check=getattr(call, "pre_check", None))
 
 
@@ -518,8 +518,11 @@ def live(issue, worktree, base, branch, config, clock, gh, writer, decisions, ru
     if worktree and os.path.isdir(worktree):
         recover_check_backup(worktree)       # K3r6-m2: any stage's entry repairs an interrupted 1L check swap
 
+    # K4r1-B1: base/branch are read from the Ports at CALL time — the FSM (or test's
+    # `handoff.fill_from_execute`) fills them after `live()` returned; a closure that captured the
+    # constructor's None would make qa's engine push a silent no-op
     def run_role(call):
-        return runner.run_role(role_spec(call, issue, worktree, config, base, branch, unattended))
+        return runner.run_role(role_spec(call, issue, worktree, config, ports.base, ports.branch, unattended))
 
     def _tree_run(cmds, tree, owner, timeout_s):
         run_dir = RR.new_run_dir(RR.run_root(worktree, issue, root_env), "check", owner)
@@ -561,8 +564,11 @@ def live(issue, worktree, base, branch, config, clock, gh, writer, decisions, ru
         return CAP.mark(worktree, issue, stage, clock=clock)
 
     def push():
-        if not push_url or not branch:
+        branch = ports.branch
+        if not push_url:
             return False
+        if not branch:
+            raise RuntimeError("the engine push has no branch (no execute hand-over block and no worktree branch)")
         local = G.run(worktree, "rev-parse", "refs/heads/%s" % branch, check=False).decode().strip()
         remote = G.run(worktree, "ls-remote", push_url, "refs/heads/%s" % branch, check=False).decode().split()
         if not local or (remote and remote[0] == local):
@@ -764,7 +770,7 @@ def live_execute(issue, main, variant, config, clock, gh, writer, decisions, run
 
         def base_export(path):
             n = os.path.normpath(path)
-            os.makedirs(base_dir, exist_ok=True)  # fs-ok: engine-owned path (run dir tmp / engine cache / check-backup journal), no role writes there
+            os.makedirs(base_dir, exist_ok=True)  # fs-ok: <run>/in/base-scripts — the 1L run dir's in/ (roles denyWrite in/), base script export
             return FS.write_bytes(base_dir, n, G.run(worktree, "show", "%s:%s" % (base_sha, n)), 0o555)
         checks, dropped = base_checks()
         try:
@@ -853,7 +859,7 @@ def net_in_tree(worktree, base, rev, files, raw, copy_list, run_dir, env, issue=
     def _warm(b, tree, inspect=None):
         r, _px = warm_in_place(worktree, tree, run_dir, env, issue, inspect=inspect)
         return r
-    os.makedirs(os.path.join(run_dir, "tmp"), exist_ok=True)  # fs-ok: engine-owned path (run dir tmp / engine cache / check-backup journal), no role writes there
+    os.makedirs(os.path.join(run_dir, "tmp"), exist_ok=True)  # fs-ok: the 1L check's run dir tmp/ (new_run_dir, outside the worktree)
     rep = os.path.join(run_dir, "tmp", "net-report.jsonl")
     with EFF.prepared_tree(worktree, base, [], _warm if base else None, copy_list, target=rev) as (tt, info):
         if info["halt"]:
@@ -990,7 +996,7 @@ def recover_check_backup(worktree):
             done.append("node_modules")
         except FS.UnsafePath:
             pass
-    os.remove(bp)  # fs-ok: engine-owned path (run dir tmp / engine cache / check-backup journal), no role writes there
+    os.remove(bp)  # fs-ok: the check-backup journal (check_backup_path — the engine run home above the run roots, outside every role sandbox)
     return done
 
 
@@ -1099,7 +1105,7 @@ def base_check_configs(worktree, base_sha, p=None, tools_node=None, suite_node=N
     if tools_node:
         rec["node_link"] = os.readlink(nm) if os.path.islink(nm) else (suite_node or None)
     bp = check_backup_path(worktree)
-    os.makedirs(os.path.dirname(bp), exist_ok=True)  # fs-ok: engine-owned path (run dir tmp / engine cache / check-backup journal), no role writes there
+    os.makedirs(os.path.dirname(bp), exist_ok=True)  # fs-ok: parent dir of the check-backup journal (check_backup_path — engine run home, outside every role sandbox)
     with open(bp + ".tmp", "w") as fh:            # fs-ok: engine cache (the journal)
         json.dump(rec, fh)
     os.replace(bp + ".tmp", bp)                     # fs-ok: journaled BEFORE the worktree is touched
@@ -1168,6 +1174,19 @@ def config_at_base(main, base, cfg):
     return CF.Config(raw, cfg.root, list(cfg.warnings)), "commands/engine/visual from %s" % base
 
 
+def fill_handoff(p, wt):
+    """K4r1-B1: base/branch for test/qa — execute's durable hand-over block first; without one (an
+    Issue execute ran before the engine) the engine worktree's own branch. Read before any role or
+    push runs."""
+    from workflows.dev import handoff as HO
+    HO.fill_from_execute(p)
+    if not p.branch:
+        ref = G.run(wt, "symbolic-ref", "-q", "HEAD", check=False).decode().strip()
+        if ref.startswith("refs/heads/"):
+            p.branch = ref[len("refs/heads/"):]
+    return p
+
+
 def fsm_factory(main, config, clock, gh, gh_write, runner, judge_runner, unattended=True, push_url=None,
                 host=None, plugin=None, env=None, events=None, local_dev_py=None):
     """`ports_for(issue, stage, variant=None)` for `workflows.dev.fsm.Driver`: analyze / design /
@@ -1200,8 +1219,17 @@ def fsm_factory(main, config, clock, gh, gh_write, runner, judge_runner, unatten
         elif stage in ("test", "qa"):
             cfg, note = base_cfg()
             wt = BR.worktree_path(main, n)
-            p = live(n, wt if os.path.isdir(wt) else main, None, None, cfg, clock, gh, writer, decisions, runner,
-                     judge_runner, journal=journal, unattended=unattended, push_url=push_url, host=host, plugin=plugin)
+            if not os.path.isdir(wt) or os.path.realpath(wt) == os.path.realpath(main):
+                # K4r1-B1: test/qa NEVER run in the person's checkout (a legacy-started Issue has no
+                # engine worktree) — the FSM turns `unavailable` into an env pause before the stage
+                p = live(n, main, None, None, cfg, clock, gh, writer, decisions, runner, judge_runner,
+                         journal=journal, unattended=unattended, push_url=None, host=host, plugin=plugin)
+                p.unavailable = ("no engine worktree for #%d (%s) — test/qa never run in the main checkout; "
+                                 "run /gld execute %d first or continue by hand" % (n, wt, n))
+            else:
+                p = live(n, wt, None, None, cfg, clock, gh, writer, decisions, runner, judge_runner,
+                         journal=journal, unattended=unattended, push_url=push_url, host=host, plugin=plugin)
+                fill_handoff(p, wt)
         else:
             p = live(n, main, None, None, config, clock, gh, writer, decisions, runner, judge_runner, journal=journal,
                      unattended=unattended, push_url=push_url, host=host, plugin=plugin)

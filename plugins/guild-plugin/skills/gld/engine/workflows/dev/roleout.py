@@ -128,7 +128,27 @@ def names(p):
         return []
 
 
-def install(store, worktree, issue, skip=("split.json",)):
+def clear(p):
+    """K4r1-m8: empty the engine spec store at a FRESH design — a specialist spec from an earlier
+    design run must not be installed into the execute worktree (nor convene qa's designer)."""
+    d = store_dir(p)
+    try:
+        lst = os.listdir(d)
+    except OSError:
+        return []
+    gone = []
+    for name in lst:
+        path = os.path.join(d, name)
+        if os.path.isfile(path) and not os.path.islink(path):
+            os.remove(path)  # fs-ok: engine spec store <git-common-dir>/guild/engine/<N>/specs (roles denyWrite <common>/guild/**)
+            gone.append(name)
+        elif os.path.islink(path):
+            os.unlink(path)  # fs-ok: engine spec store — a link there is not the engine's; the link itself goes
+            gone.append(name)
+    return gone
+
+
+def install(store, worktree, issue, skip=("split.json", "split-plan.json")):
     """Copy the stored specs into `<worktree>/docs/specs/<N>/` through fsafe. A file the worktree
     already has is left alone (the branch's committed spec, or a developer's edit, wins). Returns
     (installed, kept)."""

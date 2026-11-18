@@ -18,6 +18,11 @@
 #   • platform + K3 carry-overs: gh forms, issue close, pause `cause:`, roleout, spec store install,
 #     base config, H§M line on execute env stops, legacy unreadable pending lines, sub-directory check
 #     configs, the AST raw-write lint, O_NOFOLLOW reads.
+#   • review r1 (test_k4_r1.py): the FSM's test/qa ports (late-bound branch, engine push, no main-checkout
+#     fallback), fail-closed author trust, the split resumed only from its recorded plan with idempotent
+#     child creation and B.fail failures, every FSM end on the exit-code contract, close only from an exact
+#     member plan line, the minors, and the user decisions of 2026-11-18 (PO forcing, outsider text vs the
+#     harness guard, the role commit's lefthook config from <base>).
 # No test calls `claude`, a model or GitHub (a failing `gh` is first on PATH).
 #
 # Usage: bash plugins/guild-plugin/tests/engine_k4_test.sh
@@ -47,7 +52,7 @@ if [ "$RC" -ne 0 ]; then
 fi
 echo "engine K4: $PASS passed, $FAIL failed"
 # ⚠ Keep equal to the measured PASS count; raise it only when tests are added on purpose.
-ENGINE_K4_MIN_TESTS=100
+ENGINE_K4_MIN_TESTS=138
 if [ "$((PASS + FAIL))" -lt "$ENGINE_K4_MIN_TESTS" ]; then
   echo "FAIL  실행된 검사가 $((PASS + FAIL))건뿐입니다 (최소 ${ENGINE_K4_MIN_TESTS}건)."
   exit 1

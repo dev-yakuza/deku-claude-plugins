@@ -188,6 +188,10 @@ def role_key(role, task=None):
     if role == "tech-lead":
         return "tech-lead-design" if task in ("design", None) else "tech-lead-review"
     if role == "tester":
+        if task == "spec-cases":
+            # K4r1-m4: design's tester runs on the person's MAIN checkout and writes only its own
+            # out/ — the read-only reviewer class (no docs/specs allowWrite, tracked paths denied)
+            return "reviewer"
         return "tester-cases" if task in ("cases", None) else "tester-verify"
     return "reviewer"
 

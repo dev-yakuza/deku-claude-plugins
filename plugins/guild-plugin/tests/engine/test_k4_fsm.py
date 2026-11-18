@@ -93,7 +93,9 @@ class Routing(unittest.TestCase):
     def test_done_open_with_closed_as_decided_finishes_close(self):
         cd = comment("<!-- guild:closed-as-decided -->\n결정: «x»\n닫는 이유: 하지 않기로 결정 (not_planned)\n"
                      "<!-- /guild:closed-as-decided -->", 20)
-        h = K4(self, labels=("guild:done",), comments=[cd])
+        ao = comment("<!-- guild:analyze:output -->\n## Guild analyze — #7\n\n결정대로 닫음: «x» — 코드 변경 없음\n"
+                     "<!-- /guild:analyze:output -->", 19)
+        h = K4(self, labels=("guild:done",), comments=[ao, cd])
         out = driver(h).run(7)
         self.assertEqual(out.result.kind, StageResult.DONE)
         self.assertEqual(h.issue()["state"], "CLOSED")

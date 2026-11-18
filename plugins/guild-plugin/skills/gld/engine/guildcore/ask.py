@@ -73,9 +73,13 @@ class Question(object):
 
 
 def surface(question, attended, decisions, events=None, clock=None, writer=None, issue=None,
-            stage=None, pause_line=None, journal=None):
-    """Attended → pending block + `ask` event; unattended → pause. Returns the qid."""
+            stage=None, pause_line=None, journal=None, cause=None):
+    """Attended → pending block + `ask` event; unattended → pause. Returns the qid. `cause` (a rendered
+    needs-human cause line) rides in the attended block too (K4r1-m1): an unattended resume that
+    finds the question unanswered completes the pause with ITS cause, not a generic `defect:`."""
     fields = question.pending_fields(stage=stage)
+    if cause:
+        fields["cause"] = cause
     token = os.urandom(6).hex()
     if journal is not None and question.nonce:
         # K1-m4: the nonce is journaled BEFORE the commitment is written (crash-safe reveal);

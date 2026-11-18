@@ -115,6 +115,32 @@ def export_gates(worktree, base_sha, dest):
 
 GATE_CONFIG_NAME = ".config.json"
 
+# lefthook's own config search order (v1/v2: root `lefthook.*` / `.lefthook.*`, then `.config/lefthook.*`)
+LEFTHOOK_NAMES = tuple("%s%s.%s" % (d, n, e) for d in ("", ".config/") for n in ("lefthook", ".lefthook")
+                       for e in ("yml", "yaml", "json", "toml") if not (d and n.startswith(".")))
+
+
+def base_lefthook_env(worktree, base_sha, dest_dir):
+    """User decision (2026-11-18, K3 carry-over 7): a role's own `git commit` runs the lefthook
+    pre-commit with <base>'s config — the SAME source as the engine's 1L checks — never the branch's
+    (editing lefthook.yml on the branch stays allowed; it just does not gate the branch's own
+    commits). The base copy goes into the run dir's `in/` (roles denyWrite) and lefthook reads it via
+    `LEFTHOOK_CONFIG`; a base without any lefthook config → `LEFTHOOK=0` (a config the branch added
+    never runs as the hook). Known limit: lefthook still merges an untracked `lefthook-local.yml`
+    from the worktree root (a role-created one is a new untracked file the scope check sees)."""
+    if not worktree or not base_sha or not dest_dir:
+        return {}
+    for name in LEFTHOOK_NAMES:
+        rc, out = _git(worktree, "show", "%s:%s" % (base_sha, name))
+        if rc == 0:
+            path = os.path.join(dest_dir, "lefthook-base." + name.rsplit(".", 1)[1])
+            os.makedirs(dest_dir, exist_ok=True)  # fs-ok: the run dir's in/ — created by the engine, roles denyWrite in/
+            with open(path, "wb") as fh:  # fs-ok: the run dir's in/ — the base lefthook copy, roles denyWrite in/
+                fh.write(out)
+            os.chmod(path, 0o444)  # fs-ok: the run dir's in/ — the base lefthook copy made read-only
+            return {"LEFTHOOK_CONFIG": path}
+    return {"LEFTHOOK": "0"}
+
 
 def gate_config_path(gates_dir):
     return os.path.join(gates_dir, GATE_CONFIG_NAME) if gates_dir else None

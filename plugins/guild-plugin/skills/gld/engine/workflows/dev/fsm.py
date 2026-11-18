@@ -33,7 +33,7 @@ from guildcore import ask as ASK
 from guildcore import decisions as D
 from guildcore import pause as PZ
 from guildcore import state as ST
-from guildcore.adapters.gh import GhWriteError
+from guildcore.adapters.gh import GhError, GhWriteError, classify_error
 from guildcore.decisions import DecisionLog
 from guildcore.judges.runner import Halted, RateLimited
 from guildcore.records import markers
@@ -44,6 +44,15 @@ ORDER = ("analyze", "design", "execute", "test", "qa", "done")
 MAX_STAGE_RUNS = 24
 PRODUCER = (("analyze output", "analyze"), ("analyze/design", "analyze"), ("skeleton", "design"),
             ("design", "design"), ("test-cases", "design"), ("target-structure", "design"))
+
+
+class ChildEnded(Exception):
+    """A child driven by 2b ended without a stage result (exit 1/3/6/75 — the process end): the
+    parent's run ends the same way (K4r1-m13)."""
+
+    def __init__(self, outcome):
+        Exception.__init__(self, outcome.line)
+        self.outcome = outcome
 
 
 class Outcome(object):
@@ -92,11 +101,18 @@ class Driver(object):
         self.stages = stages or {}
         self.events = events
         self.depth = 0
+        self.active = None              # the Issue whose stage is running (a child's, inside 2b)
 
     # -- the process end -------------------------------------------------------------------------
     def run(self, n, only=None):
+        """K4r1-M4: EVERY way the FSM can end maps to the §2.4 contract — a GitHub read or write
+        error by its class (auth → 3, rate limit → 75, transient → `env: service` pause, else
+        `defect: engine FAIL`), any other exception → `defect: engine FAIL — <type>` (exit 0 with
+        needs-human; 1 only when that pause cannot be written either)."""
         try:
             return self._run(n, only)
+        except ChildEnded as ce:
+            return ce.outcome
         except Halted:
             return Outcome(None, 6, "halted: kill-switch", halted="kill-switch")
         except RateLimited as rl:
@@ -106,16 +122,31 @@ class Driver(object):
                 return Outcome(None, 3, "gh auth failed — %s" % B.one_line(str(ex), 160))
             if ex.kind == "ratelimit":
                 return Outcome(None, 75, "GitHub rate limit — %s" % B.one_line(str(ex), 120))
-            return self._defect(n, "gh write failed — %s" % B.one_line(str(ex), 160), "transient" if ex.kind == "transient" else "defect")
+            return self._defect(self.active or n, "gh write failed — %s" % B.one_line(str(ex), 160), "transient" if ex.kind == "transient" else "defect")
+        except GhError as ex:
+            kind = classify_error(str(ex))
+            if kind == "auth":
+                return Outcome(None, 3, "gh auth failed — %s" % B.one_line(str(ex), 160))
+            if kind == "ratelimit":
+                return Outcome(None, 75, "GitHub rate limit — %s" % B.one_line(str(ex), 120))
+            return self._defect(self.active or n, "gh read failed — %s" % B.one_line(str(ex), 160),
+                                "transient" if kind == "transient" else "defect")
+        except Exception as ex:                                       # noqa: BLE001 — the contract's last line
+            return self._defect(self.active or n, "%s — %s" % (ex.__class__.__name__, B.one_line(str(ex), 160)))
 
     def _defect(self, n, reason, cls="defect"):
         try:
             p = self.ports_for(n, None)
             r = B.fail(p, "engine", reason, cls)
             return Outcome(r, 0)
-        except GhWriteError as ex:
-            if ex.kind == "auth":
+        except (GhWriteError, GhError) as ex:
+            kind = ex.kind if isinstance(ex, GhWriteError) else classify_error(str(ex))
+            if kind == "auth":
                 return Outcome(None, 3, "gh auth failed — %s" % B.one_line(str(ex), 160))
+            if kind == "ratelimit":
+                return Outcome(None, 75, "GitHub rate limit — %s" % B.one_line(str(ex), 120))
+            return Outcome(None, 1, "engine FAIL — %s (pause not written: %s)" % (reason, B.one_line(str(ex), 80)))
+        except Exception as ex:                                       # noqa: BLE001
             return Outcome(None, 1, "engine FAIL — %s (pause not written: %s)" % (reason, B.one_line(str(ex), 80)))
 
     def _fn(self, stage):
@@ -123,6 +154,7 @@ class Driver(object):
 
     # -- the FSM ------------------------------------------------------------------------------
     def _run(self, n, only):
+        self.active = n
         p0 = self.ports_for(n, None)
         if p0.config is None:
             return self._end(n, B.env_halt("uninitialized", "Guild not initialized (run /gld init)"))
@@ -151,7 +183,13 @@ class Driver(object):
             state = ST.derive(issue.get("labels"))
             stage = state.stage
             if stage == "guild:done" or stage == "done":
-                return self.finish_done(p0, n, issue)
+                if not only:
+                    return self.finish_done(p0, n, issue)
+                if only != "test":                                      # K4r1-m2: only test re-verifies a done Issue
+                    return Outcome(B.StageResult(B.StageResult.FAIL, fail_class="prevalidate", line=(
+                        "#%d is at guild:done — /gld %s does not run on it (use /gld rollback stage to move back)"
+                        % (n, only))), 0)
+                stage = "test"
             if stage == "children":
                 if only:
                     return Outcome(B.StageResult(B.StageResult.FAIL, fail_class="prevalidate", line=(
@@ -167,6 +205,11 @@ class Driver(object):
                     % (n, stage, only, only))), 0)
             variant = variant_of(issue.get("labels")) if target == "execute" else None
             p = self.ports_for(n, target, variant)
+            why = getattr(p, "unavailable", None)
+            if why:                                                      # K4r1-B1: e.g. no engine worktree
+                if not self.unattended:
+                    return Outcome(B.StageResult(B.StageResult.FAIL, line=why, fail_class="defect"), 0)
+                return self._end(n, B.pause(p, target, "env", why, "env: other — %s" % why, env_key="other"))
             p.stage_start = p.now()                                       # K3 m4 contract: the FSM passes it
             fn = self._fn(target)
             r = fn(p, variant) if target == "execute" else fn(p, only=only)
@@ -189,12 +232,14 @@ class Driver(object):
 
     def _drive_child(self, c):
         self.depth += 1
+        parent = self.active
         try:
             out = self._run(c, None)
         finally:
             self.depth -= 1
-        if out.result is None:
-            raise RuntimeError("child #%d ended without a result (%s)" % (c, out.line))
+        self.active = parent            # an exception leaves `active` on the child: its pause lands there
+        if out.result is None or out.exit_code != 0:
+            raise ChildEnded(out)
         return out.result
 
     def _end(self, n, r):
@@ -210,8 +255,12 @@ class Driver(object):
     def finish_done(self, p, n, issue):
         """A-F37: `guild:done` ∧ OPEN ∧ a closed-as-decided comment → T3 ④ was interrupted: close."""
         if (issue.get("state") or "").upper() == "OPEN":
-            cd = markers.find(B.records(p), "closed-as-decided")
-            if cd is not None:
+            recs = B.records(p)
+            cd = markers.find(recs, "closed-as-decided")
+            ao = markers.find(recs, "analyze:output")
+            # K4r1-m6: only while analyze:output STILL says "결정대로 닫음" — a later analyze that went
+            # on to work replaced it, and a stale closed-as-decided must not close a worked Issue
+            if cd is not None and ao is not None and "결정대로 닫음" in markers.body_of(ao):
                 body = markers.body_of(cd)
                 reason = "not_planned" if "(not_planned)" in body else "completed"
                 p.writer.issue_close(n, reason)

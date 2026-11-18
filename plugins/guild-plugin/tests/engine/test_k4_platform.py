@@ -345,7 +345,7 @@ class JudgeSpecs(unittest.TestCase):
     def test_prompt_templates_exist_and_specialists_share_one(self):
         from workflows.dev.stages.base import RoleCall
         for role, task in (("explorer", "kickoff"), ("product-owner", "analyze"), ("tech-lead", "design"),
-                           ("tester", "cases"), ("tech-lead", "integration")):
+                           ("tester", "spec-cases"), ("tech-lead", "integration")):
             self.assertIn("#7", PO.prompt(RoleCall(role, task, "s", "x"), 7))
         t = PO.prompt(RoleCall("designer", "design", "design", "E1.5"), 7)
         self.assertIn("out/ux.md", t)

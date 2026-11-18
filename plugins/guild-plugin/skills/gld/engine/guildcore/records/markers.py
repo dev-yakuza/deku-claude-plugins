@@ -52,13 +52,14 @@ TRUSTED = ("OWNER", "MEMBER", "COLLABORATOR")
 def trusted(comments, own_ids=(), associations=TRUSTED):
     """K2-M5: the comments a RECORD may come from — written by the engine (journaled id), or by
     someone with write access (`author_association` OWNER/MEMBER/COLLABORATOR). A marker in a
-    drive-by comment (NONE, CONTRIBUTOR, FIRST_TIME_CONTRIBUTOR …) is not a record. A comment
-    without the field (fixtures, legacy reads) is kept."""
+    drive-by comment (NONE, CONTRIBUTOR, FIRST_TIME_CONTRIBUTOR …) is not a record. FAIL CLOSED
+    (K4r1-M1): a comment whose association is missing or blank is NOT a member's (the REST read
+    always carries the field; a read that lost it must not turn a drive-by marker into a record)."""
     own = set(str(x) for x in own_ids or ())
     out = []
     for c in comments or []:
         a = c.get("author_association")
-        if a is None or a in associations or str(c.get("id")) in own:
+        if (a and a in associations) or str(c.get("id")) in own:
             out.append(c)
     return out
 

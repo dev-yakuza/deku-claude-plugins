@@ -353,8 +353,15 @@ def ask(p, stage, question, needs_human_line, pause_args=None):
     """Attended → pending block + `ask` event (StageResult ASK); unattended → pause with the
     question (`pause_args` = kwargs of `pause`)."""
     if not p.unattended:
+        from guildcore.records import needs_human
+        pa = pause_args or {}
+        try:
+            cause = needs_human.cause_line(pa.get("cause_kind") or "ambiguity", pa.get("line") or needs_human_line,
+                                           pa.get("env_key"))
+        except ValueError:
+            cause = needs_human.cause_line("ambiguity", needs_human_line)
         qid = ASK.surface(question, True, p.decisions, events=p.events, clock=p.clock,
-                          stage=stage, journal=p.journal)
+                          stage=stage, journal=p.journal, cause=cause)
         return StageResult(StageResult.ASK, line=needs_human_line, qid=qid)
     return pause(p, stage, question=question, **(pause_args or {}))
 

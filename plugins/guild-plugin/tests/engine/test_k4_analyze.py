@@ -87,13 +87,13 @@ class KickoffCoercions(unittest.TestCase):
 
     def test_partial_with_verified_anchor_stays_partial_and_records_assumption(self):
         h = K4(self, roles=[evidence(self), out_role(self, "DONE", ac_patch=[])],
-               judges={"KICKOFF": kickoff(success="partial", anchors={"success": ANCHOR_OK}), "STAKES": stakes("low")})
+               judges={"KICKOFF": kickoff(success="partial", anchors={"success": ANCHOR_OK}), "STAKES": stakes("medium")})
         r = A.run(h.p)
         self.assertEqual(r.kind, StageResult.ADVANCE)
         out = h.body_with("analyze:output")
         self.assertIn("Success=partial", out)
         self.assertIn("가정: Success: choose success (근거: lib/app/home.dart:3)", out)
-        self.assertEqual(h.calls["roles"][1].role, "product-owner")       # forced: unattended ∧ partial
+        self.assertEqual(h.calls["roles"][1].role, "product-owner")       # forced: unattended ∧ partial ∧ stakes medium
 
     def test_stakes_low_without_reason_is_high(self):
         h = K4(self, roles=[evidence(self)], judges={"KICKOFF": kickoff(goal="unclear"),

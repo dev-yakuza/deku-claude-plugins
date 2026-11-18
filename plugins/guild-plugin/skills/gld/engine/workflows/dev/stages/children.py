@@ -74,10 +74,10 @@ def run(p, drive, only=None):
     B.register_exact(p)
     q, res = B.pending_answer(p, STAGE, "integration-fix-child")
     if res is not None:
-        B.mark_applied(p, STAGE, res)
         if res.get("choice") == "yes":
-            fix_child(p, q)
-            kids = ST.discover_children(p.gh, p.issue)
+            fix_child(p, q)                               # K4r1-m7: create (idempotent by key) BEFORE the
+            kids = ST.discover_children(p.gh, p.issue)    # answer is consumed — a crash re-creates nothing
+        B.mark_applied(p, STAGE, res)
     cleaned = cleanup(p, kids)
     pending = [c for c in kids if "guild:done" not in _labels(c) and c["number"] not in cleaned]
     for i, c in enumerate(pending):
@@ -184,6 +184,7 @@ def integrate(p, kids):
 def fix_child(p, q):
     line = (q.get("refs") or "integration fix") if q is not None else "integration fix"
     key = "%d-fix-%s" % (p.issue, hashlib.sha1(line.encode("utf-8")).hexdigest()[:8])
-    body = "%s\n\nParent Issue: #%d" % (markers.value(line), p.issue)
+    import re
+    body = "%s\n\nParent Issue: #%d" % (re.sub(r"Parent Issue:\s*#", "Parent Issue #", markers.value(line)), p.issue)
     p.writer.issue_create("[Guild子] 통합 수정 — %s" % markers.value(line)[:80], body,
                           labels=["guild:child", "guild:analyze"], key=key)

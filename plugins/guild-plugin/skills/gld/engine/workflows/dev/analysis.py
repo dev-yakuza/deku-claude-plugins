@@ -152,6 +152,37 @@ def _norm(s):
     return " ".join((s or "").split())
 
 
+# K4r1-M5: "close as decided" needs an ENGINE-verified member plan line that itself decides the close —
+# the judgment's quote must equal one whole line (bullet optional) and that line's answer must carry a
+# close token; a reason-specific token must agree with the judged reason. A conservative rule until
+# the sprint plan prints a machine token (§7 "다음 설계").
+CLOSE_NOT_PLANNED_RE = re.compile(r"not[ _-]?planned|won'?t[ _-]?(?:fix|do)|하지 않|안 함|안 한다|하지 않기로|취소", re.I)
+CLOSE_COMPLETED_RE = re.compile(r"이미 충족|이미 구현|already (?:done|met|satisfied|implemented)|\bcompleted\b", re.I)
+CLOSE_ANY_RE = re.compile(r"\bclose[sd]?\b|닫(?:음|는다|기|자|아)|작업 불필요|no work needed", re.I)
+
+
+def close_plan_line(quote, plan_lines, decide):
+    """The member plan line `quote` names EXACTLY whose answer decides a close compatible with
+    `decide` (completed | not_planned) — else None."""
+    q = _norm(quote)
+    if not q:
+        return None
+    for pl in plan_lines or []:
+        raw = _norm(pl.raw)
+        if q not in (raw, _norm(re.sub(r"^\s*[-*]\s*", "", pl.raw))):
+            continue
+        ans = pl.answer or ""
+        np_, cp = bool(CLOSE_NOT_PLANNED_RE.search(ans)), bool(CLOSE_COMPLETED_RE.search(ans))
+        if np_ and cp:
+            return None                                # both reasons named — not a decision
+        if np_:
+            return pl if decide == "not_planned" else None
+        if cp:
+            return pl if decide == "completed" else None
+        return pl if CLOSE_ANY_RE.search(ans) else None
+    return None
+
+
 def verify_anchor(anchor, root, sources, tracked=None):
     """True when `anchor` = {cite: "path:line[-line]", quote} matches the file (quote within ±3
     lines of the range, whitespace-folded) or `{source: issue|charter|plan, quote}` is a substring of
@@ -356,10 +387,11 @@ def coerce_kickoff(fields, root, sources, net_lines, plan_lines, premise_unmet_d
     dec = cl.get("decide") if cl.get("decide") in ("none", "completed", "not_planned") else "none"
     k.close = {"decide": dec, "source": cl.get("source"), "line": cl.get("line") or ""}
     if dec != "none":
-        from_plan = cl.get("source") == "plan_line" and any(
-            _norm(cl.get("line")) and (_norm(cl.get("line")) == _norm(pl.raw) or _norm(cl.get("line")) in _norm(pl.raw))
-            for pl in plan_lines)
+        pl = close_plan_line(cl.get("line"), plan_lines, dec) if cl.get("source") == "plan_line" else None
+        from_plan = pl is not None
         k.close["from_plan"] = from_plan
+        if from_plan:
+            k.close["line"] = pl.raw                  # the engine's own copy of the member's line
         if not from_plan and not attended:
             k.coerced.append("close without a plan-decision line → high ambiguity (unattended)")
     st = f.get("surface_to_human") or {}
