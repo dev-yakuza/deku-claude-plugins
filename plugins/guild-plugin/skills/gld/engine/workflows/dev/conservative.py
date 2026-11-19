@@ -33,7 +33,23 @@ EX-ARB is not gated here: its conservative side is the first-sprint coercion (`f
 from guildcore import ask as ASK
 
 STALE = "stale"                 # K6 (item 40): the point of the block that retires an answer its run no longer matches
-GATED = ("STAKES", "SPLIT", "INTEGRATE", "TEST", "QA", "DE-ARB", "AN-PO", "VIS-ENV", "DIRECTIVE", "HANDOFF", "EX-DWC")
+# K6 item 27: the gated groups are DERIVED from the §9.5 group table (`valves.GROUPS`) — every group there is gated
+# here unless it has its own conservative side, named with the reason (a new §9.5 group is gated by default, and the
+# K5 r9/r10/r11 tables then fail until it has a scenario, its shapes and its expectations)
+NOT_GATED = {
+    "KICKOFF": "analyze confirms the interpretation blind (firstsprint.confirm_interpretation)",
+    "EX-ARB-dismiss": "BLOCKER/MAJOR dismiss is coerced to accept (firstsprint.no_dismiss)",
+    "EX-ARB-accept": "accept is the conservative side of EX-ARB itself",
+    "ESCALATE": "no G-ESCALATE judge is wired: every unknown state pauses for a person (k6-notes item 14)",
+}
+
+
+def _gated():
+    from guildcore import valves as VALVES
+    return tuple(g for g in VALVES.GROUPS if g not in NOT_GATED)
+
+
+GATED = _gated()
 KIND = "group-conservative"
 NOT_OPTIONS = ("unsure",)
 
