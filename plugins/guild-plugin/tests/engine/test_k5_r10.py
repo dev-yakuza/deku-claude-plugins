@@ -150,16 +150,22 @@ def shape_of(group, y):
     return lambda _c: copy.deepcopy(SHAPES[group][y])
 
 
+QUESTION_CAP = 3          # K5r11-m2(b): answers one case may take before it counts as an endless sequence
+
+
 def run_case(case, group, x, y):
     build, run, _f, _y, _e = R9.SCENARIOS[group]
     h = build(case, R9.runner_judge(group, shape_of(group, y), y))
     h.p.valves = {"group.%s.conservative" % group: True}
     asked, r = 0, None
-    for _i in range(5):
+    for i in range(QUESTION_CAP + 1):
         r = run(h)
         q = R9._open_questions(h, group)
         if not q:
             break
+        if i == QUESTION_CAP:
+            # K5r11-m2(b): the same answer keeps raising questions — an endless sequence is a failure, not a stop
+            case.fail("%s X=%s Y=%s: still asking after %d answers (%s)" % (group, x, y, QUESTION_CAP, q[-1].id))
         asked += 1
         R9._answer(h, q[-1], x)
     blocks = _blocks(h)

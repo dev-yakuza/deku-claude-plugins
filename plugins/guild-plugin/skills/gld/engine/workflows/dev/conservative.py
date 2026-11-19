@@ -393,8 +393,10 @@ def gate(p, spec, raw):
     line = "group.%s.conservative — %s %s 결정을 사람이 정함" % (g, g, spec.step or spec.point or "")
     q = ASK.Question(KIND, line, [{"token": o, "label": o} for o in opts] + [{"token": "stop", "label": "stop"}],
                      recommended=d.choice, recommended_by=d.by, refs=key, group=g, stakes="high",
-                     neutral="#%d: group.%s.conservative — %s(%s) 를 어느 쪽으로 정할까요?" % (
-                         int(p.issue), g, g, spec.step or spec.point or "-"), raised_by="confirm")
+                     # K5r11-M1: the neutral wording never carries the group name (`SPLIT` IS the option `split`) —
+                     # the issue, the gate and the step only; `predict.leak` also ignores this engine template
+                     neutral="#%d: 보수 경로 확인(%s) — 어느 쪽으로 정할까요?" % (
+                         int(p.issue), spec.step or spec.point or "-"), raised_by="confirm")
     q.point = "conservative:%s" % g
     q.irreversible = irr
     raise Ask(q, line)

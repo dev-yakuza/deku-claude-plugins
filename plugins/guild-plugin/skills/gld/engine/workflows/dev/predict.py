@@ -33,7 +33,8 @@ Only these answers count as a human judgment in §9.5 (G1, graduation, release).
               journaled with the nonce and revealed with the recommendation in the answer's resolution block
               (`revealed_question`). The leak check stays as defence in depth: any text still going out that
               mentions the options unevenly (the recommendation 0 times included) or evaluates them (a
-              preference OR a negative word) refuses the blind answer.
+              preference OR a negative word) refuses the blind answer. (K5r11-M1) Mentions are counted only
+              outside the engine's own template: the neutral wording itself is never read as naming an option.
 
 First-sprint "auto" ends only on a recorded go (§10.4, R4C-m9): a trusted `<!-- guild:note -->` comment
 `first-sprint go/no-go` with `result: go` on a sprint tracker. Trackers are found by a REST list (`issue_rows`,
@@ -355,10 +356,14 @@ def leak(p, q, stage=None, texts=()):
     if rec is None:
         return None
     nm = _Names(q)
-    if nm.names_rec(q.text):
+    # K5r11-M1 (structural): the blind question's own wording is the engine's template (`Question.neutral` /
+    # `default_neutral`) — an option token in it (a group name `SPLIT`, a step) is no judgment of the options, so
+    # mentions are counted only in the text that is NOT the template
+    tmpl = q.text if getattr(q, "neutralized", False) else None
+    if nm.names_rec(_strip_template(q.text, tmpl)):
         return "question"
     for t in list(q.context_lines) + [x for x in texts if x]:
-        if nm.names_rec(t):
+        if nm.names_rec(_strip_template(t, tmpl)):
             return "text"
     for o in q.options:
         lb = str(o.get("label") or "")
@@ -381,6 +386,15 @@ def leak(p, q, stage=None, texts=()):
                     continue                                     # an earlier blind question passed this same check
                 return "decision-log %s" % b.id
     return None
+
+
+def _strip_template(text, tmpl):
+    """K5r11-M1: `text` without the engine-generated neutral template (every occurrence) — what is left is the only
+    text whose option mentions can say anything about the recommendation."""
+    text = str(text or "")
+    if tmpl:
+        text = text.replace(str(tmpl), " ")
+    return text
 
 
 def default_neutral(p, q):
