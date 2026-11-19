@@ -89,6 +89,8 @@ def triggered(b, later_events):
     rejection on the Issue (K5r4-m5: from its history — `history_triggers`)."""
     if str(b.get("unsure")).lower() == "true":
         return "unsure"
+    if str(b.get("dual") or "") == "disagree":                   # K6 item 11: §9.5 — 이중 판단 불일치
+        return "dual-judge disagreement (%s said %s)" % (b.get("dual_model") or "-", b.get("dual_choice") or "-")
     if str(b.get("coerced")).lower() == "true" and b.get("coerced_by") not in ("first-sprint", "valve", "conservative"):
         return "coerced"
     if later_events:
@@ -498,6 +500,57 @@ def apply_judgments(common, rows, repo, version, irreversible=lambda row: False)
     return out
 
 
+QUALITY_MIN_WRONG = 10           # §9.5: grader `wrong`s a person judged before the confirmation rate is read
+QUALITY_CONFIRM_FLOOR = 0.5      # below this share confirmed → adjust the prosecutor prompt
+REVISION_WINDOW = 20             # §9.5: a grader revision re-grades the latest 20 person-judged decisions
+
+
+def _human_verdicts(common, repo):
+    """{(issue, D-id): (given_info, order)} — the person's verdicts (sheet `human` + blind `predict-first` oks)."""
+    out = {}
+    for i, g in enumerate(grades(common)):
+        if g.get("repo") != repo or g.get("kind") == "grader" or g.get("grader_version") not in ("human", "predict-first"):
+            continue
+        gi = (g.get("given_info") or "").lower()
+        if gi in ("ok", "wrong"):
+            out[(int(g.get("issue") or 0), g.get("decision_id"))] = (gi, i)
+    return out
+
+
+def grader_quality(common, repo, gv=None, prev_gv=None):
+    """K6 item 11 — the §9.5 grader-quality rules, over this clone's grades.jsonl:
+    * `wrong_confirmation`: of the grader's `wrong`s a person judged, the share the person confirmed; with ≥ 10 and
+      < 50 % → `alert` (adjust the prosecutor prompt — a person's call; nothing changes by itself);
+    * `revision`: when `gv` (a new grader_version) and `prev_gv` both graded the latest 20 person-judged decisions,
+      the share of exact agreement with the person for each — the new version is adoptable only when ≥ the old
+      (`adoptable`); fewer than 20 re-graded → `adoptable: null` (not decidable yet)."""
+    human = _human_verdicts(common, repo)
+    rows = [g for g in grades(common) if g.get("kind") == "grader" and g.get("repo") == repo]
+    cur = gv or (rows[-1].get("grader_version") if rows else None)
+    latest = latest_grader_rows(common, repo, cur) if cur else {}
+    wrongs = [k for k, r in latest.items() if r.get("given_info") == "wrong" and k in human]
+    conf = sum(1 for k in wrongs if human[k][0] == "wrong")
+    rate = (float(conf) / len(wrongs)) if wrongs else None
+    out = {"grader_version": cur, "wrong_confirmation": {
+        "judged": len(wrongs), "confirmed": conf, "rate": rate,
+        "alert": bool(len(wrongs) >= QUALITY_MIN_WRONG and rate is not None and rate < QUALITY_CONFIRM_FLOOR)}}
+    if gv and prev_gv:
+        window = [k for k, _v in sorted(human.items(), key=lambda kv: kv[1][1])][-REVISION_WINDOW:]
+
+        def agree(v):
+            got = latest_grader_rows(common, repo, v)
+            have = [k for k in window if k in got]
+            if len(have) < REVISION_WINDOW:
+                return None, len(have)
+            return sum(1 for k in have if got[k].get("given_info") == human[k][0]) / float(len(have)), len(have)
+        a_new, n_new = agree(gv)
+        a_old, n_old = agree(prev_gv)
+        out["revision"] = {"new": gv, "old": prev_gv, "new_agreement": a_new, "old_agreement": a_old,
+                           "regraded": [n_new, n_old],
+                           "adoptable": None if a_new is None or a_old is None else a_new >= a_old}
+    return out
+
+
 def latest_grader_rows(common, repo, gv=None):
     """{(issue, D-id): the grader row of the highest pass} (the current grader_version when given)."""
     out = {}
@@ -650,8 +703,11 @@ def main(d, a):
         return 64
     by_issue, later_fn, ev_sum, ev_full, texts, ev_untr = {}, {}, {}, {}, {}, {}
     pf_rows, pf_cands = [], []
+    acs = {}
     for n in issues:
-        log = DecisionLog.load(markers.trusted(gh.comments(n), ()))
+        tcs = markers.trusted(gh.comments(n), ())
+        log = DecisionLog.load(tcs)
+        acs[n] = ac_text(tcs)                                  # K6 item 11: call ① sees the Issue's AC
         gone = log.resolved_ids()
         by_issue[n] = [b for b in log.blocks if b.id not in gone or b.get("by") == "human"]
         ev_sum[n], _full, facts = collect_evidence(gh, n, repo)
@@ -680,6 +736,7 @@ def main(d, a):
     later = lambda i, b: later_fn[i](b)                                    # noqa: E731
     graded = []
     if getattr(a, "grader", False):
+        d.grading_acs = acs
         graded = run_grader(d, common, repo, by_issue, later, first, valves, eng, ev_full, texts,
                             int(getattr(a, "pass_no", 1) or 1), watch, ev_untr)
         if isinstance(graded, dict):                                       # an error result
@@ -701,6 +758,17 @@ def main(d, a):
                  "watch": watch,
                  "graded": len(graded)}, out=d.out)
     return 0
+
+
+def ac_text(comments):
+    """The acceptance criteria of the Issue's trusted `analyze:output` (`AC #n: text` lines) — "" when none."""
+    try:
+        from guildcore.records import outputs as OUT
+        from workflows.dev import analysis as AN
+        so = OUT.find(comments, "analyze:output")
+        return "\n".join("%s: %s" % (x["id"], x["text"]) for x in (AN.parse_output(so.body).ac if so else []))
+    except Exception:                                            # noqa: BLE001 — no AC is not an error here
+        return ""
 
 
 def run_grader(d, common, repo, by_issue, later, first, valves, eng, ev_full, texts, pass_no, watch=(),
@@ -737,7 +805,8 @@ def run_grader(d, common, repo, by_issue, later, first, valves, eng, ev_full, te
         if (issue, b.id, pass_no) in done:
             continue
         row = GD.grade(judge, b, issue, group_of(b), ev_full.get(issue) or "", tier, texts.get(issue) or "",
-                       gv, pass_no, untrusted=(ev_untrusted or {}).get(issue) or "")
+                       gv, pass_no, untrusted=(ev_untrusted or {}).get(issue) or "",
+                       ac=(getattr(d, "grading_acs", None) or {}).get(issue) or "")
         row.update(kind="grader", repo=repo, selected=why)
         J.fsync_append(grades_path(common), json.dumps(row, ensure_ascii=False, sort_keys=True))
         out.append(row)

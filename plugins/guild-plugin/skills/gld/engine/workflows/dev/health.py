@@ -27,7 +27,7 @@ from guildcore import valves as VALVES
 BANDS = (("exarb_dismiss", "lenient", 0.10), ("kickoff_clear", "lenient", 0.15), ("stakes_low", "lenient", 0.15),
          ("handoff_ok_with_assumption", "absolute", 0.25), ("kickoff_unclear", "strict", 0.15),
          ("stakes_high", "strict", 0.15), ("pause_issues", "strict", 0.10), ("loopback_issues", "strict", 0.10),
-         ("unsure", "absolute", 0.20), ("coercion", "absolute", 0.15))
+         ("unsure", "absolute", 0.20), ("coercion", "absolute", 0.15), ("dual_disagree", "absolute", 0.25))
 ABSOLUTE = (("forbidden-command", r"forbidden|denied command"), ("scope-violation", r"wrote outside its scope"),
             ("unknown-state", r"engine unknown state|escalation cap reached"), ("write-not-landed", r"did not land on re-read"))
 
@@ -60,6 +60,8 @@ def metrics(blocks_by_issue):
                 add("stakes_high", ch == "high")
             if pt == "HANDOFF" and judged:
                 add("handoff_ok_with_assumption", ch == "ok_with_assumption")
+            if judged and b.get("dual"):
+                add("dual_disagree", b.get("dual") == "disagree")      # K6 item 11 (§9.4-6 band > 25 %)
             if judged:
                 add("unsure", str(b.get("unsure")).lower() == "true")
                 add("coercion", str(b.get("coerced")).lower() == "true" and b.get("coerced_by") not in ("first-sprint", "valve", "conservative"))
@@ -184,7 +186,8 @@ def main(d, a):
            "absolute_tripwires": [{"tripwire": k, "issue": n, "evidence": e} for k, n, e in trips],
            "review_within_1_day": bool(trips), "watch": sorted(gstate.get("watch", {})), "conservative": cons,
            "downgrade_recommended": downgrade_advice(trips, cmp, gstate, cons),
-           "unverified": UV.report(common)}                # K6 item 4: §10.2-6 groups and their release count
+           "unverified": UV.report(common),                # K6 item 4: §10.2-6 groups and their release count
+           "grader_quality": G.grader_quality(common, gh.owner_repo() if hasattr(gh, "owner_repo") else "")}
     if getattr(a, "first_sprint", False):
         rep["go_no_go_draft"] = go_no_go(m, trips, cmp, rep["watch"], cons, len(issues), COST.rows(common))
     emit.engine(rep, out=d.out)

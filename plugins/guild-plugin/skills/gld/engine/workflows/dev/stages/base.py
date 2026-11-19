@@ -120,6 +120,7 @@ class Ports(object):
         self.git_dir = git_dir
         self.valves = {}                  # K5: the soft valves in force (guildcore.valves.effective), read at run start
         self.unverified = frozenset()     # K6 item 4: unverified groups not yet released (live Ports only)
+        self.dual_rate = 0                # K6 item 11: §9.4-7 dual-judgment share (live Ports: config, default 10 %)
         self.directives = []              # K5: attended `dev note` texts of this Issue (by: human, point: directive)
         # the procedure replay's injection list (§10.2-2): legacy values that are not the
         # engine's to decide (loop-back reason/signature …). Empty in every live run.
@@ -137,7 +138,9 @@ class Ports(object):
 
         def judged(spec):
             from workflows.dev import conservative as CONS
-            return CONS.gate(self, spec, raw)
+            from workflows.dev import dual as DUAL
+            # K6 item 11: a sampled share is judged again by another tier (monitoring — never the flow)
+            return DUAL.check(self, spec, CONS.gate(self, spec, raw), raw)
         judged.raw = raw
         return judged
 
@@ -352,6 +355,9 @@ def record_judgment(p, stage, point, refs, dec, choice=None, reason=None, extra=
         f["coerced_to"] = dec.coerced_to
         if getattr(dec, "grounds", None):
             f["grounds"] = dec.grounds                      # K6 (item 39 i): why it could not run, how to give grounds
+    if getattr(dec, "dual", None):
+        # K6 item 11: the §9.4-7 dual judgment (monitoring) — a disagreement is a §9.5 grading trigger
+        f["dual"], f["dual_choice"], f["dual_model"] = dec.dual, dec.dual_choice, dec.dual_model
     if reason:
         f["reason"] = reason
     f.update(extra or {})

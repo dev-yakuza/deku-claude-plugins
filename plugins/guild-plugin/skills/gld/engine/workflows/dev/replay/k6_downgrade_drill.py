@@ -21,7 +21,6 @@ import argparse
 import json
 import os
 import re
-import subprocess
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -35,15 +34,16 @@ OLD_FILES = {"run.md": P + "commands/sprint/run.md", "_handoff.md": P + "command
 
 
 def show(repo, rev, path):
+    from guildcore.adapters import git as G
     try:
-        return subprocess.check_output(["git", "-C", repo, "show", "%s:%s" % (rev, path)],
-                                       stderr=subprocess.DEVNULL).decode("utf-8", "replace")
-    except subprocess.CalledProcessError:
+        return G.run(repo, "show", "%s:%s" % (rev, path)).decode("utf-8", "replace")
+    except G.GitError:
         return None
 
 
 def ls(repo, rev, prefix):
-    out = subprocess.check_output(["git", "-C", repo, "ls-tree", "-r", "--name-only", rev, prefix]).decode()
+    from guildcore.adapters import git as G
+    out = G.run(repo, "ls-tree", "-r", "--name-only", rev, prefix).decode()
     return [x for x in out.split("\n") if x.endswith(".py")]
 
 

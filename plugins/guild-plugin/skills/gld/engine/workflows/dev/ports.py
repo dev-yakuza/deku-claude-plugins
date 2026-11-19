@@ -1290,6 +1290,11 @@ def fsm_factory(main, config, clock, gh, gh_write, runner, judge_runner, unatten
         p.valves = dict(valves or {})                  # K5 §10.5: read once at run start by the caller
         from workflows.dev import unverified as UV
         p.unverified = UV.pending(common)             # K6 item 4: §10.2-6 unverified groups not yet released
+        from workflows.dev import dual as DUAL
+        try:                                           # K6 item 11: §9.4-7 dual judgment share
+            p.dual_rate = float(p.engine_cfg("dual_judge_rate", DUAL.DEFAULT_RATE))
+        except (TypeError, ValueError):
+            p.dual_rate = DUAL.DEFAULT_RATE
         if stage is not None:
             p.directives = directives_of(p, stage)
         if stage == "execute" and p.root and os.path.realpath(p.root) != os.path.realpath(main):
