@@ -408,6 +408,12 @@ def _judge_coverage(p, cfg, test_cases, covers, raw, ledger, visual_cases, tc_re
             return B.fail(p, STAGE, "brief too large for TEST")
         per = {a.get("id"): a for a in d.fields.get("ac") or []}
         verdicts = {ac: (per.get(ac) or {}).get("verdict", "unsure") for ac in acs}
+        rows = [r_ for r_ in d.fields.get("visual_rows") or [] if isinstance(r_, dict)]
+        if d.choice == "gap" and verdicts and all(v == "effective" for v in verdicts.values()) and \
+                not (visual_cases and any(r_.get("verdict") != "covered" for r_ in rows)):
+            # K5r10-m1: `gap` names a gap the stage must see — a stray visual row on an Issue without visual cases is
+            # never read (below), so the gap is in the ACs
+            verdicts = {ac: "unsure" for ac in verdicts}
         eff = [ac for ac, v in verdicts.items() if v == "effective"]
         outcomes, meta = EFF.run(p, cfg, eff, _covers_by_ac(covers), p.base, p.impl_files)
         for ac, oc in outcomes.items():

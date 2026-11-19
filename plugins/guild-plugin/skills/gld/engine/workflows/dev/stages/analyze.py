@@ -604,6 +604,13 @@ def product_owner(p, k, issue_text, charter, forced, body, irr):
             rating = d.fields.get("rating") or "unclear"
             if rating == "partial" and not AN.verify_anchor(d.fields.get("anchor"), p.root, {}, tracked_fn(p)):
                 rating = "unclear"
+            # K5r10-M1: a re-rating never raises Success above what KICKOFF rated (and is never `clear` — coerce_an_po)
+            rank = {"unclear": 0, "partial": 1, "clear": 2}
+            cur = k.readiness.get("success")
+            if cur in rank and rank.get(rating, 0) > rank[cur]:
+                rating = cur
+            if rating == "clear":
+                rating = "unclear"
             k.readiness["success"] = rating
             if rating == "unclear":
                 what = "Success unclear — product-owner: %s" % B.one_line(res.line or "", 160)

@@ -105,7 +105,8 @@ def coerce_stakes(fields):
 def coerce_an_po(fields):
     if fields.get("action") == "rerate_success":
         r = fields.get("rating")
-        if r not in ("clear", "partial", "unclear") or (r == "partial" and not fields.get("anchor")):
+        # K5r10-M1: re-rating means "Success is not settled" — never `clear` (the stage also caps it at KICKOFF's)
+        if r not in ("partial", "unclear") or (r == "partial" and not fields.get("anchor")):
             fields["rating"] = "unclear"
             return fields, "rule"
     return fields, None
@@ -180,26 +181,100 @@ COERCIONS = {"TEST": (coerce_test,), "QA": (coerce_qa,), "PRMATCH": (coerce_prma
              "SPLIT": (coerce_split,), "INTEGRATE": (coerce_integrate,), "HANDOFF": (coerce_handoff,)}
 
 
+# K5r10-M1/m1: per gated group, the result fields that belong to ONE option — written by a judge only when it chose that
+# option. A field listed under several options is shared by them. Fields not listed (reason, coverage, defects, cites …)
+# are the judgment's observations and stay whatever was chosen.
+OPTION_FIELDS = {
+    "AN-PO": {"rerate_success": ("rating", "anchor")},
+    "DE-ARB": {"reinvoke": ("role", "addendum"), "decide": ("assumption",),
+               "escalate": ("reason", "question", "options"), "pause": ("cause", "options")},
+    "SPLIT": {"split": ("slices",)},
+    "INTEGRATE": {"gap": ("gaps",)},
+    "HANDOFF": {"ok_with_assumption": ("line",), "upstream_gap": ("signature", "fixable_by_execute")},
+    "STAKES": {"low": ("local_reversible_reason",), "medium": ("local_reversible_reason",)},
+    "QA": {"pass": ("quality_bar_met",)},
+    "DIRECTIVE": {"applies": ("applies",), "out_of_scope": ("out_of_scope",)},
+    # TEST: the per-AC / visual-row verdicts back the choice — `_human_test_gap`
+}
+
+
+def _person_line(choice, who):
+    return {"gap": "사람이 간극으로 판정 (%s)", "applies": "사람이 적용할 지시로 판정 (%s)",
+            "out_of_scope": "사람이 범위 밖 지시로 판정 (%s)"}.get(choice, "사람이 " + choice + " 로 판정 (%s)") % who
+
+
+def _fill(g, x, f, who):
+    """The conservative/neutral value of option `x`'s own field when the judge did not choose `x` — the value that
+    guarantees `x`'s effect (or, where `x` needs grounds nobody gave, its group's coercion takes the safe path)."""
+    if g == "AN-PO" and x == "rerate_success":
+        return {"rating": "unclear", "anchor": None}               # → the readiness question / re-rating
+    if g == "HANDOFF" and x == "upstream_gap":
+        return {"fixable_by_execute": False}                       # → a person / escalation, never an engine fix
+    if g == "INTEGRATE" and x == "gap":
+        return {"gaps": [{"kind": "coverage", "needs_decision": True, "child_to_fix": None,
+                          "line": "사람이 통합 간극으로 판정 (%s)" % who}]}
+    if g == "DIRECTIVE" and x in ("applies", "out_of_scope"):
+        # the comments the judge read stay (which comment — not what the judge made of it); the line is the person's
+        refs = [c.get("comment") for k in ("applies", "out_of_scope") for c in f.get(k) or [] if isinstance(c, dict)]
+        return {x: [{"comment": refs[0] if refs else None, "line": _person_line(x, who)}]}
+    return {}
+
+
+def _human_test_gap(f, who):
+    """K5r10-m1: a person's `gap` over a judge's `all_effective` — every AC the judge called effective and every visual
+    row it called covered becomes `unsure` (stray rows on an Issue without visual cases included: the stage never reads
+    those, so the gap is in the ACs)."""
+    why = "사람이 커버리지 간극으로 판정 (%s)" % who
+    f["ac"] = [dict(a, verdict="unsure", why=why) if a.get("verdict") == "effective" else a
+               for a in f.get("ac") or [] if isinstance(a, dict)]
+    f["visual_rows"] = [dict(r, verdict="unsure") if r.get("verdict") == "covered" else r
+                        for r in f.get("visual_rows") or [] if isinstance(r, dict)]
+    return f
+
+
+def own_fields(group, x, judged, fields, who):
+    """K5r10-M1: the judge chose `judged`, a person chose `x`: the option-specific fields of every option other than
+    `x` are dropped (they were written for another choice), `x`'s own fields the judge's choice does not share are
+    replaced by `_fill` (or dropped); fields `x` shares with `judged` stay."""
+    f = dict(fields or {})
+    if x == judged:
+        return f
+    if group == "TEST" and x == "gap":
+        return _human_test_gap(f, who)
+    table = OPTION_FIELDS.get(group) or {}
+    mine, theirs = set(table.get(x, ())), set(table.get(judged, ()))
+    for k in set(k for ks in table.values() for k in ks):
+        if not (k in mine and k in theirs):
+            f.pop(k, None)
+    f.update({k: v for k, v in _fill(group, x, fields or {}, who).items() if k in mine - theirs})
+    return f
+
+
 def apply_choice(spec, fields, choice, who=None):
     """K5r9-M1/M2: a person's answer to a conservative question (conservative.gate) has EXACTLY the downstream effect
     the judge's choosing that option would have had: the choice key is set and the group's coercions run over the
     judge's fields — the same consistency rules the judge's own output went through (runner) — so a stage that derives
     its outcome from other fields (TEST: per-AC verdicts, INTEGRATE: gaps) sees the person's choice there too.
-    `who` (e.g. "D12") names the person's decision in the line a rewrite writes. Returns (fields, final choice, by)."""
+    K5r10-M1: a person's choice never runs on fields the judge wrote for ANOTHER option (`own_fields`).
+    `who` (e.g. "D12") names the person's decision in the line a rewrite writes. Returns (fields, final choice, rule) —
+    `rule` names the coercion that replaced the person's choice (None when the choice stands)."""
     from guildcore.judges.runner import _get, _set
-    f = dict(fields or {})
-    _set(f, spec.choice_key, choice)
     g = spec.group
+    judged = _get(dict(fields or {}), spec.choice_key)
+    f = own_fields(g, choice, judged, fields, who) if who else dict(fields or {})
+    _set(f, spec.choice_key, choice)
     if who and g == "TEST" and choice == "gap":
         f, _ = _test_gap(f, "사람이 커버리지 간극으로 판정 (%s)" % who)
     if who and g == "INTEGRATE" and choice == "gap" and not [x for x in f.get("gaps") or [] if isinstance(x, dict)]:
         f["gaps"] = [{"kind": "coverage", "needs_decision": True, "child_to_fix": None,
                       "line": "사람이 통합 간극으로 판정 (%s)" % who}]
-    by = None
+    rule = None
     for co in getattr(spec, "coercions", None) or ():
+        before = _get(f, spec.choice_key)
         f, b = co(f)
-        by = by or b
-    return f, _get(f, spec.choice_key), by
+        if b and rule is None and _get(f, spec.choice_key) != before:
+            rule = co.__name__
+    return f, _get(f, spec.choice_key), rule
 
 
 def hedged(items):
