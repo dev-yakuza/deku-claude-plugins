@@ -83,8 +83,12 @@ def watch_groups(p):
 
 
 def conservative(p, group):
+    """`group.<g>.conservative` in force (a valve), or — K6 item 4 — `g` is a §10.2-6 unverified group not yet
+    released (`p.unverified`, read once per run by the live Ports — `workflows.dev.unverified`)."""
     key = "group.%s.conservative" % group.replace(":", "-")
-    return _truthy((getattr(p, "valves", None) or {}).get(key))
+    if _truthy((getattr(p, "valves", None) or {}).get(key)):
+        return True
+    return group.replace(":", "-") in (getattr(p, "unverified", None) or ())
 
 
 def _go_cache(p):

@@ -54,6 +54,7 @@ import os
 
 from guildcore import journal as J
 from guildcore import valves as VALVES
+from workflows.dev import unverified as UV
 
 HIGH_RISK = ("KICKOFF", "STAKES", "EX-ARB:dismiss", "ESCALATE", "SPLIT", "INTEGRATE")
 SELECTIVE = ("TEST", "QA", "EX-ARB:accept", "DE-ARB", "AN-PO", "VIS-ENV", "DIRECTIVE", "HANDOFF", "EX-DWC")
@@ -300,6 +301,11 @@ def state_path(common):
     return os.path.join(J.engine_dir(common), "grade-state.json")
 
 
+def _now():
+    import time
+    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+
+
 def load_state(common):
     try:
         with open(state_path(common), encoding="utf-8") as fh:
@@ -437,7 +443,7 @@ def apply_judgments(common, rows, repo, version, irreversible=lambda row: False)
     st.setdefault("streak", {})
     sync_releases(common, st)
     released_at = VALVES.load(common)["human"].get("released_at") or {}
-    blocked, forgiven = [], []
+    blocked, forgiven, released = [], [], []
     n, cons, watch = 0, [], []
     for row in rows:
         gi = (row.get("given_info") or "").strip().lower()
@@ -452,6 +458,11 @@ def apply_judgments(common, rows, repo, version, irreversible=lambda row: False)
         J.fsync_append(grades_path(common), json.dumps(rec, ensure_ascii=False, sort_keys=True))
         n += 1
         g = row.get("group") or "?"
+        # K6 item 4: a person's verdict on a blind answer of an unverified group counts toward its release (a wrong
+        # forgiven by a valve release below still keeps the group unverified)
+        rel_g = UV.count(st, dict(row, given_info=gi), _now())
+        if rel_g:
+            released.append(rel_g)
         rel = released_at.get("group.%s.conservative" % g.replace(":", "-"))
         if gi == "wrong" and rel and row.get("decided_at") and str(row.get("decided_at")) < str(rel):
             # K5r7-m5: a wrong DECIDED before the person's release (imported after it) is forgiven with the rest —
@@ -482,6 +493,8 @@ def apply_judgments(common, rows, repo, version, irreversible=lambda row: False)
         out["blocked_by_release"] = sorted(set(blocked))
     if forgiven:
         out["forgiven_by_release"] = forgiven
+    if released:
+        out["unverified_released"] = sorted(set(released))
     return out
 
 

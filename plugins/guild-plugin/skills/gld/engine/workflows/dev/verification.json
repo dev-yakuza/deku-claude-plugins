@@ -1,0 +1,6 @@
+{
+  "about": "design §10.2-6 — the groups the held-out judgment replay verified. Written by replay/gate_report.py from the replay's graded results; shipped with the release. A group not listed under `verified` is UNVERIFIED: its first 5 counted blind (predict-first) answers go through the conservative path, released only when a person confirmed no wrong among them (§10.4 G1 group rule).",
+  "replay": "not run — the §10.2-6 held-out replay needs a paid opus run (k6-notes.md); until then every group is unverified",
+  "release_after": 5,
+  "verified": []
+}

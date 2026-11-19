@@ -1288,6 +1288,8 @@ def fsm_factory(main, config, clock, gh, gh_write, runner, judge_runner, unatten
         p.events = events
         p.config_note = note
         p.valves = dict(valves or {})                  # K5 §10.5: read once at run start by the caller
+        from workflows.dev import unverified as UV
+        p.unverified = UV.pending(common)             # K6 item 4: §10.2-6 unverified groups not yet released
         if stage is not None:
             p.directives = directives_of(p, stage)
         if stage == "execute" and p.root and os.path.realpath(p.root) != os.path.realpath(main):

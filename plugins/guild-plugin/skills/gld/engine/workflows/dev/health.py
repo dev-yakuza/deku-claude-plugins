@@ -157,6 +157,7 @@ def main(d, a):
     from guildcore.decisions import DecisionLog
     from guildcore.records import markers
     from workflows.dev import grade as G
+    from workflows.dev import unverified as UV
     common = d.common()
     gh = d.gh()
     issues = G._issues(d, a, gh) or sorted(set(int(r["issue"]) for r in COST.rows(common) if r.get("issue")))
@@ -182,7 +183,8 @@ def main(d, a):
     rep = {"issues": issues, "rates": [{"metric": k, "value": v, "centre": c, "verdict": vd} for k, v, c, vd in cmp],
            "absolute_tripwires": [{"tripwire": k, "issue": n, "evidence": e} for k, n, e in trips],
            "review_within_1_day": bool(trips), "watch": sorted(gstate.get("watch", {})), "conservative": cons,
-           "downgrade_recommended": downgrade_advice(trips, cmp, gstate, cons)}
+           "downgrade_recommended": downgrade_advice(trips, cmp, gstate, cons),
+           "unverified": UV.report(common)}                # K6 item 4: §10.2-6 groups and their release count
     if getattr(a, "first_sprint", False):
         rep["go_no_go_draft"] = go_no_go(m, trips, cmp, rep["watch"], cons, len(issues), COST.rows(common))
     emit.engine(rep, out=d.out)
