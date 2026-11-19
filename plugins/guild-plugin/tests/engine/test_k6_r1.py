@@ -171,6 +171,13 @@ class M2AfterReveal(unittest.TestCase):
                                 or blk.get("predict_first_refused"), blk.fields)
                 _answer(h, y)
                 ok, cands = self._counted(h)
+                if g in CONS.INHERENT:
+                    # K6 r2 M1: an inherent gate group's answers are never blind judgments — each question is a
+                    # grading-sheet row for the person's verdict on the engine's decision (`inherent-gate`)
+                    self.assertEqual(ok, [])
+                    self.assertEqual([(r["decision_id"], r["mode"]) for r in cands],
+                                     [(b.id, G.INHERENT_MODE) for b in _pending(h)])
+                    continue
                 self.assertEqual([r["decision_id"] for r in ok + cands], [_pending(h)[0].id],
                                  "only the first (blind) answer of the point is a §9.5 judgment")
 
@@ -299,13 +306,19 @@ HELD_OUT_R1 = (   # review-k6-r1 heldout_labels.py — a regression set (never u
 
 class M4Labels(unittest.TestCase):
     def test_asides_never_shown(self):
+        # K6 r2 M3: a remark aside is cut; an aside the engine cannot classify ("(narrow but safe)", "（やりすぎ）") is
+        # neither shown nor dropped — the label refuses (None: the question is not blind, never counted)
         for s in HELD_OUT_R1:
             with self.subTest(label=s):
-                self.assertIn(PF.neutral_label(s), ("로그인만", "앱 전체", "ログインのみ", "アプリ全体", "Login only", "Whole app"))
+                self.assertIn(PF.neutral_label(s), ("로그인만", "앱 전체", "ログインのみ", "アプリ全体", "Login only", "Whole app",
+                                                    None))
 
     def test_heads_when_they_tell_options_apart(self):
-        self.assertEqual(PF.blind_labels(["export function, safe choice", "quiz module: risky interpretation"]),
+        self.assertEqual(PF.blind_labels(["export function, as the request reads", "quiz module: risky interpretation"]),
                          ["export function", "quiz module"])
+        # K6 r2 M3: a tail that is not a remark is never dropped silently ("safe choice" — unknown → refused)
+        self.assertEqual(PF.blind_labels(["export function, safe choice", "quiz module: risky interpretation"]),
+                         [None, "quiz module"])
         # the heads collide → the per-label form (tails that do not rate are kept)
         self.assertEqual(PF.blind_labels(["알림, 푸시만", "알림, 이메일만"]), ["알림, 푸시만", "알림, 이메일만"])
         # an unclosed aside (the one-line cap cut it) goes too
@@ -390,7 +403,9 @@ class M6ReleasePaths(unittest.TestCase):
     def test_every_group_has_a_release_path_or_a_reason(self):
         for g in VALVES.GROUPS:
             with self.subTest(group=g):
-                paths = [g in CONS.GATED, g == "KICKOFF", g in UV.SHEET_RELEASED, g in UV.EXEMPT]
+                # K6 r2 M1: an inherent gate group (one non-conservative option) is released by sheet verdicts
+                paths = [g in CONS.GATED and g not in CONS.INHERENT, g == "KICKOFF", g in UV.SHEET_RELEASED,
+                         g in UV.EXEMPT]
                 self.assertEqual(sum(paths), 1, paths)
         for g, why in list(UV.EXEMPT.items()) + list(UV.SHEET_RELEASED.items()):
             self.assertTrue(len(why) > 20, g)
@@ -557,12 +572,16 @@ class Decision2Folds(unittest.TestCase):
     def test_every_written_token_is_documented_after_the_fold(self):
         rows = self.DR.fold_check(REPO, OLD, "HEAD", sup=_sup())
         toks = dict((r["token"], r) for r in rows)
-        for t in ("halted:engine-gh-auth", "halted:engine-env-ignored-missing", "halted:engine-env-build-inputs-changed",
-                  "halted:engine-env-missing", "halted:engine-env-unknown", "create-settle-wait", "create-unsettled",
+        for t in ("halted:engine-gh-auth", "create-settle-wait", "create-unsettled",
                   "gh-service-wait", "gh-unavailable", "create-settle-until-1790000000", "gh-service-until-1790000000",
                   "board:gh-unavailable", "board:create-unsettled"):
             self.assertIn(t, toks)
             self.assertNotEqual(toks[t]["folded"], t, t)
+        # K6 r2 m3: engine-env-* is not folded — 0.101.3's `engine-env-<reason>` wildcard row renders it
+        for t in ("halted:engine-env-ignored-missing", "halted:engine-env-build-inputs-changed",
+                  "halted:engine-env-missing", "halted:engine-env-unknown"):
+            self.assertIn(t, toks)
+            self.assertEqual(toks[t]["folded"], t, t)
         bad = [r["token"] for r in rows if not r["documented_0_101_3"]]
         self.assertEqual(bad, [])
         self.assertIn("gh auth login", toks["halted:engine-gh-auth"].get("note", ""))

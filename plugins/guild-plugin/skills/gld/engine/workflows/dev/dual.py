@@ -9,6 +9,12 @@ Only the §9.5 DECISION groups (`valves.GROUPS` — KICKOFF, STAKES, SPLIT, QA, 
 judgment (IDENT, SAMECAUSE, PRMATCH, RUNNER, FOLLOWUP, MUTATION, GATECAST, DWC, BRANCH …) is never recorded as a
 decision block — doubling it would cost a second tier on every call of a selected Issue for nothing to read.
 Not dual-judged: a person's decision, a coerced / cached replay, a shadow, the grader's own calls, a helper.
+K6 r2 m2 — what the sample is: a gated group's NON-conservative pick never returns from the gate (it raises the
+blind question), so `check` on the gate's result alone sampled only its conservative picks — the conservative gate
+now calls `check` itself just before the question (the result rides in the local tape, never on the pending block,
+and lands on the applied block; `dev health` counts it against the judge's pick). Remaining bias: a clone without
+the tape loses that dual result. Cost: the rate is a share of judge CALLS; the second call runs on `OTHER` (sonnet →
+opus), so its cost share is higher than the rate — "+10 %" is a call count, not dollars.
 """
 
 import copy

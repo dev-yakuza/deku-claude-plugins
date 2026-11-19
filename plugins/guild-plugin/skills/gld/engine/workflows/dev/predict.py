@@ -107,6 +107,11 @@ def conservative_label(p, group):
     g = group.replace(":", "-")
     src = conservative_source(p, group)
     if src == "unverified":
+        from workflows.dev import unverified as UV
+        if g in UV.SHEET_RELEASED:
+            # K6 r2 M1: released by the person's grading-sheet verdicts (`dev grade`), never by the blind answers
+            return ("unverified %s (§10.2-6: released after the person's grading-sheet verdicts on its decisions — "
+                    "`dev grade`; `dev health` shows the count)" % g)
         return "unverified %s (§10.2-6: released after its human verdicts — `dev health` shows the count)" % g
     return "group.%s.conservative" % g
 
@@ -240,7 +245,7 @@ NEGATIVE = re.compile(r"아니|않|못\s*하|약하|약함|부족|틀리|틀림|
 
 
 # K5r6-M2: likelihood / ranking language (an option label that says how likely or how good it is) — ko / ja / en
-LIKELIHOOD = re.compile(r"가능성|가장|제일|최선|최적|잘\s*맞|자연스럽|분명|명백|당연|확실|의도된|의도한|"
+LIKELIHOOD = re.compile(r"가능성|가장|제일|최선|최적|잘\s*맞|자연스러|자연스럽|분명|명백|당연|확실|의도된|의도한|"
                         r"可能性|おすすめ|オススメ|推奨|最適|最善|最も|一番|妥当|適切|望ましい|ベスト|らしい|と思われ|"
                         r"ではない|じゃない|自然|明らか|"
                         r"\bmost\b|\bleast\b|\bbest\b|\bobvious|\bclearly\b|\bplausib|\bimplausib|\bdoubt|"
@@ -302,14 +307,111 @@ _CLAUSE = re.compile(r"\s*[(（\[][^)）\]]*[)）\]]|\s*(?:—|–|--| - |;|；|
 
 
 # K6 r1 M4 (structural — three review rounds found new evaluative paraphrases the word lists missed): an ASIDE is
-# never shown blind, whatever it says — every parenthesis / bracket (an unclosed one, cut by the one-line cap, to the
-# end) and every spaced-dash tail. A blind label is the summary's head: what the option builds. Two options that
-# differ only in their asides become indistinct → the blind answer is refused (shown openly, never counted).
+# never shown blind as written — every parenthesis / bracket (an unclosed one, cut by the one-line cap, to the end)
+# and every spaced-dash tail.
+# K6 r2 M3: but an aside is also where a summary states its SCOPE ("(설정 화면 제외)", "— iOS 만", "(soft delete, keep
+# audit log)", "（パスワード再設定は対象外）") — cut, the label shows a scope the token does not run (the person's
+# token runs the full interpretation: `apply_choice` parity holds for the token, not for the meaning). Each clause of
+# an aside (and of a tail `blind_labels` would drop) is now one of:
+#   REMARK  rates (`rates`) or speaks of the source / the reading (`_REMARK_REF`: title, request, intent, reading,
+#           evidence …) — cut, as r1 (no execution meaning; where the paraphrases live);
+#   SCOPE   a limitation / exclusion / inclusion / negation (`_SCOPE`) that does not rate — KEPT (shown blind);
+#           a scope clause that also rates cannot be shown or dropped → the blind answer is refused;
+#   OTHER   anything else ("(admin)", "(web)", "(narrow but safe)", "(최소 범위)") — whether it changes what runs
+#           is unknown to the engine: never dropped silently, never shown → the blind answer is refused (shown
+#           openly, never counted — `aside_split` → None).
+# The shown label therefore names everything the token runs that the summary said, or the question is not blind.
 _ASIDE = re.compile(r"\s*[(（\[【][^)）\]】]*(?:[)）\]】]|$)|\s+(?:—|–|--|-)\s+.*$|\s*—.*$")
+_SCOPE = re.compile(r"제외|빼고|말고|(?:\S)만(?=$|\s|[)）\]】,.、])|(?:^|\s)만(?=$|\s)|뿐|한정|이외|외에는|전용|없이|유지|남기|남김|"
+                    r"금지|않|미포함|불포함|포함|까지|부터|단독|전체|모든|일부|"
+                    r"対象外|除く|除き|除外|のみ|だけ|限定|以外|しない|せず|含む|含め|含まない|維持|残す|保持|全体|全て|すべて|一部|まで|"
+                    r"\bonly\b|\bexcept|\bexclud|\bwithout\b|\bnever\b|\bnot\b|n't\b|\bno\b|\bkeep|\bkept\b|\bretain|"
+                    r"\bpreserv|\binclud|\bincl\.|\ball\b|\bwhole\b|\bentire|\bevery\b|\bpartial|\bsoft\b|\bhard\b|"
+                    r"\bread-only\b|\blimited\b|\bsolely\b", re.I)
+_REMARK_REF = re.compile(r"제목|본문|요청|이슈|설명|의도|취지|해석|근거|문구|작성자|보고자|뜻하|말하는|원한|원하는|읽|"
+                         r"タイトル|本文|依頼|要望|要求|説明|趣旨|意図|解釈|読み|読む|根拠|文言|"
+                         r"\btitle|\bissue\b|\bticket\b|\brequest|\breporter|\bauthor\b|\bdescription\b|\bbody\b|"
+                         r"\bintent|\bmeant\b|\breading\b|\breads\b|\binterpret|\bevidence\b|\bbasis\b|\bask(?:ed|s)?\b|"
+                         r"\bsays?\b|\bsaid\b|\bmention|\bwritten\b|\bwording\b|\bliteral", re.I)
+_CLAUSES = re.compile(r"\s*[,、，;；]\s*")
+_CLOSE = {"(": ")", "（": "）", "[": "]", "【": "】"}
+
+
+_CODE_SPAN = re.compile(r"`[^`]*(?:`|$)")
+_LIT_TOKEN = re.compile(r"[A-Za-z0-9_./#:+\-~%$<>=!*·↔→&|@]+")
+
+
+def _literal(t):
+    """K6 r2 M3: a clause made only of code spans, numbers, paths, identifiers (`_runAutoSync`, `v2.0`, `#1684`, `CSV`,
+    `iOS/Android`, `status: 401`) — no natural-language word that could rate: shown as it is."""
+    rest = _CODE_SPAN.sub(" ", t)
+    for w in rest.split():
+        w = w.strip("'\"“”‘’()[]{}.,;")
+        if not w or re.match(r"^[^\w]+$", w):
+            continue
+        if _LIT_TOKEN.fullmatch(w) and (re.search(r"[0-9_./#:+$<>=*·↔→&|@]", w) or re.search(r"[a-z][A-Z]", w)
+                                        or re.match(r"^[A-Z]{2,}s?$", w)):
+            continue
+        return False
+    return True
+
+
+def clause_kind(text):
+    """K6 r2 M3: "remark" | "scope" | "scope-rating" | "other" for one clause of an aside / a dropped tail (a literal —
+    `_literal` — counts as scope: it is shown)."""
+    t = str(text or "").strip()
+    if not t:
+        return "remark"
+    if _literal(t):
+        return "scope"
+    sc = bool(_SCOPE.search(t)) and not _REMARK_REF.search(t)
+    if rates(t):
+        return "scope-rating" if sc else "remark"
+    if _REMARK_REF.search(t):
+        return "remark"
+    return "scope" if sc else "other"
+
+
+def _kept_clauses(inner):
+    """(kept clauses, refuse?) of one aside's / tail's text."""
+    kept, refuse = [], False
+    for c in _CLAUSES.split(inner):
+        k = clause_kind(c)
+        if k == "scope":
+            kept.append(c.strip())
+        elif k != "remark":
+            refuse = True
+    return kept, refuse
+
+
+def aside_split(label):
+    """K6 r2 M3: (the label with each aside reduced to its SCOPE clauses — remarks cut — , refuse?) — refuse when an
+    aside holds a clause that can be neither shown nor dropped (`clause_kind` other / scope-rating)."""
+    lb = str(label or "")
+    refuse = [False]
+
+    def one(m):
+        seg = m.group(0)
+        st = seg.lstrip()
+        lead = seg[:len(seg) - len(st)]
+        if st[:1] in _CLOSE:
+            close = st[-1] if st[-1:] in _CLOSE.values() else ""
+            inner = st[1:len(st) - len(close)] if close else st[1:]
+            kept, bad = _kept_clauses(inner)
+            refuse[0] = refuse[0] or bad
+            return ("%s%s%s%s" % (lead, st[0], ", ".join(kept), close or _CLOSE[st[0]])) if kept else ""
+        dm = re.match(r"(—|–|--|-)\s*(.*)$", st, re.S)
+        dash, inner = (dm.group(1), dm.group(2)) if dm else ("—", st)
+        kept, bad = _kept_clauses(inner)
+        refuse[0] = refuse[0] or bad
+        return (" %s %s" % (dash, ", ".join(kept))) if kept else ""
+    out = _ASIDE.sub(one, lb).strip(" —–-;:,、")
+    return out, refuse[0]
 
 
 def aside_cut(label):
-    return _ASIDE.sub("", str(label or "")).strip(" —–-;:,、")
+    """The label with its asides reduced (remarks cut, scope clauses kept — K6 r2 M3); see `aside_split`."""
+    return aside_split(label)[0]
 
 
 _HEAD_SPLIT = re.compile(r"\s*(?:[,、，;；]|[:：](?=\s|$))\s*")
@@ -319,7 +421,9 @@ def blind_labels(labels):
     """K6 r1 M4: the labels of one blind question, as shown — each `neutral_label`; then, when the HEADS (each label up
     to its first comma / colon / semicolon) still tell every option apart and none rates, only the heads: the least
     that distinguishes the options is all a blind question needs, and a tail is where a summary drifts into a remark
-    the word lists do not know. Returns [label or None (refused)]."""
+    the word lists do not know. K6 r2 M3: a tail is dropped only when every clause of it is a remark; a scope clause
+    stays with its head ("Retry failed uploads, but never on 4xx"), and a tail clause that can be neither shown nor
+    dropped refuses that label. Returns [label or None (refused)]."""
     # a recommendation MARKER (권장 · recommend · (rec) …) is the judge naming its pick — never cut away silently:
     # the label stays as written so the leak check refuses the blind answer (K5r3-M1)
     nl = [(str(x or "") if MARKERS.search(str(x or "")) else neutral_label(x)) for x in labels]
@@ -327,22 +431,34 @@ def blind_labels(labels):
         return nl
     if any(x is None for x in nl):
         return nl
-    heads = [_HEAD_SPLIT.split(x, 1)[0].strip() for x in nl]
+    parts = [_HEAD_SPLIT.split(x, 1) for x in nl]
+    heads = [pp[0].strip() for pp in parts]
     keys = [re.sub(r"\s+", " ", h).strip().lower() for h in heads]
     if all(keys) and len(set(keys)) == len(keys) and not any(rates(h) for h in heads):
-        return heads
+        out = []
+        for h, pp in zip(heads, parts):
+            if len(pp) < 2:
+                out.append(h)
+                continue
+            kept, bad = _kept_clauses(re.sub(r"\s*[:：]\s*", ", ", pp[1]))
+            out.append(None if bad else (h + (", " + ", ".join(kept) if kept else "")))
+        return out
     return nl
 
 
 def neutral_label(label):
-    """K5r6-M2 / K6 r1 M4: an option label as the engine shows it blind — the judge's summary without its asides
-    (`aside_cut` — always) and without a comma / colon tail that rates the option. None when what is left still
-    evaluates (or nothing is left): the blind answer is then refused."""
-    lb = aside_cut(label)
+    """K5r6-M2 / K6 r1 M4 / K6 r2 M3: an option label as the engine shows it blind — the judge's summary with its asides
+    reduced to their scope clauses (`aside_split`) and without a comma / colon tail that rates the option. None when
+    what is left still evaluates, nothing is left, or an aside holds a clause that can be neither shown nor dropped:
+    the blind answer is then refused."""
+    lb, refuse = aside_split(label)
+    if refuse:
+        return None
     if not rates(lb):
         return lb or None
-    out = _CLAUSE.sub(_cut, lb).strip(" —–-;:,、")
-    if not out or rates(out):
+    cut = []
+    out = _CLAUSE.sub(lambda m: _cut(m, cut), lb).strip(" —–-;:,、")
+    if not out or rates(out) or any(clause_kind(c.strip(" —–-;；:：,、，()（）[]")) == "scope-rating" for c in cut):
         return None
     return out
 
@@ -351,16 +467,21 @@ _PAREN = re.compile(r"^(\s*)([(（\[])([^)）\]]*)([)）\]])$")
 _COMMA = re.compile(r"\s*[,、，;；]\s*")
 
 
-def _cut(m):
+def _cut(m, cut=None):
     """One clause of a label: kept when it does not rate. K5r7-m2(b): a parenthesis is cut by its comma clauses —
-    `(앱 전체, 가능성 높음)` keeps `(앱 전체)` (cutting it whole made two labels the same)."""
+    `(앱 전체, 가능성 높음)` keeps `(앱 전체)` (cutting it whole made two labels the same). `cut` collects what was
+    removed (K6 r2 M3: `neutral_label` refuses when a removed clause was not a remark)."""
     c = m.group(0)
     if not rates(c):
         return c
     pm = _PAREN.match(c)
     if not pm:
+        if cut is not None:
+            cut.append(c)
         return ""
     keep = [x for x in _COMMA.split(pm.group(3)) if x.strip() and not rates(x)]
+    if cut is not None:
+        cut += [x for x in _COMMA.split(pm.group(3)) if x.strip() and rates(x)]
     return "%s%s%s%s" % (pm.group(1), pm.group(2), ", ".join(keep), pm.group(4)) if keep else ""
 
 
@@ -644,3 +765,19 @@ def kickoff_chosen_fields(p, chosen):
     its chosen interpretation IS that question's recommendation: the block carries `chosen_sha` (sealed), never
     `chosen`; analyze:output names it once the stage goes on."""
     return {"chosen_sha": sealed(p, chosen, "KICKOFF.chosen")} if chosen is not None else {}
+
+
+# K6 r2 M2: the KICKOFF fields that describe the CHOSEN reading (KICKOFF.md: "`areas`: repo directories the change
+# touches") — next to a blind interpretation question they are its recommendation as surely as `chosen` is
+KICKOFF_FOOTPRINT = ("work_type", "cast", "ui_surface", "safety_net_visual", "areas")
+FOOTPRINT_WITHHELD = "(withheld until the person's blind answer — predict-first)"
+
+
+def kickoff_footprint_sealed(p, values):
+    """The KICKOFF block's footprint while a blind interpretation question follows in the same run: one seal
+    (`footprint_sha` — the values and the nonce journaled first) and a fixed placeholder, so the visible block is the
+    same whichever reading the judge chose; the values ride with the question's withheld texts (revealed with the
+    answer) and the run after the answer writes them openly."""
+    txt = json.dumps(values, sort_keys=True, ensure_ascii=False, default=str)
+    p.__dict__.setdefault("_withheld_next", []).append("KICKOFF footprint: %s" % txt)
+    return {"footprint_sha": sealed(p, txt, "KICKOFF.footprint"), "footprint": FOOTPRINT_WITHHELD}

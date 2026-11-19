@@ -453,8 +453,8 @@ Sprint #99 — 결제 흐름 안정화      (시작 3일 전 · state: rate-limi
   the marker write is what failed.
   ⚠ **0.101.3 folds (K6 user decision 2)**: a 0.102 supervisor writes `state` in a form 0.101.3 documents and the
   precise token beside it — `halt_reason` (+ `halt_note`, the action) for a halted state (`engine-gh-auth` →
-  `halted:marker-unwritable`, `engine-env-missing` → `halted:engine-env-python`, `engine-env-ignored-missing` /
-  `engine-env-build-inputs-changed` → `halted:engine-env-uninitialized`, `engine-env-unknown` → `halted:interrupted`),
+  `halted:marker-unwritable`; `engine-env-<reason>` is never folded — 0.101.3 has a wildcard row for it — but carries
+  `halt_note` too),
   `wait_reason` (`create-settle` / `gh-service`) for a `rate-limited-until-<epoch>` / `-remaining-<n>s` state. Read
   those keys first: `halted:<halt_reason>` and the `create-settle` / `gh-service` wording above are what to render.
 - **How to stop it.** ⚠ For any live state, print the marker's `pid` with the command:

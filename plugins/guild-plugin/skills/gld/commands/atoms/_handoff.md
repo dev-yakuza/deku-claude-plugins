@@ -644,7 +644,8 @@ even write its `env: service` pause) are the same shape: a wait on its own budge
 re-run picks up — never `child-session-failed`. `interrupted` used to be the single destination of every
 abnormal exit, which on a run that lasts days is the only diagnostic channel there is.
 ⚠ **0.101.3 folds (K6 user decision 2)**: the supervisor writes each 0.102-only token in the form 0.101.3 documents and
-the precise token beside it — ledger/marker `halt_reason` + `halt_note` (a folded `halted:` state), `wait_reason` (a
+the precise token beside it — ledger/marker `halt_reason` + `halt_note` (a folded `halted:` state; an unfolded
+`engine-env-<reason>` carries them too), `wait_reason` (a
 `create-settle` / `gh-service` wait written as `rate-limited-until-<epoch>` / `-remaining-<n>s`), failures.jsonl
 `class_exact` (a folded class), the board token `account-rate-limited` (for `create-unsettled` / `gh-unavailable`).
 These keys are machine tokens too; a 0.102 reader reads the precise one first.

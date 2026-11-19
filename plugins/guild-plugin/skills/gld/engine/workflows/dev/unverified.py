@@ -16,8 +16,12 @@
     import, `given_info` ok / wrong on the would-dismiss) count instead;
   - `EXEMPT` (ESCALATE, EX-ARB-accept): no less conservative path exists to gate — never listed as unverified.
   `test_k6_r1.ReleasePath` checks every group of `valves.GROUPS` is in exactly one of these.
+  - K6 r2 M1: the gated groups with ONE non-conservative option (`conservative.INHERENT` — INTEGRATE, TEST, QA,
+    AN-PO, VIS-ENV, EX-DWC, derived from the option tables) are SHEET_RELEASED too: their gate question exists only
+    when the judge chose that option, so its answer is never counted; every such question becomes a grading-sheet
+    row (`grade.inherent_row`, open until the person imports it) and the person's verdicts on those decisions count.
 * K6 r1 m1 — no release while a wrong CANDIDATE of the group (a blind disagreement on the sheet, `dev grade`) is not
-  yet judged by a person (`open` — refreshed by every `dev grade`, cleared by the person's import of that row); a
+  yet judged by a person (`open` — merged by every `dev grade` across its scopes (K6 r2 m1), cleared only by the person's import of that row); a
   verdict imported after the release still counts (`n`, `wrong` — `dev health` shows a wrong after the release; the
   §9.5 count rule acts on it as on any group).
 * State: `grade-state.json` → `unverified: {group: {"n", "wrong", "open", "released_at"}}` (local, like `watch`).
@@ -44,11 +48,30 @@ def canonical(group):
     return str(group or "").replace(":", "-")
 
 
-# K6 r1 M6: groups whose conservative path asks no blind question — released by the person's sheet verdicts
-SHEET_RELEASED = {
-    "EX-ARB-dismiss": "a BLOCKER/MAJOR dismiss is coerced to accept (`would-dismiss`, no question) — the person's "
-                      "verdicts on those decisions on the grading sheet count",
-}
+# K6 r1 M6: groups whose conservative path asks no COUNTED blind question — released by the person's sheet verdicts.
+# K6 r2 M1: + every gated group with one non-conservative option (`conservative.INHERENT`, derived from the option
+# tables): its gate question exists only when the judge chose that option, so the answer is no blind judgment — the
+# person's grading-sheet verdicts on those decisions (`grade.inherent_row`: every such question → a sheet row, open
+# until imported) count, and only on that option (`SHEET_CHOICE`).
+def _sheet_released():
+    from workflows.dev import conservative as CONS
+    out = {"EX-ARB-dismiss": "a BLOCKER/MAJOR dismiss is coerced to accept (`would-dismiss`, no question) — the "
+                             "person's verdicts on those decisions on the grading sheet count"}
+    for g, opt in sorted(CONS.INHERENT.items()):
+        out[g] = ("the gate asks only when the judge chose `%s` (the one non-conservative option) — the question's "
+                  "existence is the recommendation, so its answer is never counted; the person's grading-sheet "
+                  "verdicts on those `%s` decisions count (`dev grade` puts every such question on the sheet)"
+                  % (opt, opt))
+    return out
+
+
+def _sheet_choice():
+    from workflows.dev import conservative as CONS
+    return dict(CONS.INHERENT)
+
+
+SHEET_RELEASED = _sheet_released()
+SHEET_CHOICE = _sheet_choice()       # group → the only choice whose sheet verdict counts (EX-ARB-dismiss: any)
 # K6 r1 M6: groups with no less conservative path to gate — never unverified
 EXEMPT = {
     "ESCALATE": "no G-ESCALATE judge is wired (k6-notes user decision 1) — every unknown state already pauses for a "
@@ -82,7 +105,9 @@ def _key(row):
 
 def note_candidates(st, cands, path=FILE):
     """K6 r1 m1: `dev grade` lists the wrong candidates still waiting for a person (blind disagreements not yet
-    confirmed) — each unverified group's `open` set is replaced by this run's list."""
+    confirmed, and — K6 r2 M1 — the inherent-gate sheet rows). K6 r2 m1: MERGED into each unverified group's `open`
+    set, never replaced — a `dev grade` reads only its scope (`--sprint T` / `--issues N,M`), and an older scope's
+    unjudged candidate must keep holding the release; only the person's import of that row removes it (`count`)."""
     groups = unverified(path)
     by = {}
     for c in cands or ():
@@ -94,16 +119,22 @@ def note_candidates(st, cands, path=FILE):
         if u is None and g not in by:
             continue
         u = st["unverified"].setdefault(g, {"n": 0, "wrong": 0})
-        u["open"] = sorted(by.get(g, ()))
+        u["open"] = sorted(set(u.get("open") or ()) | by.get(g, set()))
 
 
 def counts(row, source):
     """Does this human verdict count toward the release of its group? — a predict-first answer's verdict, or (K6 r1
-    M6) for a SHEET_RELEASED group the person's own sheet verdict (`source` = the import version `human`)."""
+    M6) for a SHEET_RELEASED group the person's own sheet verdict (`source` = the import version `human`; K6 r2 M1:
+    for an inherent gate group on its non-conservative choice only — never a predict-first `ok`)."""
     g = canonical(row.get("group"))
     if (row.get("mode") or "") == "predict-first":
-        return True
-    return g in SHEET_RELEASED and source == "human"
+        return g not in SHEET_CHOICE          # K6 r2 M1: an inherent gate group's blind answer is never counted
+    if g in SHEET_RELEASED:
+        # K6 r2 M1: a sheet-released group counts the person's sheet verdicts — for an inherent gate group only on its
+        # non-conservative pick (a verdict on a conservative `block` / `gap` releases nothing)
+        need = SHEET_CHOICE.get(g)
+        return source == "human" and (need is None or (row.get("choice") or "").strip() == need)
+    return False
 
 
 def count(st, row, now, path=FILE, source=None):

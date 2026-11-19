@@ -99,6 +99,10 @@ def check(repo, old, new):
                 r[k] = "named"
             elif reason.startswith("engine-env-") and generic(t):
                 r[k] = "generic engine-env-<reason>"
+            elif k == "_handoff.md" and re.search(r"`halted:<reason>` is a wildcard", t):
+                # K6 r2 m3: `_handoff.md` declares the halted reasons a wildcard (r1 m6) — the explanation lives in
+                # run.md / daily.md (their rows are checked above and by `fold_check`)
+                r[k] = "wildcard halted:<reason>"
             else:
                 r[k] = "MISSING"
         rows.append(r)
@@ -168,8 +172,11 @@ def documented(old_t, field, token):
         if any(("`halted:%s`" % r) in ln for ln in rows):
             return True
         if r.startswith("engine-env-"):
-            env = [ln for ln in rows if "engine-env-<reason>" in ln]
-            return bool(env) and ("`%s`" % r[len("engine-env-"):]) in env[0]
+            # K6 r2 m3: 0.101.3's `halted:engine-env-<reason>` row is a WILDCARD row ("the engine's environment check
+            # failed (… examples …). Fix the environment, then /gld sprint run") — it renders any engine-env reason
+            # (r1 counted only the listed examples, which led to folding `unknown` into `interrupted`)
+            env = [ln for ln in rows if "`halted:engine-env-<reason>`" in ln]
+            return bool(env) and "environment" in env[0]
         return False
     if field == "class":
         return bool(re.search(r"`%s`" % re.escape(token), old_t.get("daily.md") or ""))

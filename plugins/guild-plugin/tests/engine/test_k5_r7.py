@@ -261,9 +261,9 @@ class M2Labels(unittest.TestCase):
                           ("ログイン画面のみ（根拠が薄い）", "ログイン画面のみ"),
                           ("アプリ全体（タイトル通り）", "アプリ全体"),
                           ("Login screen only (a stretch)", "Login screen only"),
-                          # K6 r1 M4: an aside is never shown blind, whatever it says (r7 m2(b) kept its
-                          # non-rating comma clauses — the r7/r10/K6-r1 paraphrases leaked through exactly there)
-                          ("다크 모드 (앱 전체, 가능성 높음)", "다크 모드")):
+                          # K6 r2 M3: an aside keeps its SCOPE clauses (what the token runs) and loses its remarks
+                          # (K6 r1 M4 had cut it whole — the label then showed a scope the token did not run)
+                          ("다크 모드 (앱 전체, 가능성 높음)", "다크 모드 (앱 전체)")):
             self.assertEqual(PF.neutral_label(raw), want, raw)
 
     def test_descriptive_labels_are_kept(self):
@@ -286,10 +286,11 @@ class M2Labels(unittest.TestCase):
                   summaries=("다크 모드 (로그인만, 가능성 낮음)", "다크 모드 (앱 전체, 가능성 높음)"))
         e, p = _env(self)
         ev, blk = _ask_readiness(e, p, k)
-        # K6 r1 M4: the options differ only in their asides → after the cut they are the same → the blind answer is
-        # refused (the recommendation shown openly, never a counted judgment) — an aside is never shown blind
-        self.assertFalse(ev["predict_first"])
-        self.assertTrue(str(blk.get("predict_first_refused")).startswith("label-indistinct"), blk.fields)
+        # K6 r2 M3: the options differ in their SCOPE asides — kept (the rating clauses cut): blind, no leak, and each
+        # label still says what its token runs (K6 r1 M4 had cut both to "다크 모드" and refused)
+        self.assertTrue(ev["predict_first"])
+        self.assertEqual(sorted(o["label"] for o in ev["options"] if o["token"] != "stop"),
+                         ["다크 모드 (로그인만)", "다크 모드 (앱 전체)"])
 
 
 def _w(did, at):

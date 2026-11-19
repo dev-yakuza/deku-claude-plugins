@@ -841,6 +841,8 @@ PY
 # is written as the 0.101.3 token of the nearest meaning in the field 0.101.3 reads, and the precise token rides
 # beside it, where 0.102's own readers look first (run.md · daily.md · board.md):
 #   marker/ledger `state: halted:<r>`   → folded state + `halt_reason: <r>` + `halt_note: <what to do>`
+#     (K6 r2 m3: `engine-env-*` is NOT folded — 0.101.3's `engine-env-<reason>` wildcard row reads it; only the
+#     note rides beside it)
 #   ledger `state: <w>-until-/-remaining-` (create-settle · gh-service waits) → `rate-limited-…` + `wait_reason: <w>`
 #   failures.jsonl `class`              → folded class + `class_exact: <class>`
 #   board reason token (blocked)        → folded token (the precise class stays in failures.jsonl)
@@ -849,10 +851,10 @@ PY
 compat_fold() {     # compat_fold <token> → the token 0.101.3 documents (the token itself when it already does)
   case "$1" in
     halted:engine-gh-auth)                    echo "halted:marker-unwritable" ;;
-    halted:engine-env-missing)                echo "halted:engine-env-python" ;;
-    halted:engine-env-ignored-missing|halted:engine-env-build-inputs-changed)
-                                              echo "halted:engine-env-uninitialized" ;;
-    halted:engine-env-unknown)                echo "halted:interrupted" ;;
+    # K6 r2 m3: no `halted:engine-env-*` fold — 0.101.3's run.md / daily.md already carry the `engine-env-<reason>`
+    # wildcard row ("the engine's environment check failed … fix the environment, then /gld sprint run"); folding
+    # `unknown` into `interrupted` told 0.101.3 "power loss … a card may be stuck" instead. The exact reason stays in
+    # `state`; `halt_note` (marker_write) says what to fix.
     create-settle-wait|gh-service-wait)       echo "busy" ;;
     create-unsettled|gh-unavailable)          echo "busy-skipped" ;;
     create-settle-until-*|gh-service-until-*) echo "rate-limited-until-${1##*-until-}" ;;
@@ -890,7 +892,8 @@ marker_write() {
   local exact="$1" state note
   state="$(compat_fold "$1")"
   note="$(compat_note "$1")"
-  if [ "$state" != "$exact" ] && [ "${exact#halted:}" != "$exact" ]; then
+  if [ "${exact#halted:}" != "$exact" ] && { [ "$state" != "$exact" ] || [ -n "$note" ]; }; then
+    # a folded halt — or (K6 r2 m3) an unfolded one with a note (engine-env-*): local ledger first, before gh
     ledger_set state "\"$state\"" 2>/dev/null || true
     ledger_set halt_reason "${exact#halted:}" 2>/dev/null || true
     [ -n "$note" ] && ledger_set halt_note "$note" 2>/dev/null || true
@@ -915,13 +918,13 @@ with open(ledger_path) as fh:
 # K6 decision 2 — the 0.101.3 fold in `state`, the precise 0.102 token beside it (and gone once it no longer holds)
 for k in ("halt_reason", "halt_note", "wait_reason"):
     led.pop(k, None)
-if exact and exact != state:
-    if exact.startswith("halted:"):
-        led["halt_reason"] = exact[len("halted:"):]
-        if note:
-            led["halt_note"] = note
-    else:
-        led["wait_reason"] = exact.split("-until-")[0].split("-remaining-")[0]
+if exact.startswith("halted:") and (exact != state or note):
+    # a folded halt, or (K6 r2 m3) an unfolded `engine-env-*` one whose note says what to fix
+    led["halt_reason"] = exact[len("halted:"):]
+    if note:
+        led["halt_note"] = note
+elif exact and exact != state:
+    led["wait_reason"] = exact.split("-until-")[0].split("-remaining-")[0]
 led.update({
     "host": host, "pid": int(pid), "state": state,
     # Not utcfromtimestamp/utcnow — both are deprecated in 3.12+ and emit a DeprecationWarning

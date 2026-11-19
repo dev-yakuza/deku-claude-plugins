@@ -60,7 +60,10 @@ def metrics(blocks_by_issue):
                 add("stakes_high", ch == "high")
             if pt == "HANDOFF" and judged:
                 add("handoff_ok_with_assumption", ch == "ok_with_assumption")
-            if judged and b.get("dual"):
+            # K6 r2 m2: a gated pick a person answered (`coerced_by: conservative`) keeps the dual judgment made on the
+            # judge's pick before the question — it belongs to the sample (else only the conservative picks would)
+            gated = b.get("by") == "human" and b.get("coerced_by") == "conservative"
+            if (judged or gated) and b.get("dual"):
                 add("dual_disagree", b.get("dual") == "disagree")      # K6 item 11 (§9.4-6 band > 25 %)
             if judged:
                 add("unsure", str(b.get("unsure")).lower() == "true")

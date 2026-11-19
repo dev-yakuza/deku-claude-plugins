@@ -7,8 +7,11 @@ citations, candidate areas). You decide; the explorer only gathered.
 - `interpretations`: 2–3 substantively different readings when the Issue allows them, else one.
   `chosen` = the id you recommend. Each `summary` is a short noun phrase of what that reading would build —
   never how likely, how good or how well it fits, and never which one you recommend (a person reads the
-  summaries BEFORE seeing `chosen`; the engine drops every parenthesis and dash aside from a summary and
-  refuses an evaluative one). Put WHY a reading fits or not in its `rationale` (never shown in a blind question).
+  summaries BEFORE seeing `chosen`; the engine refuses an evaluative summary). State the reading's SCOPE in the
+  summary itself — an aside (parenthesis / dash tail) is shown only when it is an explicit limit (`제외`, `만`,
+  `only`, `except`, `not`, `keep …`) or a literal (a path, an identifier, a version); an aside about the Issue or
+  the reading is cut, and any other aside makes the question non-blind. Put WHY a reading fits or not in its
+  `rationale` (never shown in a blind question).
 - `readiness.<goal|constraint|success>.rating`: `clear` | `partial` | `unclear` | `unsure` (RD rules):
   `partial` ONLY when something in reach points at one reading — give it as `anchor`:
   `{cite: "path:line", quote}` (a repo file line the engine re-reads; quote must be on those lines ±3)

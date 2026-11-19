@@ -29,6 +29,8 @@ parse_guild_answer = answer_rec.parse
 
 
 AFTER_REVEAL = "after-reveal"     # K6 r1 M2: `predict_first_counted: false — after-reveal …` — excluded from §9.5 wholly
+INHERENT = "inherent"             # K6 r2 M1: `predict_first_counted: false — inherent: …` — the question's existence is
+                                  # the recommendation; never an `ok` / candidate (a grading-sheet row instead)
 
 class Question(object):
     def __init__(self, kind, text, options, recommended=None, recommended_by=None,
@@ -70,6 +72,7 @@ class Question(object):
         # gate's `cons_used` / `cons_run` — the stage run's identity on GitHub, read when the local tape is gone)
         self.extra = {}
         self.after_reveal = None          # K6 r1 M2: set by the conservative gate on a re-asked decision point
+        self.inherent = None              # K6 r2 M1: set by the conservative gate for a one-option group (INHERENT)
 
     def commitment(self):
         if self.recommended is None:
@@ -102,6 +105,8 @@ class Question(object):
                 # K6 r1 M2: an earlier answer of the same decision point revealed the recommendation of that time —
                 # this answer is no blind judgment (neither an `ok` nor a wrong candidate)
                 f["predict_first_counted"] = "false — %s: %s" % (AFTER_REVEAL, self.after_reveal)
+            elif getattr(self, "inherent", None):
+                f["predict_first_counted"] = "false — %s: %s" % (INHERENT, self.inherent)
             elif getattr(self, "uncounted", None):
                 f["predict_first_counted"] = "false — %s" % self.uncounted   # K5r6-M2(a)
         else:

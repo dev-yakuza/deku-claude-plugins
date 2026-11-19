@@ -15,6 +15,10 @@ Human judgments (§9.5 "사람 판정 = 블라인드 채점표 답 + predict-fir
   a DIFFERENT answer is only a wrong CANDIDATE: it goes on the sheet (`predict-first candidate`) for a person to
   confirm — only that person's `given_info=wrong` (imported like any sheet row) is a §9.5 / G1 wrong; nothing sets
   `watch` / `conservative` before. An answer that saw the recommendation stays a decision (`by: human`) only.
+  K6 r2 M1: a conservative-gate question of a group with ONE non-conservative option (`conservative.INHERENT`) exists
+  only because the judge chose that option — its answer is neither an `ok` nor a candidate; every such question is a
+  sheet row (`mode: inherent-gate`, `choice` = the judge's pick, `inherent_row`) the person grades on the evidence,
+  open (holding the §10.2-6 release) until imported.
 
 Selection (deterministic — `(repo, issue, D-id)` hash, never random):
 * only L0/SJ decisions the engine made (`by: judge:*` / `leader:*`); a decision a person already decided (an
@@ -223,7 +227,13 @@ def predict_first_judgments(blocks, issue):
     counted, cands = [], []
     for r in blocks:
         q = pend.get(r.get("resolves")) if r.get("by") == "human" else None
-        if q is None or not q.get("predict_first") or q.get("predict_first_refused"):
+        if q is None:
+            continue
+        row = inherent_row(q, r, issue)
+        if row is not None:
+            cands.append(row)            # K6 r2 M1: never an `ok` / candidate — the sheet verdict releases the group
+            continue
+        if not q.get("predict_first") or q.get("predict_first_refused"):
             continue
         if r.get("reveal") == "unavailable" or r.get("recommended") in (None, ""):
             continue
@@ -266,6 +276,40 @@ def predict_first_judgments(blocks, issue):
                               given_info="", evidence="predict-first candidate — confirm: was %s clearly better on "
                                                       "what the engine knew?" % ch))
     return counted, cands
+
+
+INHERENT_MODE = "inherent-gate"
+
+
+def _inherent_group(q):
+    """K6 r2 M1: the group of a conservative-gate question whose existence states its recommendation
+    (`conservative.INHERENT` — one non-conservative option), or None."""
+    from workflows.dev import conservative as CONS
+    if q.get("kind") != CONS.KIND:
+        return None
+    g = q.get("group") or str(q.get("point") or "").partition(":")[2]
+    return g if g in CONS.INHERENT else None
+
+
+def inherent_row(q, r, issue):
+    """K6 r2 M1: a person's answer (blind or not, revealed or not, after-reveal or not) to an INHERENT gate question
+    → one grading-sheet row for the person to judge the engine's decision on the evidence (`mode: inherent-gate`,
+    `choice` = the judge's non-conservative pick); open until imported. Never an `ok` nor a wrong candidate: the
+    person knew the recommendation from the question's existence. None for any other question."""
+    g = _inherent_group(q)
+    ch = r.get("choice")
+    if g is None or not ch:
+        return None
+    from workflows.dev import conservative as CONS
+    rec = r.get("recommended") or q.get("recommended") or CONS.INHERENT[g]
+    return {"decision_id": q.id, "issue": issue, "stage": q.get("stage") or "", "group": g, "mode": INHERENT_MODE,
+            "choice": rec, "coerced": "false", "coerced_by": "", "unsure": "false",
+            "irreversible": "true" if q.get("irreversible") == "true" else "", "outcome": "",
+            "note": "resolution %s" % r.id,
+            "reason": "inherent gate: asked only because the engine chose %s; the person answered %s" % (rec, ch),
+            "given_info": "",
+            "evidence": "inherent-gate verdict — grade the engine's %s on the evidence (ok = it was right, wrong = it "
+                        "was not); the question's existence revealed it, so the answer was no blind judgment" % rec}
 
 
 def sheet_rows(selected, mode, evidence):
@@ -380,6 +424,18 @@ def verify_rows(rows, blocks_of):
             rejected.append({"decision_id": r.get("decision_id"), "issue": r.get("issue"), "why": "no §9.5 group"})
             continue
         fixed = dict(r, group=g, irreversible="true" if irr else "")
+        # K6 r2 M1: an inherent group's sheet verdict counts toward its release only on its non-conservative pick —
+        # the choice and the mode come from the log (a pending gate block: the pick its resolution revealed)
+        from workflows.dev import conservative as CONS
+        if g in CONS.INHERENT:
+            if _inherent_group(b) is not None:
+                res = [x for x in cache[n].values() if x.get("resolves") == b.id and x.get("by") == "human"]
+                fixed["choice"] = (res[-1].get("recommended") if res else None) or b.get("recommended") or ""
+                fixed["mode"] = INHERENT_MODE
+            else:
+                fixed["choice"] = b.get("raw_choice") or b.get("choice") or ""
+                if fixed.get("mode") == INHERENT_MODE:
+                    fixed["mode"] = ""
         # K5r7-m5: a release forgives by DECISION time — K5r8-m4: the log's time only; none in the log = unknown
         # (no forgiveness), never the sheet's `decided_at` column
         fixed["decided_at"] = b.get("at") or ""

@@ -108,8 +108,10 @@ class M1Aliases(unittest.TestCase):
         self.assertTrue(blk.get("predict_first_refused").startswith("decision-log"))
 
     def test_full_summary_beyond_the_label_cut_is_caught(self):
-        long_a = "앱 전체 화면에 다크 모드를 적용하고 설정 화면에서 사용자가 시스템 테마를 따를지 직접 고를지 선택할 수 있게 한다 — 저장은 기기 로컬 저장소에만 하고 서버 동기화는 하지 않는다"
-        long_b = "로그인 화면에만 다크 모드를 적용하고 나머지 화면은 지금의 밝은 테마를 유지하며 설정 화면은 바꾸지 않는다 — 범위를 최소화해 이번 스프린트 안에 끝낼 수 있게 한다"
+        long_a = "앱 전체 화면에 다크 모드를 적용하고 설정 화면에서 사용자가 시스템 테마를 따를지 직접 고를지 선택할 수 있게 하며 저장은 기기 로컬 저장소에만 하고 서버 동기화는 하지 않는다"
+        # K6 r2 M3: no dash aside — the one-line cap would cut an aside mid-clause, which refuses at the label
+        # (before the decision-log check this test is about)
+        long_b = "로그인 화면에만 다크 모드를 적용하고 나머지 화면은 지금의 밝은 테마를 유지하며 설정 화면은 바꾸지 않고 범위를 최소화해 이번 스프린트 안에 끝낼 수 있게 한다"
         k = _kick(["I1", "I2"], "I1", "범위 선택", summaries=(long_a, long_b))
         rec = [i for i in k.interpretations if i["id"] == k.chosen][0]
         opts = [{"token": i["id"], "label": B.one_line(i["summary"], 80)} for i in k.interpretations] + \

@@ -100,6 +100,21 @@ def run(logs, out_dir, sample=400):
     return rep
 
 
+def blind_question(pair):
+    """K6 r2 M3: the labels a blind question with these two options shows, decided as `predict.apply` decides it — a
+    label `blind_labels` refuses, labels that are the same after the cut, or a recommendation marker refuse the WHOLE
+    question (None: shown openly, never counted)."""
+    if any(PF.MARKERS.search(str(x or "")) for x in pair):
+        return None
+    shown = PF.blind_labels(pair)
+    if any(x is None for x in shown):
+        return None
+    keys = [re.sub(r"\s+", " ", x).strip().lower() for x in shown]
+    if not all(keys) or len(set(keys)) < len(keys):
+        return None
+    return shown
+
+
 def heldout(path):
     """{kind: {n, unchanged, cut, refused}, "leaked": [...]} — `path` = {"sets": {lang: {"evaluative": [...],
     "descriptive": [...]}}}; labels paired (i, i+1) per language through `predict.blind_labels`."""
@@ -123,6 +138,26 @@ def heldout(path):
                     if kind == "descriptive" and k != "unchanged":
                         out["descriptive_changed"].append([s0, shown])
         out[kind] = t
+        # K6 r2 M3: the same pairs as whole blind questions (a refused label refuses its question — the label-level
+        # count above calls the partner of a refused label "shown"); a leak = an evaluative label shown unchanged in a
+        # question that stays blind
+        qt = {"questions": 0, "refused": 0, "blind": 0, "labels_unchanged": 0}
+        for lang, v in sorted((d.get("sets") or {}).items()):
+            labels = list(v.get(kind) or [])
+            for i in range(0, len(labels) - 1, 2):
+                pair = labels[i:i + 2]
+                qt["questions"] += 1
+                shown = blind_question(pair)
+                if shown is None:
+                    qt["refused"] += 1
+                    continue
+                qt["blind"] += 1
+                for s0, sh in zip(pair, shown):
+                    if sh == s0:
+                        qt["labels_unchanged"] += 1
+                        if kind == "evaluative":
+                            out.setdefault("question_leaked", []).append(s0)
+        out["question_" + kind] = qt
     return out
 
 

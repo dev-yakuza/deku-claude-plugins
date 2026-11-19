@@ -113,10 +113,15 @@ class M1NeutralText(unittest.TestCase):
         self.assertTrue(q3.predict_first)                                # an enumeration of EVERY option is neutral
         q4 = PF.apply(p, mk(["proceed unlike back", "revert"]), "execute")
         self.assertTrue(q4.blind_refused.startswith("options"))         # a label comparing with another option
-        # K6 r1 M4: the same comparison as a dash ASIDE is cut (never shown blind) — the answer stays blind, no leak
+        # K6 r1 M4 → K6 r2 M3: the same comparison as a dash ASIDE is never shown blind — and never dropped silently
+        # either (not a remark, not a scope): the blind answer is refused (shown openly, never counted), no leak
         q5 = PF.apply(p, mk(["proceed — unlike back", "revert"]), "execute")
-        self.assertTrue(q5.predict_first)
-        self.assertEqual(sorted(o["label"] for o in q5.options if o["token"] != "stop"), ["proceed", "revert"])
+        self.assertFalse(q5.predict_first)
+        self.assertTrue(q5.blind_refused.startswith("label-evaluative"), q5.blind_refused)
+        # a remark aside (about the request) is still cut and the answer stays blind
+        q6 = PF.apply(p, mk(["proceed — as the request asks", "revert"]), "execute")
+        self.assertTrue(q6.predict_first)
+        self.assertEqual(sorted(o["label"] for o in q6.options if o["token"] != "stop"), ["proceed", "revert"])
 
     def test_stakes_reason_naming_the_chosen_refuses_the_pause(self):
         # r3-m1/m2: free text this Issue's decision log already shows for the stage (STAKES / KICKOFF reason)

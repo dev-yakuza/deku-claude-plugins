@@ -28,7 +28,8 @@ K6 (items 33/40) + review-k6-r1: an answer belongs to the stage run that asked. 
 the group's conservative choice) applies to any run — never re-judged, retired or re-asked. Another answer, reached
 by a run that is not the asking one (local tape: replay + brief; another clone: the role-input signatures only), is
 judged again and applies when the judge now picks the person's option or the one asked about; otherwise it is
-retired (`stale`). A question at a point that already had an answer (`:a<k>`) is never a counted blind judgment
+retired (`stale`). K6 r2 M4: on a clone without the asking run's tape the judge is called anyway — that judgment
+decides the same way even when the role inputs match (the brief carries what no role input does). A question at a point that already had an answer (`:a<k>`) is never a counted blind judgment
 (`after_reveal`). The identity hashes normalise volatile tokens (`normalise`).
 
 EX-ARB is not gated here: its conservative side is the first-sprint coercion (`firstsprint.no_dismiss` →
@@ -59,6 +60,42 @@ def _gated():
 GATED = _gated()
 KIND = "group-conservative"
 NOT_OPTIONS = ("unsure",)
+
+
+def nonconservative_options(group):
+    """The options of `group` that the gate asks about (its schema's enum without `unsure` and without the group's
+    conservative choice `judging.UNSURE`) — or None (no schema)."""
+    from workflows.dev import judging as JG
+    try:
+        prop = ((JG.schema(group) or {}).get("properties") or {}).get(JG.CHOICE.get(group, "verdict")) or {}
+    except (IOError, OSError, ValueError):
+        return None
+    safe = JG.UNSURE.get(group)
+    return tuple(x for x in (prop.get("enum") or []) if x not in NOT_OPTIONS and x != safe)
+
+
+def _inherent():
+    out = {}
+    for g in GATED:
+        nc = nonconservative_options(g) or ()
+        if len(nc) == 1:
+            out[g] = nc[0]
+    return out
+
+
+# K6 r2 M1: a gated group with exactly ONE non-conservative option (derived from the option tables — INTEGRATE clean,
+# TEST all_effective, QA pass, AN-PO record, VIS-ENV regression, EX-DWC loop_back) — its gate asks only when the
+# judge chose that option, so the question's EXISTENCE is the recommendation (`predict.INHERENT`'s close-decided case).
+# Its answer is never a counted blind judgment (neither an `ok` nor a wrong candidate); the group is released by the
+# person's grading-sheet verdicts on those decisions instead (`unverified.SHEET_RELEASED`, `grade` makes the rows).
+INHERENT = _inherent()
+
+
+def inherent(group):
+    """The reason `group`'s gate question is inherent (its existence states the recommendation), or None."""
+    opt = INHERENT.get(group)
+    return ("the gate asks only when the judge chose %s (the group's one non-conservative option)" % opt) if opt \
+        else None
 
 
 class Ask(BaseException):
@@ -326,6 +363,8 @@ def _save_tape(p, key, stage, d, brief=None):
     live = p.__dict__.get("_cons_live")
     rec = {"what": "conservative-tape", "key": key, "stage": stage, "roles": live, "decision": d.as_dict(),
            "used": dict(p.__dict__.get("_cons_used") or {}), "brief": brief}
+    if getattr(d, "dual", None):                         # K6 r2 m2: the pre-question dual judgment (local only)
+        rec["dual"] = {"dual": d.dual, "dual_choice": d.dual_choice, "dual_model": d.dual_model}
     try:
         import json
         json.dumps(rec)
@@ -461,7 +500,9 @@ def _asked_brief(p, key):
     """The brief hash of the run that asked — from the LOCAL tape only (K6 r1 M3). Only a replayed run sees the same
     role OUTPUT the asking run saw; a run whose roles went live (another clone: `_remote_replay`) gets other wording
     from the same inputs, so its brief can never hash the same — its identity is the role-input signatures alone
-    (`cons_run`, with qa's HEAD salt for rework). The block's `cons_brief` stays as a record, never compared."""
+    (`cons_run`, with qa's HEAD salt for rework). The block's `cons_brief` stays as a record, never compared.
+    K6 r2 M4: matching signatures do not apply the answer by themselves there — the judge the run calls anyway (no
+    tape to reuse) must pick the person's option or the one asked about (`gate`)."""
     if p.__dict__.get("_cons_remote"):
         return None
     t = _tape_for(p, key)
@@ -616,8 +657,15 @@ def gate(p, spec, raw):
     ans, res, applied = _answer(p, key)
     opts = options_of(spec)
     fresh = None
-    if ans is not None and not applied and ans not in safe_answers(g) and spec.stage in REPLAY_STAGES \
-            and _matched(p, spec, key) is False:
+    same = None
+    if ans is not None and not applied and ans not in safe_answers(g) and spec.stage in REPLAY_STAGES:
+        same = _matched(p, spec, key)
+    # K6 r2 M4: without the asking run's tape (another clone — `_remote_replay` — or a lost journal) the judge is
+    # called anyway (no taped decision to reuse), and the role-input signatures cannot see what only the judge's brief
+    # carries (TEST: the AC file and the cited test bodies). That judgment decides like a diverged run's: the answer
+    # applies only when it picks the person's option or the one asked about. `None` (a pre-K6 block, no identity) keeps
+    # the earlier behaviour
+    if same is False or (same is not None and _tape_for(p, key) is None):
         # K6 (item 40, review-k5-r10 m3) as fixed by K6 r1 M1–M3: a NON-conservative answer given to a stage run this
         # one no longer is (a crash after the gate, then a rollback / rework / an Issue edit changed a role's inputs
         # or — local tape — the judge's brief). The point is judged again; the answer still applies when the judge
@@ -660,6 +708,10 @@ def gate(p, spec, raw):
         f, final, rule = JG.apply_choice(spec, d.fields, ans, who=str(res.id))
         out = Decision(final, f, "human", d.digest, unsure=False, coerced=True, coerced_by="conservative",
                        raw_choice=d.choice, cost=0.0, cached=True, model=d.model)
+        if fresh is None and t and t.get("dual") and not applied:
+            # K6 r2 m2: the dual judgment of the taped decision (made before the question) rides on the applied block
+            out.dual, out.dual_choice, out.dual_model = (t["dual"].get("dual"), t["dual"].get("dual_choice"),
+                                                         t["dual"].get("dual_model"))
         if rule and final != ans:
             # K5r10-m2: a rule replaced the person's choice — the log keeps both (the person's answer, the result)
             out.human_choice, out.coerced_to = ans, "%s by rule %s" % (final, rule)
@@ -688,6 +740,13 @@ def gate(p, spec, raw):
         return d
     if not opts or d.choice not in opts:
         return d
+    if getattr(p, "dual_rate", 0):
+        # K6 r2 m2: the §9.4-7 dual judgment samples the NON-conservative picks too — before the question, into the
+        # local tape only (never the pending block: `dual_choice` could show the recommendation); the decision the
+        # answer applies carries it (`dual` on the applied block, read by `dev health` against the judge's pick).
+        # Without this the sample of a gated group was its conservative picks only (they never reach `Ask`).
+        from workflows.dev import dual as DUAL
+        DUAL.check(p, spec, d, raw)
     brief = _brief_h(spec)
     _save_tape(p, key, spec.stage, d, brief)
     run_id = _run_field(p.__dict__.get("_cons_live")) if spec.stage in REPLAY_STAGES else None
@@ -707,6 +766,9 @@ def gate(p, spec, raw):
                      neutral=_neutral(p, spec), raised_by="confirm")
     q.point = "conservative:%s" % g
     q.irreversible = irr
+    if inherent(g):
+        # K6 r2 M1: asking states the recommendation — blind or not, never a counted blind judgment
+        q.inherent = inherent(g)
     if key != pt:
         # K6 r1 M2: an earlier answer of this decision point exists (applied, or retired `stale`) — its resolution
         # revealed the recommendation of that time (and a `stale` block says the judge moved since). The person can

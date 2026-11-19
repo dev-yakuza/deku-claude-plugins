@@ -354,20 +354,18 @@ def run(p, only=None, config_present=True):
                           "#%d" % p.issue, True)
     if "premise" in answers:
         k.high = set(x for x in k.high if not any(pl.dim == x for pl in plan))
-    did = B.record_judgment(p, STAGE, "KICKOFF", "J-DEV-01,J-AN-05,J-AN-06,J-AN-10,J-AN-13", d,
-                            choice=",".join("%s=%s" % (x, k.readiness[x]) for x in AN.DIMS),
-                            reason="; ".join(k.coerced)[:300] or None,
-                            extra=dict(PF.kickoff_chosen_fields(p, k.chosen), **{
-                                "work_type": k.work_type,
-                                "cast": k.cast["participation"] + k.cast["gates"],
-                                "ui_surface": k.ui_surface, "safety_net_visual": k.safety_net_visual,
-                                "areas": k.areas[:10], "explorer": explorer_state,
-                                "code_coercions": len(k.coerced) or None}))
-    trace.append("KICKOFF %s (%s)%s" % (did, d.by, (" · coerced: %d" % len(k.coerced)) if k.coerced else ""))
-
-    # A4 — harness guard
+    # K6 r2 M2: whether a blind interpretation question follows in THIS run is decided BEFORE the KICKOFF block is
+    # written — A4 (harness) and A5 (close) first, then A6's question (attended: unclear / surface; unattended: the
+    # STAKES judgments — their blocks still deferred — and the conservative KICKOFF). When one follows, the block's
+    # interpretation-dependent fields (the chosen reading's footprint: `areas` · `ui_surface` · `cast` · `work_type` ·
+    # `safety_net_visual`, and the code coercions about it) are sealed with `chosen` (`footprint_sha`, journaled,
+    # revealed with the answer) — `areas: lib/settings · ui_surface: false` next to a blind "설정만 / 앱 전체"
+    # question IS its recommendation. The run after the answer (`human_decided`) writes them openly; design reads
+    # that block (the last KICKOFF block of analyze). Judge-call order and block order are unchanged.
+    # A4 — harness guard (decided here, its record after the KICKOFF block as before)
     hits = AN.harness_hit(k.areas + ev_areas) + AN.harness_text_hit([a["text"] for a in k.ac])
     harness_note = None
+    harness_ignored = None
     if hits and not trust and not e.state.harness:
         # user decision (2026-11-18): an outsider's text is untrusted data — it alone never pauses
         dropped = [a for a in k.ac if AN.harness_text_hit([a["text"]])]
@@ -376,11 +374,109 @@ def run(p, only=None, config_present=True):
             a["id"] = "AC #%d" % (i + 1)
         harness_note = ("외부 작성자 Issue 의 하네스/게이트 경로(%s)는 신뢰하지 않는 데이터 — 정지 조건 아님%s" % (
             ", ".join(hits[:4]), ("; 그 경로를 말하는 AC %d개 제외" % len(dropped)) if dropped else ""))
-        B.record_code(p, STAGE, "harness-untrusted", "ignored", refs=",".join(hits[:4]),
+        harness_ignored = hits[:4]
+        hits = []
+    a4 = bool(e.state.harness or hits)
+    # A5 — close as decided (decided here)
+    close = k.close.get("decide")
+    if "close-decided" in answers:
+        ch = answers["close-decided"][1].get("choice")
+        close = ch if ch in ("completed", "not_planned") else "none"
+        k.close = {"decide": close, "from_plan": False, "line": "human answer %s" % answers["close-decided"][1].id}
+    a5 = close in ("completed", "not_planned")
+    # A6 — readiness gate (decided here, acted on below)
+    assumptions = list(k.assumptions)
+    unclear = [x for x in AN.DIMS if k.readiness[x] == "unclear"]
+    open_dims = [x for x in AN.DIMS if k.readiness[x] in ("partial", "unclear")]
+    stakes = {}
+    a6 = None                      # ("ask", q, line) | ("pause", q, line, prose) — the question A6 raises
+    recorders, high, cons = [], [], False
+    if not a4 and not a5:
+        if not p.unattended:
+            opts = [{"token": i["id"], "label": B.one_line(i["summary"], 80)} for i in k.interpretations] or \
+                [{"token": "proceed", "label": "진행"}]
+            opts.append({"token": "stop", "label": "stop"})
+            if unclear:
+                what = "; ".join("%s unclear — %s" % (AN.DIM_KEY[x], k.choice_needed.get(x) or "-") for x in unclear)
+                # K5r5-M1: the blind wording is the engine's (dimension names only); K5r5-M2: the judge said undecidable
+                q = ASK.Question("readiness", what, opts, recommended=k.chosen if k.chosen in [o["token"] for o in opts] else None,
+                                 recommended_by=d.by, stakes="high" if k.high & set(unclear) else None, aliases=k.aliases,
+                                 neutral=PF.neutral_text("readiness-unclear", ", ".join(AN.DIM_KEY[x] for x in unclear),
+                                                         p.issue), raised_by="judge-unclear")
+                a6 = ("ask", q, what)
+            else:
+                judge_asked = bool(k.surface.get("ask"))
+                surf = judge_asked or FS.confirm_interpretation(p)    # §10.4: on in the first sprint (and KICKOFF conservative)
+                if surf and "interpretation-surface" not in answers and "readiness" not in answers:
+                    what = k.surface.get("question") or "해석 확인: %s" % k.chosen
+                    # K5r3-M1: KICKOFF is high-risk → this ask is predict-first; its neutral wording never names the chosen one
+                    q = ASK.Question("interpretation-surface", what, opts,
+                                     recommended=k.chosen if k.chosen in [o["token"] for o in opts] else None,
+                                     recommended_by=d.by, neutral=PF.neutral_text("interpretation", p.issue),
+                                     aliases=k.aliases, raised_by="judge-surface" if judge_asked else "confirm")
+                    a6 = ("ask", q, what)
+        else:
+            chosen_txt = next((i["summary"] for i in k.interpretations if i["id"] == k.chosen), "")
+            for dim in open_dims:
+                if human_decided:
+                    stakes[dim] = "human %s" % human_decided       # a person answered this gate — no re-judging
+                elif dim in k.high:
+                    stakes[dim] = "high"
+                else:
+                    stakes[dim], rec_ = ARB.stakes(p, STAGE, "J-AN-07", "%s %s — %s" % (AN.DIM_KEY[dim], k.readiness[dim],
+                                             k.choice_needed.get(dim) or "-"),
+                                             [i["summary"] for i in k.interpretations], chosen_txt, judge_body,
+                                             k.areas, irr, "A1.3",
+                                             # K5r5-M1: the block on GitHub carries the engine's words only — the
+                                             # judge's choice_needed would show before a blind readiness answer
+                                             record_question="%s %s" % (AN.DIM_KEY[dim], k.readiness[dim]), defer=True)
+                    recorders.append(rec_)
+            high = [x for x in open_dims if stakes.get(x) == "high"]
+            # K5r5-M3: KICKOFF conservative (§9.5 count rule) — its decision goes to a person: the interpretation is
+            # confirmed blind even when every dimension is clear
+            cons = not human_decided and not high and PF.conservative(p, "KICKOFF") and bool(k.interpretations)
+            if high or cons:
+                dim = high[0] if high else None
+                if dim:
+                    line = "%s %s — %s" % (AN.DIM_KEY[dim], k.readiness[dim], B.one_line(k.choice_needed.get(dim) or "-", 160))
+                    neutral = PF.neutral_text("readiness-high", AN.DIM_KEY[dim], k.readiness[dim], p.issue)
+                else:
+                    line = "%s — 해석 확인" % PF.conservative_label(p, "KICKOFF")
+                    neutral = PF.neutral_text("kickoff-conservative", p.issue)
+                opts = [{"token": i["id"], "label": B.one_line(i["summary"], 80)} for i in k.interpretations]
+                opts.append({"token": "stop", "label": "stop"})
+                q = ASK.Question("readiness" if dim else "interpretation-surface", line, opts,
+                                 recommended=k.chosen if k.chosen in [o["token"] for o in opts] else None,
+                                 recommended_by=d.by, stakes="high", aliases=k.aliases, neutral=neutral,
+                                 # K5r6-m4: `unclear` = the judge could not decide; `partial` + STAKES high = the
+                                 # judge could, the engine asks (confirm)
+                                 raised_by="judge-unclear" if dim and k.readiness[dim] == "unclear" else "confirm")
+                # K5r3-m3: the enumeration in the canonical order (never the judge's ranking)
+                a6 = ("pause", q, line, "선택지: " + " | ".join("%s = %s" % (o["token"], o["label"])
+                                                               for o in PF.canonical(opts) if o["token"] != "stop"))
+    blind_next = a6 is not None and a6[1].recommended is not None
+    foot = {"work_type": k.work_type, "cast": k.cast["participation"] + k.cast["gates"],
+            "ui_surface": k.ui_surface, "safety_net_visual": k.safety_net_visual, "areas": k.areas[:10]}
+    kreason = "; ".join(k.coerced)[:300] or None
+    kextra = dict(PF.kickoff_chosen_fields(p, k.chosen))
+    if blind_next:
+        kextra.update(PF.kickoff_footprint_sealed(p, dict(foot, reason=kreason, code_coercions=len(k.coerced) or None)))
+        kextra["explorer"] = explorer_state
+        kreason = None
+    else:
+        kextra.update(foot)
+        kextra.update(explorer=explorer_state, code_coercions=len(k.coerced) or None)
+    did = B.record_judgment(p, STAGE, "KICKOFF", "J-DEV-01,J-AN-05,J-AN-06,J-AN-10,J-AN-13", d,
+                            choice=",".join("%s=%s" % (x, k.readiness[x]) for x in AN.DIMS),
+                            reason=kreason, extra=kextra)
+    trace.append("KICKOFF %s (%s)%s" % (did, d.by, (" · coerced: %d" % len(k.coerced)) if k.coerced else ""))
+
+    # A4 — harness guard
+    if harness_ignored is not None:
+        B.record_code(p, STAGE, "harness-untrusted", "ignored", refs=",".join(harness_ignored),
                       reason=harness_note[:300])
         trace.append(harness_note)
-        hits = []
-    if e.state.harness or hits:
+    if a4:
         line = "하네스/게이트 파일 변경 — 사람이 직접 (%s)" % (", ".join(hits[:4]) or "guild:harness")
         if "escalation" in answers:
             pass                                          # a person answered (only `stop` is offered → returned above)
@@ -388,12 +484,7 @@ def run(p, only=None, config_present=True):
         return B.ask(p, STAGE, q, line, {"cause_kind": "ambiguity", "line": line, "token_cause": "ambiguity: %s" % line})
 
     # A5 — close as decided
-    close = k.close.get("decide")
-    if "close-decided" in answers:
-        ch = answers["close-decided"][1].get("choice")
-        close = ch if ch in ("completed", "not_planned") else "none"
-        k.close = {"decide": close, "from_plan": False, "line": "human answer %s" % answers["close-decided"][1].id}
-    if close in ("completed", "not_planned"):
+    if a5:
         if k.close.get("from_plan") or "close-decided" in answers:
             return close_as_decided(p, e, k, close)
         line = "작업 불필요 판단(계획 결정 줄 없음) — 사람이 확인"
@@ -406,78 +497,18 @@ def run(p, only=None, config_present=True):
             "cause_kind": "ambiguity", "line": line, "token_cause": "ambiguity: %s" % line})
 
     # A6 — readiness gate
-    assumptions = list(k.assumptions)
-    unclear = [x for x in AN.DIMS if k.readiness[x] == "unclear"]
-    open_dims = [x for x in AN.DIMS if k.readiness[x] in ("partial", "unclear")]
-    stakes = {}
     if not p.unattended:
-        opts = [{"token": i["id"], "label": B.one_line(i["summary"], 80)} for i in k.interpretations] or \
-            [{"token": "proceed", "label": "진행"}]
-        opts.append({"token": "stop", "label": "stop"})
-        if unclear:
-            what = "; ".join("%s unclear — %s" % (AN.DIM_KEY[x], k.choice_needed.get(x) or "-") for x in unclear)
-            # K5r5-M1: the blind wording is the engine's (dimension names only); K5r5-M2: the judge said undecidable
-            q = ASK.Question("readiness", what, opts, recommended=k.chosen if k.chosen in [o["token"] for o in opts] else None,
-                             recommended_by=d.by, stakes="high" if k.high & set(unclear) else None, aliases=k.aliases,
-                             neutral=PF.neutral_text("readiness-unclear", ", ".join(AN.DIM_KEY[x] for x in unclear),
-                                                     p.issue), raised_by="judge-unclear")
-            return B.ask(p, STAGE, q, what)
-        judge_asked = bool(k.surface.get("ask"))
-        surf = judge_asked or FS.confirm_interpretation(p)        # §10.4: on in the first sprint (and KICKOFF conservative)
-        if surf and "interpretation-surface" not in answers and "readiness" not in answers:
-            what = k.surface.get("question") or "해석 확인: %s" % k.chosen
-            # K5r3-M1: KICKOFF is high-risk → this ask is predict-first; its neutral wording never names the chosen one
-            q = ASK.Question("interpretation-surface", what, opts,
-                             recommended=k.chosen if k.chosen in [o["token"] for o in opts] else None, recommended_by=d.by,
-                             neutral=PF.neutral_text("interpretation", p.issue), aliases=k.aliases,
-                             raised_by="judge-surface" if judge_asked else "confirm")
-            return B.ask(p, STAGE, q, what)
+        if a6 is not None:
+            return B.ask(p, STAGE, a6[1], a6[2])
         if p.events is not None:                          # JR-M10 — the person can hold/note
             p.events.emit("progress", p.now(), line="analyze #%d: %s · %s · cast %s" % (
                 p.issue, k.chosen, AN.readiness_line(k.readiness), ", ".join(k.cast["participation"] + k.cast["gates"]) or "none"))
     else:
-        chosen_txt = next((i["summary"] for i in k.interpretations if i["id"] == k.chosen), "")
-        recorders = []
-        for dim in open_dims:
-            if human_decided:
-                stakes[dim] = "human %s" % human_decided       # a person answered this gate — no re-judging
-            elif dim in k.high:
-                stakes[dim] = "high"
-            else:
-                stakes[dim], rec_ = ARB.stakes(p, STAGE, "J-AN-07", "%s %s — %s" % (AN.DIM_KEY[dim], k.readiness[dim],
-                                         k.choice_needed.get(dim) or "-"),
-                                         [i["summary"] for i in k.interpretations], chosen_txt, judge_body,
-                                         k.areas, irr, "A1.3",
-                                         # K5r5-M1: the block on GitHub carries the engine's words only — the
-                                         # judge's choice_needed would show before a blind readiness answer
-                                         record_question="%s %s" % (AN.DIM_KEY[dim], k.readiness[dim]), defer=True)
-                recorders.append(rec_)
-        high = [x for x in open_dims if stakes.get(x) == "high"]
-        # K5r5-M3: KICKOFF conservative (§9.5 count rule) — its decision goes to a person: the interpretation is
-        # confirmed blind even when every dimension is clear
-        cons = not human_decided and not high and PF.conservative(p, "KICKOFF") and bool(k.interpretations)
         for rec_ in recorders:          # K5r6-m7: a blind question follows → the STAKES reasons are withheld until then
             rec_(withhold=bool(high or cons))
-        if high or cons:
-            dim = high[0] if high else None
-            if dim:
-                line = "%s %s — %s" % (AN.DIM_KEY[dim], k.readiness[dim], B.one_line(k.choice_needed.get(dim) or "-", 160))
-                neutral = PF.neutral_text("readiness-high", AN.DIM_KEY[dim], k.readiness[dim], p.issue)
-            else:
-                line = "%s — 해석 확인" % PF.conservative_label(p, "KICKOFF")
-                neutral = PF.neutral_text("kickoff-conservative", p.issue)
-            opts = [{"token": i["id"], "label": B.one_line(i["summary"], 80)} for i in k.interpretations]
-            opts.append({"token": "stop", "label": "stop"})
-            q = ASK.Question("readiness" if dim else "interpretation-surface", line, opts,
-                             recommended=k.chosen if k.chosen in [o["token"] for o in opts] else None,
-                             recommended_by=d.by, stakes="high", aliases=k.aliases, neutral=neutral,
-                             # K5r6-m4: `unclear` = the judge could not decide; `partial` + STAKES high = the
-                             # judge could, the engine asks (confirm)
-                             raised_by="judge-unclear" if dim and k.readiness[dim] == "unclear" else "confirm")
-            # K5r3-m3: the enumeration in the canonical order (never the judge's ranking)
-            return B.pause(p, STAGE, "ambiguity", line, "ambiguity: %s" % line, question=q,
-                           prose="선택지: " + " | ".join("%s = %s" % (o["token"], o["label"])
-                                                        for o in PF.canonical(opts) if o["token"] != "stop"))
+        if a6 is not None:
+            _k, q, line, prose = a6
+            return B.pause(p, STAGE, "ambiguity", line, "ambiguity: %s" % line, question=q, prose=prose)
         for dim in open_dims:
             assumptions.append("%s %s (stakes %s): %s — %s 로 진행" % (AN.DIM_KEY[dim], k.readiness[dim], stakes[dim],
                                                                     k.choice_needed.get(dim) or "-", k.chosen))
