@@ -367,8 +367,9 @@ def verify_rows(rows, blocks_of):
             rejected.append({"decision_id": r.get("decision_id"), "issue": r.get("issue"), "why": "no §9.5 group"})
             continue
         fixed = dict(r, group=g, irreversible="true" if irr else "")
-        if b.get("at"):
-            fixed["decided_at"] = b.get("at")              # K5r7-m5: a release forgives by DECISION time
+        # K5r7-m5: a release forgives by DECISION time — K5r8-m4: the log's time only; none in the log = unknown
+        # (no forgiveness), never the sheet's `decided_at` column
+        fixed["decided_at"] = b.get("at") or ""
         if (r.get("group") or "") != g or str(r.get("irreversible") or "").strip().lower() != fixed["irreversible"]:
             fixed["note"] = ("%s [sheet group/irreversible %s/%s replaced by the log's]" % (
                 r.get("note") or "", r.get("group") or "-", r.get("irreversible") or "-")).strip()
@@ -385,6 +386,8 @@ def import_sheet(common, text, repo, irreversible=irreversible_row, blocks_of=No
     rejected = []
     if blocks_of is not None:
         rows, rejected = verify_rows(rows, blocks_of)
+    else:                                                    # K5r8-m4: a sheet's own `decided_at` is not trusted
+        rows = [dict(r, decided_at="") for r in rows]
     res = apply_judgments(common, rows, repo, "human", irreversible)
     if rejected:
         res["rejected"] = rejected
