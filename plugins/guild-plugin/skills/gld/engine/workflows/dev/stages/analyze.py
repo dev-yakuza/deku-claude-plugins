@@ -437,23 +437,27 @@ def run(p, only=None, config_present=True):
                 p.issue, k.chosen, AN.readiness_line(k.readiness), ", ".join(k.cast["participation"] + k.cast["gates"]) or "none"))
     else:
         chosen_txt = next((i["summary"] for i in k.interpretations if i["id"] == k.chosen), "")
+        recorders = []
         for dim in open_dims:
             if human_decided:
                 stakes[dim] = "human %s" % human_decided       # a person answered this gate — no re-judging
             elif dim in k.high:
                 stakes[dim] = "high"
             else:
-                stakes[dim] = ARB.stakes(p, STAGE, "J-AN-07", "%s %s — %s" % (AN.DIM_KEY[dim], k.readiness[dim],
+                stakes[dim], rec_ = ARB.stakes(p, STAGE, "J-AN-07", "%s %s — %s" % (AN.DIM_KEY[dim], k.readiness[dim],
                                          k.choice_needed.get(dim) or "-"),
                                          [i["summary"] for i in k.interpretations], chosen_txt, judge_body,
                                          k.areas, irr, "A1.3",
                                          # K5r5-M1: the block on GitHub carries the engine's words only — the
                                          # judge's choice_needed would show before a blind readiness answer
-                                         record_question="%s %s" % (AN.DIM_KEY[dim], k.readiness[dim]))
+                                         record_question="%s %s" % (AN.DIM_KEY[dim], k.readiness[dim]), defer=True)
+                recorders.append(rec_)
         high = [x for x in open_dims if stakes.get(x) == "high"]
         # K5r5-M3: KICKOFF conservative (§9.5 count rule) — its decision goes to a person: the interpretation is
         # confirmed blind even when every dimension is clear
         cons = not human_decided and not high and PF.conservative(p, "KICKOFF") and bool(k.interpretations)
+        for rec_ in recorders:          # K5r6-m7: a blind question follows → the STAKES reasons are withheld until then
+            rec_(withhold=bool(high or cons))
         if high or cons:
             dim = high[0] if high else None
             if dim:
@@ -467,7 +471,9 @@ def run(p, only=None, config_present=True):
             q = ASK.Question("readiness" if dim else "interpretation-surface", line, opts,
                              recommended=k.chosen if k.chosen in [o["token"] for o in opts] else None,
                              recommended_by=d.by, stakes="high", aliases=k.aliases, neutral=neutral,
-                             raised_by="judge-unclear" if dim else "confirm")
+                             # K5r6-m4: `unclear` = the judge could not decide; `partial` + STAKES high = the
+                             # judge could, the engine asks (confirm)
+                             raised_by="judge-unclear" if dim and k.readiness[dim] == "unclear" else "confirm")
             # K5r3-m3: the enumeration in the canonical order (never the judge's ranking)
             return B.pause(p, STAGE, "ambiguity", line, "ambiguity: %s" % line, question=q,
                            prose="선택지: " + " | ".join("%s = %s" % (o["token"], o["label"])

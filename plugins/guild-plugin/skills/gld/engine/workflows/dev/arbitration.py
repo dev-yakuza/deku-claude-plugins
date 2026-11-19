@@ -22,7 +22,7 @@ LEVELS = ("low", "medium", "high")
 
 
 def stakes(p, stage, refs, question, options, about_to_take, body, areas, irreversible_paths, step,
-           record_question=None):
+           record_question=None, defer=False):
     brief = [("question", question),
              ("options", "\n".join("- %s" % o for o in options) or "-"),
              ("about_to_take", about_to_take or "-"),
@@ -41,9 +41,28 @@ def stakes(p, stage, refs, question, options, about_to_take, body, areas, irreve
         extra["question"] = rq[:300]
     if irreversible_paths:
         extra["irreversible"] = "true"     # K5r5-M3: §9.5 rule 2 — a confirmed wrong here is the irreversible class
-    B.record_judgment(p, stage, "STAKES", refs, d, choice=level,
-                      reason=(d.fields.get("local_reversible_reason") or coerced or "")[:300], extra=extra or None)
+    reason = (d.fields.get("local_reversible_reason") or coerced or "")[:300]
+
+    def record(withhold=False):
+        """K5r6-m7: `withhold` — a blind question follows in this stage: the judge's free `reason` is not on GitHub
+        before the answer (sealed: `reason_sha`, journaled; revealed with the answer — `withhold_for_next`)."""
+        ex = dict(extra)
+        r = reason
+        if withhold and reason:
+            from workflows.dev import predict as PF
+            ex["reason_sha"] = PF.sealed(p, reason, "STAKES.reason")
+            r = "(withheld until the person's blind answer — predict-first)"
+            withhold_for_next(p, "STAKES reason: %s" % reason)
+        return B.record_judgment(p, stage, "STAKES", refs, d, choice=level, reason=r, extra=ex or None)
+    if defer:
+        return level, record
+    record()
     return level
+
+
+def withhold_for_next(p, text):
+    """K5r6-m7: a text the next blind question of this run withholds with its own (revealed after the answer)."""
+    p.__dict__.setdefault("_withheld_next", []).append(text)
 
 
 def _ask_or_pause(p, stage, line, options, recommended=None, kind="design-block"):
