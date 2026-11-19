@@ -367,6 +367,8 @@ def verify_rows(rows, blocks_of):
             rejected.append({"decision_id": r.get("decision_id"), "issue": r.get("issue"), "why": "no §9.5 group"})
             continue
         fixed = dict(r, group=g, irreversible="true" if irr else "")
+        if b.get("at"):
+            fixed["decided_at"] = b.get("at")              # K5r7-m5: a release forgives by DECISION time
         if (r.get("group") or "") != g or str(r.get("irreversible") or "").strip().lower() != fixed["irreversible"]:
             fixed["note"] = ("%s [sheet group/irreversible %s/%s replaced by the log's]" % (
                 r.get("note") or "", r.get("group") or "-", r.get("irreversible") or "-")).strip()
@@ -431,7 +433,8 @@ def apply_judgments(common, rows, repo, version, irreversible=lambda row: False)
     st.setdefault("watch", {})
     st.setdefault("streak", {})
     sync_releases(common, st)
-    blocked = []
+    released_at = VALVES.load(common)["human"].get("released_at") or {}
+    blocked, forgiven = [], []
     n, cons, watch = 0, [], []
     for row in rows:
         gi = (row.get("given_info") or "").strip().lower()
@@ -446,6 +449,12 @@ def apply_judgments(common, rows, repo, version, irreversible=lambda row: False)
         J.fsync_append(grades_path(common), json.dumps(rec, ensure_ascii=False, sort_keys=True))
         n += 1
         g = row.get("group") or "?"
+        rel = released_at.get("group.%s.conservative" % g.replace(":", "-"))
+        if gi == "wrong" and rel and row.get("decided_at") and str(row.get("decided_at")) < str(rel):
+            # K5r7-m5: a wrong DECIDED before the person's release (imported after it) is forgiven with the rest —
+            # recorded, but no watch / conservative step
+            forgiven.append(row.get("decision_id"))
+            continue
         if gi == "wrong":
             st["streak"][g] = 0
             if g in st["watch"] or g in IRREVERSIBLE or irreversible(row):
@@ -468,6 +477,8 @@ def apply_judgments(common, rows, repo, version, irreversible=lambda row: False)
     out = {"imported": n, "watch": sorted(set(watch)), "conservative": sorted(set(cons))}
     if blocked:
         out["blocked_by_release"] = sorted(set(blocked))
+    if forgiven:
+        out["forgiven_by_release"] = forgiven
     return out
 
 
