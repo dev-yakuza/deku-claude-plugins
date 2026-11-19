@@ -311,8 +311,17 @@ class AnswerEqualsJudge(unittest.TestCase):
         self.assertEqual(sorted(SCENARIOS), sorted(CONS.GATED))
 
     def test_answer_x_is_the_judge_choosing_x(self):
+        """K5r10-M1/m4: these fixtures pre-fill every option's fields — so only an X whose own fields (JG.OPTION_FIELDS)
+        the judge's Y shares is compared here; an X that needs grounds only a judge choosing X writes (DE-ARB decide /
+        escalate, SPLIT split, HANDOFF ok_with_assumption) never runs on Y's fields any more — `test_k5_r10.Table`
+        covers every (X, Y ≠ X) on Y's own output shape."""
         for group in CONS.GATED:
+            y = SCENARIOS[group][3]
+            table = JG.OPTION_FIELDS.get(group) or {}
             for x in options(group):
+                if x != y and not set(table.get(x, ())) <= set(table.get(y, ())) and \
+                        set(table.get(x, ())) - set(JG._fill(group, x, {}, "D0")):
+                    continue
                 with self.subTest(group=group, option=x):
                     want = self.native(group, x)
                     got = self.gated(group, x)
