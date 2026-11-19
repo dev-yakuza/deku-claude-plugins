@@ -345,6 +345,10 @@ def record_judgment(p, stage, point, refs, dec, choice=None, reason=None, extra=
     if dec.coerced:
         f["coerced_by"] = dec.coerced_by or "rule"
         f["raw_choice"] = dec.raw_choice
+    if getattr(dec, "human_choice", None):
+        # K5r10-m2: `choice` is what ran; the person chose `human_choice`, a rule turned it into `coerced_to`
+        f["human_choice"] = dec.human_choice
+        f["coerced_to"] = dec.coerced_to
     if reason:
         f["reason"] = reason
     f.update(extra or {})

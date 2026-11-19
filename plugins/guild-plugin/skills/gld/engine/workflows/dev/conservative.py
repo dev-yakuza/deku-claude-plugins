@@ -364,9 +364,12 @@ def gate(p, spec, raw):
             raise Hold("group.%s.conservative: a person answered stop (%s)" % (g, res.id))
         # K5r9-M1/M2: the person's choice goes through the group's own consistency rules (`apply_choice`) — the stage
         # then sees exactly what the judge's choosing it would have given (TEST per-AC verdicts, INTEGRATE gaps)
-        f, final, _by = JG.apply_choice(spec, d.fields, ans, who=str(res.id))
+        f, final, rule = JG.apply_choice(spec, d.fields, ans, who=str(res.id))
         out = Decision(final, f, "human", d.digest, unsure=False, coerced=True, coerced_by="conservative",
                        raw_choice=d.choice, cost=0.0, cached=True, model=d.model)
+        if rule and final != ans:
+            # K5r10-m2: a rule replaced the person's choice — the log keeps both (the person's answer, the result)
+            out.human_choice, out.coerced_to = ans, "%s by rule %s" % (final, rule)
         # K5r9: the same stage run replayed after a later question reuses this answer (its effect already written):
         # the decision is the one already logged — `record_judgment` does not log it a second time
         out.replayed = bool(applied)
