@@ -54,6 +54,34 @@ class Evidence(unittest.TestCase):
         self.assertTrue(row["flagged"])
 
 
+class SeenCitations(unittest.TestCase):
+    """measured with a local model (k6-notes): citing the AC or the judge's brief demoted 9 of 10 grades — those
+    citations exist verbatim; they are verified, and only an `ok` needs post-hoc grounds."""
+
+    def _judge(self, gi, cites):
+        def judge(spec):
+            if spec.choice_key == "choice":
+                return Decision("block", {"choice": "block", "reason": "r", "cited_evidence": cites},
+                                "judge:opus", "g1")
+            return Decision(gi, {"given_info": gi, "outcome": "inconsistent", "reason": "r",
+                                 "cited_evidence": cites}, "judge:opus", "g2")
+        return judge
+
+    def test_wrong_citing_the_brief_and_ac_stands(self):
+        blk = _block({"point": "QA", "stage": "qa", "by": "judge:sonnet", "choice": "pass"})
+        row = GD.grade(self._judge("wrong", ["AC #2: 오답이 0개이면 버튼이 비활성화된다", "AC #2 not exercised on device"]),
+                       blk, 7, "QA", "review: crash on empty retry", issue_text="quiz", ac="AC #2: 오답이 0개이면 버튼이 비활성화된다",
+                       brief="qa report: AC #2 not exercised on device")
+        self.assertEqual((row["given_info"], row["demoted"]), ("wrong", None))
+
+    def test_ok_on_the_brief_alone_is_unsure(self):
+        blk = _block({"point": "QA", "stage": "qa", "by": "judge:sonnet", "choice": "pass"})
+        row = GD.grade(self._judge("ok", ["qa report: all widget tests green on the quiz screen"]), blk, 7, "QA",
+                       "merged", issue_text="quiz", brief="qa report: all widget tests green on the quiz screen")
+        self.assertEqual(row["given_info"], "unsure")
+        self.assertIn("brief", row["demoted"])
+
+
 def _grade_row(issue, did, gi, gv, kind=None):
     r = {"repo": "o/r", "issue": issue, "decision_id": did, "given_info": gi, "grader_version": gv, "group": "QA"}
     if kind:
