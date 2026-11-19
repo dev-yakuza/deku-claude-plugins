@@ -102,7 +102,8 @@ class Ports(object):
         self.config = config
         self.root = root
         self.unattended = unattended
-        self.run_role, self.judge = run_role, judge
+        self.run_role = run_role
+        self.judge = judge
         self.suite, self.check = suite, check
         self.capture = capture or (lambda *a, **k: None)
         self.mark = mark or (lambda stage: None)
@@ -131,13 +132,30 @@ class Ports(object):
 
         def judged(spec):
             from workflows.dev import conservative as CONS
-            return CONS.gate(self, spec, raw(spec))
+            return CONS.gate(self, spec, raw)
         judged.raw = raw
         return judged
 
     @judge.setter
     def judge(self, fn):
         self.__dict__["_judge_raw"] = getattr(fn, "raw", fn)
+
+    @property
+    def run_role(self):
+        """K5r6-M1: role calls pass the conservative path's tape (replayed, not re-run, after an answer)."""
+        raw = self.__dict__.get("_run_role_raw")
+        if raw is None:
+            return None
+
+        def ran(call):
+            from workflows.dev import conservative as CONS
+            return CONS.role(self, call, raw)
+        ran.raw = raw
+        return ran
+
+    @run_role.setter
+    def run_role(self, fn):
+        self.__dict__["_run_role_raw"] = getattr(fn, "raw", fn)
 
     # -- config ---------------------------------------------------------------------------
     def cfg(self, dotted, default=None):

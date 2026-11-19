@@ -222,6 +222,19 @@ class Driver(object):
                     return Outcome(B.StageResult(B.StageResult.FAIL, line=why, fail_class="defect"), 0)
                 return self._end(n, B.pause(p, target, "env", why, "env: other — %s" % why, env_key="other"))
             p.stage_start = p.now()                                       # K3 m4 contract: the FSM passes it
+            if target == "test" and stage == "test":
+                # K5r6-M1: the execute→test hand-over question was asked after execute had moved the label to
+                # guild:test — its answer is read by decision point and applied HERE, before the test stage runs
+                from workflows.dev import conservative as CONS
+                CONS.begin(p)
+                if CONS.any_active(p) and CONS.answered_unapplied(p, "HANDOFF", "test", "X→T"):
+                    r2 = self._guarded(p, "test", lambda: self.after_execute(p, n, force=True))
+                    if r2 is not None:
+                        if r2.kind == B.StageResult.LOOPBACK and not only:
+                            continue
+                        return self._end(n, r2)
+                    p = self.ports_for(n, target, variant)
+                    p.stage_start = p.now()
             fn = self._fn(target)
             r = self._guarded(p, target, (lambda: fn(p, variant)) if target == "execute" else (lambda: fn(p, only=only)))
             if r.kind == B.StageResult.ADVANCE:
@@ -246,6 +259,7 @@ class Driver(object):
         the stage stops there and the question is asked (attended) / paused on (unattended) at that stage; the stage
         runs again after the answer. A `stop` answer holds the run."""
         from workflows.dev import conservative as CONS
+        CONS.begin(p)
         try:
             return thunk()
         except CONS.Ask as a:
@@ -307,12 +321,12 @@ class Driver(object):
         return Outcome(B.StageResult(B.StageResult.DONE), 0)
 
     # -- §3.6 execute→test --------------------------------------------------------------------
-    def after_execute(self, p, n):
+    def after_execute(self, p, n, force=False):
         cfg = getattr(p.config, "raw", None) or (p.config if isinstance(p.config, dict) else {})
         comments = B.records(p)
         bad = HO.execute_to_test(comments, p.gh.pr_search(n), n, cfg)
         always = p.engine_cfg("handoff_judge", "default") == "always"
-        if not bad and not always:
+        if not bad and not always and not force:     # force: a person's hand-over answer is waiting (K5r6-M1)
             from workflows.dev import firstsprint as FS
             if FS.handoff_shadow(p):                     # §10.4 first sprint: judged as a shadow, never acted on
                 from workflows.dev import analysis as AN
