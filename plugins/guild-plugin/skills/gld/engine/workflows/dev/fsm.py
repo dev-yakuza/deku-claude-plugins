@@ -140,6 +140,10 @@ class Driver(object):
             if self.ports_for is None:
                 raise RuntimeError("no GitHub ports (setup failed before they existed)")
             p = self.ports_for(n, None)
+            if cls == "defect":
+                # K6 item 14: every engine FAIL is an escalation on the record — the §4.2 cap and repeat rule
+                from workflows.dev import escalation as ESC
+                reason = ESC.note(getattr(p, "journal", None), "engine:%s" % reason.split(" — ")[0][:40], reason)
             r = B.fail(p, "engine", reason, cls)
             return Outcome(r, 0)
         except (GhWriteError, GhError) as ex:
@@ -357,7 +361,11 @@ class Driver(object):
         prod = producer_of(r.line)
         if prod is None:
             line = "NEEDS_CONTEXT outside the fixed map — %s" % B.one_line(r.line, 160)
-            return B.pause(p, stage, "defect", "engine unknown state — %s" % line, line) if self.unattended else r
+            if not self.unattended:
+                return r
+            from workflows.dev import escalation as ESC
+            line = ESC.note(getattr(p, "journal", None), "%s:needs-context" % stage, line)   # K6 item 14
+            return B.pause(p, stage, "defect", "engine unknown state — %s" % line, line)
         line = "%s — the producing stage (%s) already ran but left nothing behind" % (B.one_line(r.line, 160), prod)
         q = ASK.Question("needs-context-producer-ran", line, [{"token": "stop", "label": "stop"}])
         return B.ask(p, stage, q, line, {"cause_kind": "defect", "line": line, "token_cause": line})

@@ -29,7 +29,7 @@ BANDS = (("exarb_dismiss", "lenient", 0.10), ("kickoff_clear", "lenient", 0.15),
          ("stakes_high", "strict", 0.15), ("pause_issues", "strict", 0.10), ("loopback_issues", "strict", 0.10),
          ("unsure", "absolute", 0.20), ("coercion", "absolute", 0.15))
 ABSOLUTE = (("forbidden-command", r"forbidden|denied command"), ("scope-violation", r"wrote outside its scope"),
-            ("unknown-state", r"engine unknown state"), ("write-not-landed", r"did not land on re-read"))
+            ("unknown-state", r"engine unknown state|escalation cap reached"), ("write-not-landed", r"did not land on re-read"))
 
 
 def _rate(n, d):
