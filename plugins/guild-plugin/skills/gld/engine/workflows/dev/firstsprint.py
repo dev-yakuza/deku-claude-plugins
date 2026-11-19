@@ -28,16 +28,22 @@ def on(p):
 
 
 def confirm_interpretation(p):
-    return bool(p.engine_cfg("attended_confirm_interpretation", False)) or on(p)
+    # K5r5-M3: a conservative KICKOFF (§9.5 count rule) confirms the interpretation with a person too
+    return bool(p.engine_cfg("attended_confirm_interpretation", False)) or on(p) or PF.conservative(p, "KICKOFF")
 
 
-def no_dismiss(p):
-    """None | 'first-sprint' | 'valve' — why an unattended BLOCKER/MAJOR dismiss is forced to accept."""
-    if on(p):
-        return "first-sprint"
-    v = p.engine_cfg("exarb_no_unattended_dismiss", None)
-    if v is True or str(v).lower() == "true":
-        return "valve"
+def no_dismiss(p, attended=False):
+    """None | 'first-sprint' | 'valve' | 'conservative' — why a BLOCKER/MAJOR dismiss is forced to accept. Unattended:
+    first-sprint mode, the `exarb.no_unattended_dismiss` valve, or (K5r5-M3) `group.EX-ARB-dismiss.conservative`;
+    attended: the conservative valve only (EX-ARB's conservative side — §9.5 rule 2)."""
+    if not attended:
+        if on(p):
+            return "first-sprint"
+        v = p.engine_cfg("exarb_no_unattended_dismiss", None)
+        if v is True or str(v).lower() == "true":
+            return "valve"
+    if PF.conservative(p, "EX-ARB:dismiss"):
+        return "conservative"
     return None
 
 

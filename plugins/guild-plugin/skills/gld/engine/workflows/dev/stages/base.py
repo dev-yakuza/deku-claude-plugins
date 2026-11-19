@@ -122,6 +122,23 @@ class Ports(object):
         self.suite_warm = None            # the last suite run's warm-up status (K2r5-m3)
         self.suite_warm_detail = None     # its proxy summary + redacted output tail (K2r7-m1)
 
+    # -- judging (K5r5-M3: every L0/SJ decision passes the §9.5 conservative path) -----------------------------
+    @property
+    def judge(self):
+        raw = self.__dict__.get("_judge_raw")
+        if raw is None:
+            return None
+
+        def judged(spec):
+            from workflows.dev import conservative as CONS
+            return CONS.gate(self, spec, raw(spec))
+        judged.raw = raw
+        return judged
+
+    @judge.setter
+    def judge(self, fn):
+        self.__dict__["_judge_raw"] = getattr(fn, "raw", fn)
+
     # -- config ---------------------------------------------------------------------------
     def cfg(self, dotted, default=None):
         c = self.config

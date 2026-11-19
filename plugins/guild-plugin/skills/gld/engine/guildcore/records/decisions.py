@@ -45,7 +45,7 @@ ASK_KINDS = ("readiness", "premise", "close-decided", "interpretation-surface", 
              "restore-failed", "local-dev-files", "gate-inv2", "disputed-blocker",
              "dismiss-blocker", "auditor-violation", "auditor-scan-failed", "role-result-invalid",
              "diverged", "integration-gap", "integration-fix-child", "followups", "arch-drift",
-             "escalation", "permission", "budget")
+             "escalation", "permission", "budget", "group-conservative")
 BY_RE = re.compile(r"^(code|human|judge:[a-z0-9.-]+|leader:[a-z0-9.-]+)$")
 
 

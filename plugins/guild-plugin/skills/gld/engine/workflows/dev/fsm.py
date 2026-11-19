@@ -207,7 +207,7 @@ class Driver(object):
                         "#%d is a split parent (guild:children) — /gld %s does not run on it" % (n, only))), 0)
                 from workflows.dev.stages import children as CH
                 pc = self.ports_for(n, "children")
-                r = CH.run(pc, self._drive_child)
+                r = self._guarded(pc, "children", lambda: CH.run(pc, self._drive_child))
                 return self._end(n, r)
             target = "analyze" if stage == "none" else stage
             if only and target != only and not (only == "test" and stage == "done"):
@@ -223,10 +223,10 @@ class Driver(object):
                 return self._end(n, B.pause(p, target, "env", why, "env: other — %s" % why, env_key="other"))
             p.stage_start = p.now()                                       # K3 m4 contract: the FSM passes it
             fn = self._fn(target)
-            r = fn(p, variant) if target == "execute" else fn(p, only=only)
+            r = self._guarded(p, target, (lambda: fn(p, variant)) if target == "execute" else (lambda: fn(p, only=only)))
             if r.kind == B.StageResult.ADVANCE:
                 if target == "execute":
-                    r2 = self.after_execute(p, n)
+                    r2 = self._guarded(p, "test", lambda: self.after_execute(p, n))
                     if r2 is not None:
                         if r2.kind != B.StageResult.LOOPBACK:
                             return self._end(n, r2)
@@ -240,6 +240,18 @@ class Driver(object):
             if r.kind == B.StageResult.FAIL and r.fail_class == "needs_context":
                 return self._end(n, self.needs_context(p, n, target, r))
             return self._end(n, r)
+
+    def _guarded(self, p, stage, thunk):
+        """K5r5-M3: a judgment of a `group.<g>.conservative` group raises `conservative.Ask` from inside the stage —
+        the stage stops there and the question is asked (attended) / paused on (unattended) at that stage; the stage
+        runs again after the answer. A `stop` answer holds the run."""
+        from workflows.dev import conservative as CONS
+        try:
+            return thunk()
+        except CONS.Ask as a:
+            return CONS.surface(p, stage, a)
+        except CONS.Hold as h:
+            return CONS.hold(p, stage, h)
 
     def _drive_child(self, c):
         """K5r1-M1/M2: a child runs under its own IssueLock; only an explicit DONE lets the parent go on

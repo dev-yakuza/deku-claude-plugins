@@ -963,13 +963,14 @@ def arbitrate_step(p, cx, attempt, scan, scan_ran, head, untracked, role_trigger
         # §10.4: unattended, a BLOCKER/MAJOR dismiss/dispute is forced to accept in the first sprint (and after the
         # go while the `exarb.no_unattended_dismiss` valve holds) — the judge's own pick stays as `would-dismiss`
         would = []
-        why = FS.no_dismiss(p) if p.unattended else None
+        why = FS.no_dismiss(p, attended=not p.unattended)
         if why:
             for k, _c in new_bm:
                 if (ex.get(k) or {}).get("verdict") in ("dismiss", "dispute"):
                     would.append(k)
                     ex[k] = {"verdict": "accept", "reason": "%s (would-dismiss: %s)" % (
-                        "first-sprint" if why == "first-sprint" else "exarb.no_unattended_dismiss",
+                        {"first-sprint": "first-sprint", "conservative": "group.EX-ARB-dismiss.conservative"}.get(
+                            why, "exarb.no_unattended_dismiss"),
                         ex[k].get("reason") or "")}
         extra = {"coerced": "true"} if coerced else {}
         if would:

@@ -62,7 +62,7 @@ def metrics(blocks_by_issue):
                 add("handoff_ok_with_assumption", ch == "ok_with_assumption")
             if judged:
                 add("unsure", str(b.get("unsure")).lower() == "true")
-                add("coercion", str(b.get("coerced")).lower() == "true" and b.get("coerced_by") not in ("first-sprint", "valve"))
+                add("coercion", str(b.get("coerced")).lower() == "true" and b.get("coerced_by") not in ("first-sprint", "valve", "conservative"))
             if b.get("status") == "pending-human" or pt.startswith("ask:") or b.get("cause"):
                 paused = True
             if pt in ("loopback", "loop-back") or "loop" in pt:
