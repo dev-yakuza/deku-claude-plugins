@@ -42,8 +42,8 @@ review/merge re-grades only pass-1 `unsure`s. Key (repo, issue, D-id, grader_ver
 
 Count rules on import (§9.5, shared with `dev health`): per group, a person's confirmed `given_info=wrong`
 1 → `watch` (state file); a second while watched, or one in an irreversible class (SPLIT; STAKES on an
-irreversible path) → `group.<G>.conservative` in the valves' `auto` area (a person-released valve is never
-re-applied — `guildcore.valves`). `watch` clears after 10 consecutive confirmed non-wrong judgments.
+irreversible path) → `group.<G>.conservative` in the valves' `auto` area. K5r6-M3: a person's release of that
+valve is an event — the group's watch/streak start again and later confirmed wrongs may set it again. `watch` clears after 10 consecutive confirmed non-wrong judgments.
 """
 
 import csv
@@ -328,12 +328,64 @@ def irreversible_row(row):
     return str(row.get("irreversible") or "").strip().lower() == "true"
 
 
-def import_sheet(common, text, repo, irreversible=irreversible_row):
+def engine_view(b):
+    """(group, irreversible) the engine's OWN record says for a sheet row's D-id — a decision block, or the pending
+    block of a predict-first question (K5r6-m2)."""
+    if b.get("status") == "pending-human":
+        from workflows.dev import predict as PF
+
+        class _Q(object):
+            kind, point, group = b.get("kind") or "", b.get("point") or "", b.get("group")
+        g = PF.group_of(_Q(), b.get("stage"))
+    else:
+        g = group_of(b)
+    return g, (g in IRREVERSIBLE or b.get("irreversible") == "true")
+
+
+def verify_rows(rows, blocks_of):
+    """K5r6-m2: a filled sheet row's `group` / `irreversible` are re-derived from the engine's decision log (never
+    taken as written — an edit slip must not become `conservative`); a D-id the log does not have is rejected.
+    Returns (rows, rejected)."""
+    out, rejected, cache = [], [], {}
+    for r in rows:
+        if (r.get("given_info") or "").strip().lower() not in ("ok", "wrong", "unsure"):
+            out.append(r)
+            continue
+        try:
+            n = int(r.get("issue") or 0)
+            if n not in cache:
+                cache[n] = dict((b.id, b) for b in blocks_of(n))
+            b = cache[n].get(r.get("decision_id"))
+        except Exception:                                        # noqa: BLE001 — unreadable = not verified
+            b = None
+        if b is None:
+            rejected.append({"decision_id": r.get("decision_id"), "issue": r.get("issue"),
+                             "why": "no such decision in the engine's log"})
+            continue
+        g, irr = engine_view(b)
+        if not g:
+            rejected.append({"decision_id": r.get("decision_id"), "issue": r.get("issue"), "why": "no §9.5 group"})
+            continue
+        fixed = dict(r, group=g, irreversible="true" if irr else "")
+        if (r.get("group") or "") != g or str(r.get("irreversible") or "").strip().lower() != fixed["irreversible"]:
+            fixed["note"] = ("%s [sheet group/irreversible %s/%s replaced by the log's]" % (
+                r.get("note") or "", r.get("group") or "-", r.get("irreversible") or "-")).strip()
+        out.append(fixed)
+    return out, rejected
+
+
+def import_sheet(common, text, repo, irreversible=irreversible_row, blocks_of=None):
     """Rows with given_info filled → grades.jsonl (key (repo, issue, D-id, "human"); a key already present is
     skipped); then the count rules. Returns {"imported": n, "watch": [...], "conservative": [...], "grader": [...]}
-    — `grader` = the grader's output for the imported rows, revealed only now (R4J-m4)."""
+    — `grader` = the grader's output for the imported rows, revealed only now (R4J-m4). `blocks_of(issue)` (the
+    CLI: the Issue's trusted decision log) re-derives each row's group / irreversible (K5r6-m2)."""
     rows = [r for r in csv.DictReader(io.StringIO(text))]
+    rejected = []
+    if blocks_of is not None:
+        rows, rejected = verify_rows(rows, blocks_of)
     res = apply_judgments(common, rows, repo, "human", irreversible)
+    if rejected:
+        res["rejected"] = rejected
     gv_rows = latest_grader_rows(common, repo)
     res["grader"] = [{"decision_id": r.get("decision_id"), "issue": r.get("issue"),
                       "human": (r.get("given_info") or "").strip().lower(),
@@ -343,14 +395,43 @@ def import_sheet(common, text, repo, irreversible=irreversible_row):
     return res
 
 
+def sync_releases(common, st):
+    """K5r6-M3: a person's release of `group.<g>.conservative` (`valves.human_released_at`) forgives that group's
+    wrongs up to then — its `watch` and streak start again (§9.5 rules 1–2 from the start). Applied once per release
+    (`released` in the state). Returns the groups reset."""
+    rel = (VALVES.load(common)["human"].get("released_at") or {})
+    seen = st.setdefault("released", {})
+    out = []
+    for key, at in sorted(rel.items()):
+        m = VALVES.COUNT_RULE.match(key)
+        if not m or seen.get(key) == at:
+            continue
+        g = m.group(1).replace("EX-ARB-", "EX-ARB:")
+        st.setdefault("watch", {}).pop(g, None)
+        st.setdefault("streak", {})[g] = 0
+        seen[key] = at
+        out.append(g)
+    return out
+
+
+def on_release(common):
+    """`dev valve clear group.<g>.conservative` → the grade state follows at once (watch / streak reset)."""
+    st = load_state(common)
+    if sync_releases(common, st):
+        J.atomic_write(state_path(common), json.dumps(st, sort_keys=True, indent=1))
+
+
 def apply_judgments(common, rows, repo, version, irreversible=lambda row: False):
     """Human judgments (sheet rows or predict-first answers) → grades.jsonl (key (repo, issue, D-id, version),
-    present keys skipped) → the count rules."""
+    present keys skipped) → the count rules. K5r6-M3: `conservative` lists only groups whose valve is IN FORCE after
+    this import (the count rule set it now, or it already was); a set the valves refused is `blocked_by_release`."""
     have = set((g.get("repo"), str(g.get("issue")), g.get("decision_id"), g.get("grader_version"))
                for g in grades(common))
     st = load_state(common)
     st.setdefault("watch", {})
     st.setdefault("streak", {})
+    sync_releases(common, st)
+    blocked = []
     n, cons, watch = 0, [], []
     for row in rows:
         gi = (row.get("given_info") or "").strip().lower()
@@ -368,10 +449,13 @@ def apply_judgments(common, rows, repo, version, irreversible=lambda row: False)
         if gi == "wrong":
             st["streak"][g] = 0
             if g in st["watch"] or g in IRREVERSIBLE or irreversible(row):
-                VALVES.auto_set(common, "group.%s.conservative" % g.replace(":", "-"), True,
-                                "count rule: confirmed wrong %s (%s)" % (row.get("decision_id"), "irreversible"
-                                                                         if g in IRREVERSIBLE else "while watched"))
-                cons.append(g)
+                if VALVES.auto_set(common, "group.%s.conservative" % g.replace(":", "-"), True,
+                                   "count rule: confirmed wrong %s (%s)" % (row.get("decision_id"), "irreversible"
+                                                                            if g in IRREVERSIBLE or irreversible(row)
+                                                                            else "while watched")):
+                    cons.append(g)
+                else:
+                    blocked.append(g)
             st["watch"][g] = st["watch"].get(g) or row.get("decision_id")
             watch.append(g)
         elif gi == "ok":
@@ -379,7 +463,12 @@ def apply_judgments(common, rows, repo, version, irreversible=lambda row: False)
             if g in st["watch"] and st["streak"][g] >= WATCH_CLEAR_AFTER:
                 del st["watch"][g]
     J.atomic_write(state_path(common), json.dumps(st, sort_keys=True, indent=1))
-    return {"imported": n, "watch": sorted(set(watch)), "conservative": sorted(set(cons))}
+    eff = VALVES.effective(common, {})
+    cons = [g for g in cons if eff.get("group.%s.conservative" % g.replace(":", "-")) not in (None, False)]
+    out = {"imported": n, "watch": sorted(set(watch)), "conservative": sorted(set(cons))}
+    if blocked:
+        out["blocked_by_release"] = sorted(set(blocked))
+    return out
 
 
 def latest_grader_rows(common, repo, gv=None):
@@ -518,7 +607,10 @@ def main(d, a):
         with open(a.import_csv, encoding="utf-8") as fh:
             text = fh.read()
         gh = d.gh()
-        res = import_sheet(common, text, gh.owner_repo(), irreversible_row)
+        from guildcore.decisions import DecisionLog
+        from guildcore.records import markers
+        res = import_sheet(common, text, gh.owner_repo(), irreversible_row,
+                           blocks_of=lambda n: DecisionLog.load(markers.trusted(gh.comments(n), ())).blocks)
         emit.engine(res, out=d.out)
         return 0
     from guildcore.decisions import DecisionLog

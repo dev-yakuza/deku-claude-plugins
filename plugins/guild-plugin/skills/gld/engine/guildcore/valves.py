@@ -9,7 +9,8 @@ is removed):
   file and renames it over (atomic); `overrides.log` — append-only `{at, who, op, key, old, new, reason}`.
 
 Effective value of a valve: `HALT` > `human.set` > `auto` (a key in `human.release` is never re-applied by
-auto — the attempt is logged as an alarm) > env `GLD_ENGINE_<KEY>` > the committed config.
+auto — the attempt is logged as an alarm; K5r6-M3: a count-rule `group.<g>.conservative` release is an event —
+`human.released_at` — after which the count rule may set it again) > env `GLD_ENGINE_<KEY>` > the committed config.
 
 The registry of repositories the engine ran in (for `--all`, R5F-m3 / R6C-m3) lives in the config dir:
 `${CLAUDE_CONFIG_DIR:-~/.claude}/guild-engine/repos.json` — keys = absolute git common dirs, written under
@@ -49,6 +50,26 @@ ENGINE_KEY = {"kickoff.confirm_interpretation": "attended_confirm_interpretation
 
 class ValveError(Exception):
     pass
+
+
+# §9.5 groups a `group.<g>.conservative` valve names (`:` → `-`); K5r6-m1: another case of one is folded to it
+GROUPS = ("KICKOFF", "STAKES", "EX-ARB-dismiss", "ESCALATE", "SPLIT", "INTEGRATE", "TEST", "QA", "EX-ARB-accept",
+          "DE-ARB", "AN-PO", "VIS-ENV", "DIRECTIVE", "HANDOFF", "EX-DWC")
+COUNT_RULE = re.compile(r"^group\.([A-Za-z0-9_-]+)\.conservative$")
+
+
+def canonical_key(key):
+    """K5r6-m1: `group.qa.conservative` (an env var is lower-cased) → `group.QA.conservative` — a §9.5 group in
+    its canonical spelling (the flow looks the valve up by it). Every other key unchanged."""
+    m = COUNT_RULE.match(key or "")
+    if not m:
+        return key
+    g = next((x for x in GROUPS if x.casefold() == m.group(1).casefold()), None)
+    return "group.%s.conservative" % g if g else key
+
+
+def is_count_rule(key):
+    return bool(COUNT_RULE.match(key or ""))
 
 
 def valid_key(key):
@@ -123,15 +144,17 @@ def effective(common_dir, env=None):
         if k.startswith("GLD_ENGINE_VALVE_"):
             key = k[len("GLD_ENGINE_VALVE_"):].lower().replace("__", ".")
             val = parse_value(v)
+            if valid_key(key):
+                key = canonical_key(key)
             if valid_key(key) and key not in HUMAN_ONLY and _ok(key, val):
                 out[key] = val
-    released = set(data["human"]["release"])
+    released = set(k for k in data["human"]["release"] if not is_count_rule(k))     # K5r6-M3: an event, not a latch
     for k, v in data["auto"].items():
         if k not in released and k not in HUMAN_ONLY and valid_key(k) and _ok(k, v):
-            out[k] = v
+            out[canonical_key(k)] = v
     for k, v in data["human"]["set"].items():
         if valid_key(k) and _ok(k, v):
-            out[k] = v
+            out[canonical_key(k)] = v
     return out
 
 
@@ -172,6 +195,7 @@ def _write(common_dir, data):
 def human_set(common_dir, key, value, who, reason=""):
     if not valid_key(key):
         raise ValveError("unknown valve %r" % key)
+    key = canonical_key(key)
     try:
         check_value(key, value)
     except ValueError as e:
@@ -187,14 +211,21 @@ def human_set(common_dir, key, value, who, reason=""):
 
 
 def human_clear(common_dir, key, who, reason=""):
-    """A person clears a valve: its human value goes, and the key is RELEASED — auto never re-applies it."""
+    """A person clears a valve: its human value goes, and the key is RELEASED — auto never re-applies it.
+    K5r6-M3: a count-rule valve (`group.<g>.conservative`) is released as an EVENT (`human.released_at`): the wrongs
+    up to now are forgiven (`grade.on_release` clears that group's watch/streak), and confirmed wrongs AFTER it
+    apply §9.5 rules 1–2 from the start — the valve can come back. Every other key stays a permanent release."""
     if not valid_key(key):
         raise ValveError("unknown valve %r" % key)
+    key = canonical_key(key)
     with _Locked(paths(common_dir)["lock"]):
         data = load(common_dir)
         old = data["human"]["set"].pop(key, None)
         old_auto = data["auto"].pop(key, None)
-        if key not in data["human"]["release"]:
+        if is_count_rule(key):
+            data["human"]["release"] = [k for k in data["human"]["release"] if k != key]
+            data["human"].setdefault("released_at", {})[key] = _now()
+        elif key not in data["human"]["release"]:
             data["human"]["release"].append(key)
         _write(common_dir, data)
         _log(common_dir, who, "clear", key, old if old is not None else old_auto, None, reason)
@@ -206,9 +237,10 @@ def auto_set(common_dir, key, value, reason=""):
     — the attempt is logged as an alarm. Returns True when applied."""
     if not valid_key(key) or key in HUMAN_ONLY:
         raise ValveError("not an auto valve: %r" % key)
+    key = canonical_key(key)
     with _Locked(paths(common_dir)["lock"]):
         data = load(common_dir)
-        if key in data["human"]["release"]:
+        if key in data["human"]["release"] and not is_count_rule(key):
             _log(common_dir, "engine", "alarm", key, None, value, "released by a person — not re-applied: %s" % reason)
             return False
         old = data["auto"].get(key)

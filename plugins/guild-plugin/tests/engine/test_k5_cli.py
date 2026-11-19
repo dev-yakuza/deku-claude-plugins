@@ -360,8 +360,14 @@ class Valves(unittest.TestCase):
         self.assertEqual(VALVES.effective(c, {})["group.STAKES.conservative"], False)    # human beats auto
         CLI.main(["valve", "clear", "group.STAKES.conservative"], e.d)
         self.assertNotIn("group.STAKES.conservative", VALVES.effective(c, {}))
-        self.assertFalse(VALVES.auto_set(c, "group.STAKES.conservative", True, "again"))  # released: alarm only
-        self.assertNotIn("group.STAKES.conservative", VALVES.effective(c, {}))
+        # K5r6-M3: a count-rule valve's release is an EVENT — the count rule may set it again on later wrongs
+        self.assertTrue(VALVES.auto_set(c, "group.STAKES.conservative", True, "again"))
+        self.assertTrue(VALVES.effective(c, {})["group.STAKES.conservative"])
+        # every other released valve stays released: alarm only
+        VALVES.auto_set(c, "exarb.no_unattended_dismiss", True, "go")
+        CLI.main(["valve", "clear", "exarb.no_unattended_dismiss"], e.d)
+        self.assertFalse(VALVES.auto_set(c, "exarb.no_unattended_dismiss", True, "again"))
+        self.assertNotIn("exarb.no_unattended_dismiss", VALVES.effective(c, {}))
         with open(VALVES.paths(c)["log"]) as fh:
             self.assertIn('"op": "alarm"', fh.read())
 

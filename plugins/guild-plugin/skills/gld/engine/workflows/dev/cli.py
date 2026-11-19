@@ -857,6 +857,9 @@ def cmd_valve(d, a):
                 VALVES.human_set(common, a.key, VALVES.parse_value(a.value), who, a.reason or "")
             else:
                 VALVES.human_clear(common, a.key, who, a.reason or "")
+                if VALVES.is_count_rule(a.key):
+                    from workflows.dev import grade as GR
+                    GR.on_release(common)                      # K5r6-M3: watch / streak start again
         except VALVES.ValveError as e:
             _sent(d, {"ok": False, "error": str(e)})
             return 64
