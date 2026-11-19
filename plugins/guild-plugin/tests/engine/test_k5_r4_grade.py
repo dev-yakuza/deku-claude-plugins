@@ -35,7 +35,7 @@ def blk(n, **f):
 
 
 def pf_log(pf="high-risk", refused=None, reveal=None, rec="i2", choice="i1", kind="readiness", raised_by="confirm"):
-    q = dict(point="ask:%s" % kind, kind=kind, stage="analyze", by="code", status="pending-human")
+    q = dict(point="ask:%s" % kind, kind=kind, stage="analyze", by="code", status="pending-human", options="i1|i2|stop")
     if raised_by:
         q["raised_by"] = raised_by
     if pf:
@@ -64,7 +64,6 @@ class PredictFirstCount(unittest.TestCase):
         for log in (pf_log(pf=None, refused="question (high-risk)"),        # refused: saw the recommendation
                     pf_log(reveal="unavailable"),                           # could not be revealed
                     pf_log(pf=None, rec="i2"),                              # not blind at all
-                    pf_log(choice="stop"),                                   # no judgment
                     pf_log(raised_by="judge-unclear"),                       # the judge said it could not decide
                     pf_log(raised_by="judge-surface", choice="i2"),          # … or asked a person itself
                     pf_log(raised_by=None)):                                 # unknown origin — out (conservative)

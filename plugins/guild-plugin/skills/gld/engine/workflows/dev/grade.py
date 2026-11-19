@@ -8,7 +8,7 @@ Human judgments (§9.5 "사람 판정 = 블라인드 채점표 답 + predict-fir
 * the blind sheet rows a person fills (`--import`);
 * predict-first ANSWERS — a resolved question whose pending block carried `predict_first` (never
   `predict_first_refused`), whose resolution revealed `recommended` (never `reveal: unavailable`) and whose answer
-  is an option other than `stop`. K5r5-M2 (user decision 2026-11-19): only a question the ENGINE raised although
+  is counted (K5r6-M2: at least two real options; `stop` is a CANDIDATE, never an `ok`). K5r5-M2 (user decision 2026-11-19): only a question the ENGINE raised although
   the judge was sure (`raised_by: confirm` — the first-sprint confirmation, a conservative group) counts; a question
   the judge itself raised (`judge-unclear`, `judge-surface`, or no `raised_by`) is out of the count either way. The
   answer equal to the hidden recommendation → `ok` (grades.jsonl, grader_version `predict-first`, the count rules);
@@ -209,8 +209,9 @@ def predict_first_judgments(blocks, issue):
     `counted` = `ok` rows (the person, blind, chose the hidden recommendation on a `confirm` question);
     `candidates` = sheet rows for a person to confirm (a different blind answer on a `confirm` question).
     Excluded: a refused blind (`predict_first_refused`), a resolution that could not reveal (`reveal: unavailable`
-    / no `recommended`), `stop`, every answer that saw the recommendation (no `predict_first`), and every question
-    the judge raised itself (`raised_by` ≠ confirm)."""
+    / no `recommended`), every answer that saw the recommendation (no `predict_first`), every question the judge
+    raised itself (`raised_by` ≠ confirm), and — K5r6-M2 — an answer equal to the recommendation on a question with
+    one real option (`predict_first_counted: false`). `stop` is a candidate (K5r6-M2(b))."""
     from workflows.dev import predict as PF
     pend = dict((b.id, b) for b in blocks)
     counted, cands = [], []
@@ -221,10 +222,13 @@ def predict_first_judgments(blocks, issue):
         if r.get("reveal") == "unavailable" or r.get("recommended") in (None, ""):
             continue
         ch = r.get("choice")
-        if not ch or ch == "stop":
+        if not ch:
             continue
         if q.get("raised_by") != CONFIRM:
             continue                     # the judge said it could not decide / asked a person — not its wrong
+        # K5r6-M2(a): one real option (`i1 | stop`) is no blind judgment between options — never an `ok`
+        real = [t for t in q.options() if t != "stop"]
+        one = len(real) < 2 or str(q.get("predict_first_counted") or "").startswith("false")
 
         class _Q(object):
             kind, point, group = q.get("kind") or "", q.get("point") or "", q.get("group")
@@ -235,7 +239,17 @@ def predict_first_judgments(blocks, issue):
                "mode": "predict-first", "choice": r.get("recommended"), "coerced": "false", "coerced_by": "",
                "unsure": "false", "irreversible": "true" if q.get("irreversible") == "true" else "",
                "outcome": "", "note": "resolution %s" % r.id}
-        if ch == r.get("recommended"):
+        if ch == "stop":
+            # K5r6-M2(b): `stop` on a blind engine-raised question rejects every option — the strongest "the
+            # recommendation was wrong" signal: a CANDIDATE (the person confirms it on the sheet, like any other)
+            cands.append(dict(row, reason="wrong candidate: the person, blind, answered stop (none of %s); the engine "
+                                          "recommended %s (%s)" % ("|".join(real) or "-", r.get("recommended"),
+                                                                  q.get("predict_first")),
+                              given_info="", evidence="predict-first candidate (stop) — confirm: was the engine's %s "
+                                                      "wrong, or did the person only stop the run?" % r.get("recommended")))
+        elif ch == r.get("recommended"):
+            if one:
+                continue                 # uncounted (`predict_first_counted: false`) — see above
             counted.append(dict(row, reason="blind answer = recommended %s (%s)" % (ch, q.get("predict_first")),
                                 given_info="ok", evidence=""))
         else:

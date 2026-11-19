@@ -75,8 +75,9 @@ class Question(object):
     def pending_fields(self, stage=None, by="code"):
         f = {"point": self.point, "kind": self.kind, "refs": self.refs, "stage": stage, "by": by,
              "status": "pending-human", "question": self.text,
-             "options": [o["token"] for o in self.options], "stakes": self.stakes,
-             "recommended_by": self.recommended_by}
+             "options": [o["token"] for o in self.options], "stakes": self.stakes}
+        if not self.predict_first:
+            f["recommended_by"] = self.recommended_by       # K5r6-m8: blind → not even the judge's tier before the answer
         if self.waits_at and self.waits_at != stage:
             f["waits_at"] = self.waits_at
         if self.group:
@@ -88,6 +89,8 @@ class Question(object):
         if self.predict_first:
             f["recommended_sha"] = self.commitment()
             f["predict_first"] = self.pf_why or "true"     # §9.5: only these answers count as a human judgment
+            if getattr(self, "uncounted", None):
+                f["predict_first_counted"] = "false — %s" % self.uncounted   # K5r6-M2(a)
         else:
             f["recommended"] = self.recommended
             if self.blind_refused:
@@ -139,7 +142,10 @@ def withheld_text(q):
     """The judge's free text withheld from a blind question (`Question.withheld`, set by the predict-first
     enforcement point) as one line — journaled with the nonce, revealed in the answer's resolution block."""
     w = getattr(q, "withheld", None) or {}
-    parts = [w.get("question")] + list(w.get("context") or []) + list(w.get("texts") or [])
+    shown = dict((o["token"], o.get("label")) for o in (getattr(q, "options", None) or []))
+    labels = ["%s = %s" % (o["token"], o.get("label")) for o in (w.get("labels") or [])
+              if o["token"] != "stop" and o.get("label") != shown.get(o["token"])]   # K5r6-M2: the cut clauses
+    parts = [w.get("question")] + list(w.get("context") or []) + list(w.get("texts") or []) + labels
     seen, out = set(), []
     for x in parts:
         x = " ".join(str(x or "").split())

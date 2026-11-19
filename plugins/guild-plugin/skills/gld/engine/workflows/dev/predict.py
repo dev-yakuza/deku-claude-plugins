@@ -211,8 +211,45 @@ NEGATIVE = re.compile(r"아니|않|못\s*하|약하|약함|부족|틀리|틀림|
                       r"\bbad\b|\brule[sd]? out\b|\bexclude", re.I)
 
 
+# K5r6-M2: likelihood / ranking language (an option label that says how likely or how good it is) — ko / ja / en
+LIKELIHOOD = re.compile(r"가능성|가장|제일|최선|최적|잘\s*맞|자연스럽|분명|명백|당연|확실|의도된|의도한|"
+                        r"可能性|おすすめ|オススメ|推奨|最適|最善|最も|一番|妥当|適切|望ましい|ベスト|らしい|と思われ|"
+                        r"ではない|じゃない|自然|明らか|"
+                        r"\bmost\b|\bleast\b|\bbest\b|\bobvious|\bclearly\b|\bplausib|\bimplausib|\bdoubt|"
+                        r"\bideal\b|\boptimal\b|\breasonabl|\bsensibl|\bnatural(?:ly)?\b|\bsafe(?:r|st)\b|"
+                        r"\bintended\b|\bpreferred\b|\brecommend", re.I)
+
+
+# the NEGATIVE words that rate (not the plain negation a summary may describe with: 않 / not / 제외 …)
+NEG_RATING = re.compile(r"약하|약함|부족|틀리|틀림|어긋|맞지|무리|부적절|과도|너무|의심|"
+                        r"\bunlikely\b|\bweak|\bwrong\b|\bpoor|\btoo\b|\bworse\b|\bbad\b", re.I)
+
+
 def evaluative(text):
-    return bool(PREFERENCE.search(text) or NEGATIVE.search(text))
+    return bool(PREFERENCE.search(text) or NEGATIVE.search(text) or LIKELIHOOD.search(text))
+
+
+def rates(label):
+    """K5r6-M2: does an option label rate its option (how likely / good / fitting)? — preference, likelihood and
+    rating words; a plain negation that describes the option ("설정 화면은 바꾸지 않는다") is not a rating."""
+    t = str(label or "")
+    return bool(PREFERENCE.search(t) or LIKELIHOOD.search(t) or NEG_RATING.search(t))
+
+
+_CLAUSE = re.compile(r"\s*[(（\[][^)）\]]*[)）\]]|\s*(?:—|–|--| - |;|；|:|：|,|、|，)[^—–;；:：,、，(（]*")
+
+
+def neutral_label(label):
+    """K5r6-M2: an option label as the engine shows it blind — the judge's summary with every evaluative clause (a
+    parenthesis, a dash / colon / comma tail that rates the option) cut. None when what is left still evaluates
+    (or nothing is left): the blind answer is then refused."""
+    lb = str(label or "")
+    if not rates(lb):
+        return lb
+    out = _CLAUSE.sub(lambda m: "" if rates(m.group(0)) else m.group(0), lb).strip(" —–-;:,、")
+    if not out or rates(out):
+        return None
+    return out
 
 
 class _Names(object):
@@ -342,18 +379,42 @@ def apply(p, q, stage=None, texts=()):
         return q
     # K5r5-M1 (structural): the person sees only engine-generated text before answering — the neutral template and
     # the options' own summaries; the judge's text is withheld (journaled, revealed after the answer)
-    q.withheld = {"question": q.text, "context": list(q.context_lines), "texts": [t for t in texts if t]}
+    extra = list(getattr(p, "__dict__", {}).pop("_withheld_next", None) or [])     # K5r6-m7: STAKES reasons
+    q.withheld = {"question": q.text, "context": list(q.context_lines), "texts": [t for t in texts if t] + extra}
     q.original, q.text, q.neutralized = q.text, (q.neutral or default_neutral(p, q)), True
     q.context_lines = []
-    q.options = canonical(q.options)
+    # K5r6-M2: the labels are the judge's summaries — blind, the engine shows them without their evaluative clauses
+    # (`neutral_label`); a label that still evaluates refuses the blind answer
+    q.withheld["labels"] = [dict(o) for o in q.options]
+    where = None
+    opts = []
+    for o in q.options:
+        if o["token"] == "stop":
+            opts.append(o)
+            continue
+        nl = neutral_label(o.get("label"))
+        if nl is None:
+            where = "label-evaluative %s" % o["token"]
+            nl = o.get("label")
+        opts.append(dict(o, label=nl))
+    q.options = canonical(opts)
+    # K5r6-M2(a): with one real option (`i1 | stop`) the answer is no judgment between interpretations — it stays
+    # blind but is never counted as one (§9.5 / §10.2-6 releases read only counted answers)
+    if len([o for o in q.options if o["token"] != "stop"]) < 2:
+        q.uncounted = "one real option"
     texts = [swap(q, t) for t in texts]
-    where = ("inherent: %s" % INHERENT[q.kind]) if q.kind in INHERENT else leak(p, q, stage, texts)
+    if q.kind in INHERENT:
+        where = "inherent: %s" % INHERENT[q.kind]
+    elif where is None:
+        where = leak(p, q, stage, texts)
     if where:
         q.predict_first, q.blind_refused = False, "%s (%s)" % (where, q.pf_why or "requested")
         q.pf_why = None
         # not blind → nothing is withheld: the judge's own wording goes out with the recommendation shown openly
         q.text, q.context_lines, q.neutralized = q.original, list(q.withheld["context"]), False
+        q.options = canonical(q.withheld["labels"])
         q.withheld = None
+        q.uncounted = None
     return q
 
 

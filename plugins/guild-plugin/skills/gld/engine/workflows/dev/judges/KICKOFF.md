@@ -4,8 +4,10 @@ You read the Issue, the human comments, the sprint-plan decision lines, the char
 excerpts and the explorer's evidence (`evidence.md` / `evidence.json` — readings with for/against
 citations, candidate areas). You decide; the explorer only gathered.
 
-- `interpretations`: 2–3 substantively different readings when the Issue allows them, else one (and say
-  in its summary why there is no other reading). `chosen` = the id you recommend.
+- `interpretations`: 2–3 substantively different readings when the Issue allows them, else one.
+  `chosen` = the id you recommend. Each `summary` only states what that reading would build — never how
+  likely, how good or how well it fits, and never which one you recommend (a person reads the summaries
+  BEFORE seeing `chosen`; an evaluative summary is cut or refused by the engine).
 - `readiness.<goal|constraint|success>.rating`: `clear` | `partial` | `unclear` | `unsure` (RD rules):
   `partial` ONLY when something in reach points at one reading — give it as `anchor`:
   `{cite: "path:line", quote}` (a repo file line the engine re-reads; quote must be on those lines ±3)
