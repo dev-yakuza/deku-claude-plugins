@@ -11,12 +11,13 @@ person (ask / pause)". One gate does it for every L0/SJ judgment, whatever stage
 * a person already answered this DECISION POINT's question (`refs: conservative:<G>:#<N>:<stage>:<step>:L<loop>` —
   K5r6-M1: the point, never the judge's input digest) → that answer applies FIRST (the judge's taped decision, no new
   judge call): a Decision carrying the person's choice (`by: human`, `coerced_by: conservative`, `raw_choice` = the
-  judge's) — the stage goes on with it, and a `point: applied` block records the application; `stop` → the run holds
+  judge's; K5r9-M1/M2: the choice run through the group's coercions — `judging.apply_choice` — so the stage's
+  outcome is exactly the judge's-choosing-it outcome) — the stage goes on with it, and a `point: applied` block records
+  the application once its effect is written (`flush`, K5r9-M2); `stop` → the run holds
   there (`Hold`). K5r7-M1: an answer is CONSUMED by that application — the point re-entered later (a rerun, a
   `/gld rollback`, the resume after the pause the answer led to = §2.5 rule 3) is a new point `<key>:a<k>`, judged and
   asked again; the loop generation `L` only grows (numbered blocks + resets). Only the same stage run, replayed after a
-  later question, reuses an applied answer (the tape's `used`) — only while the replay matches (K5r8-M2). The X→T
-  hand-over marks `applied` after its effect (`flush`, K5r7-m4);
+  later question, reuses an applied answer (the tape's `used`) — only while the replay matches (K5r8-M2);
 * otherwise `Ask` is raised: the FSM turns it into an attended ask / unattended pause at that stage (`surface`) —
   predict-first (the judge's choice is the sealed recommendation; `raised_by: confirm`, so a different blind answer
   is a §9.5 wrong CANDIDATE — user decision 2026-11-19). The role results the stage got before asking are taped
@@ -169,9 +170,10 @@ def begin(p):
 
 
 def flush(p):
-    """K5r7-m4: the `applied` marks a gate deferred (the execute→test hand-over: its effect — a loop-back, a pause —
-    is written by the FSM AFTER the gate) are written once that effect is (the caller: the result is not FAIL). A
-    crash or a failed write in between leaves the answer unapplied: the test-entry check applies it again."""
+    """K5r7-m4 / K5r9-M2: the `applied` marks the gate deferred (every answered point — its effect is written by the
+    stage, or by the FSM after the gate for the execute→test hand-over) are written once that effect is (the caller:
+    the result is not FAIL, a hold, or the stage's next question). A crash or a failed write in between leaves the
+    answer unapplied: the same point applies it again on the next run (never a consumed answer with no effect)."""
     from workflows.dev.stages import base as B
     for stage, res in p.__dict__.pop("_cons_defer", None) or []:
         B.mark_applied(p, stage, res)
@@ -352,19 +354,22 @@ def gate(p, spec, raw):
         t = _tape_for(p, key)
         d = Decision.from_dict(t["decision"]) if t and t.get("decision") else raw(spec)
         if not applied:
-            if g == "HANDOFF" and spec.step == "X→T":   # K5r7-m4: marked after the FSM writes its effect
-                p.__dict__.setdefault("_cons_defer", []).append((spec.stage or "-", res))
-            else:
-                from workflows.dev.stages import base as B
-                B.mark_applied(p, spec.stage or "-", res)
+            # K5r7-m4 / K5r9-M2: `applied` is written only after the answer's effect is (the FSM's `flush`: the stage
+            # ended without FAIL, held, or went on to its next question) — a crash in between leaves it unapplied
+            p.__dict__.setdefault("_cons_defer", []).append((spec.stage or "-", res))
             p.__dict__["_cons_replay"] = None
         p.__dict__.setdefault("_cons_used", {})[pt] = key
         if ans == "stop":
             raise Hold("group.%s.conservative: a person answered stop (%s)" % (g, res.id))
-        f = dict(d.fields or {})
-        f[spec.choice_key] = ans
-        return Decision(ans, f, "human", d.digest, unsure=False, coerced=True, coerced_by="conservative",
-                        raw_choice=d.choice, cost=0.0, cached=True, model=d.model)
+        # K5r9-M1/M2: the person's choice goes through the group's own consistency rules (`apply_choice`) — the stage
+        # then sees exactly what the judge's choosing it would have given (TEST per-AC verdicts, INTEGRATE gaps)
+        f, final, _by = JG.apply_choice(spec, d.fields, ans, who=str(res.id))
+        out = Decision(final, f, "human", d.digest, unsure=False, coerced=True, coerced_by="conservative",
+                       raw_choice=d.choice, cost=0.0, cached=True, model=d.model)
+        # K5r9: the same stage run replayed after a later question reuses this answer (its effect already written):
+        # the decision is the one already logged — `record_judgment` does not log it a second time
+        out.replayed = bool(applied)
+        return out
     d = raw(spec)
     if d is None:
         return d
@@ -391,9 +396,30 @@ def gate(p, spec, raw):
     raise Ask(q, line)
 
 
-def surface(p, stage, ask):
-    """The FSM's side: ask (attended) / pause (unattended) with the gate's question at `stage`."""
+def guarded(p, stage, thunk):
+    """K5r9-M2: one stage run under the conservative path (the FSM's `_guarded`): a gate's `Ask` → the question is
+    surfaced at `stage`, `Hold` → the run holds; the `applied` marks the gate deferred are written when the answers'
+    effect is — the stage ended without FAIL (`flush`), held, or went on to its next question (`surface`). A FAIL or a
+    crash writes none: the same decision point applies the answer again."""
+    begin(p)
+    try:
+        r = thunk()
+    except Ask as a:
+        return surface(p, stage, a)
+    except Hold as h:
+        flush(p)
+        return hold(p, stage, h)
     from workflows.dev.stages import base as B
+    if r is None or r.kind != B.StageResult.FAIL:
+        flush(p)
+    return r
+
+
+def surface(p, stage, ask):
+    """The FSM's side: ask (attended) / pause (unattended) with the gate's question at `stage`. The answers this stage
+    run applied before it reached this question took effect (the run went on to it) — their `applied` marks first."""
+    from workflows.dev.stages import base as B
+    flush(p)
     line = ask.line
     return B.ask(p, stage, ask.question, line, {"cause_kind": "ambiguity", "line": line,
                                                  "token_cause": "ambiguity: %s" % line})

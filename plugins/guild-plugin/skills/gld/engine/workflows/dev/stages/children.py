@@ -175,6 +175,9 @@ def integrate(p, kids, trusted=True):
         if g.get("kind") == "slicing":
             g["needs_decision"] = True                  # JR-M6: never judged by the split's own judge
     verdict = "clean" if d.choice == "clean" and not gaps else "gap"
+    if verdict == "gap" and not gaps:                   # K5r9-M2: a gap nobody named is a decision, never gaps[0] of []
+        gaps = [{"kind": "coverage", "needs_decision": True, "child_to_fix": None,
+                 "line": "integration judged a gap without naming it"}]
     B.record_judgment(p, STAGE, "INTEGRATE", "J-DEV-07,J-DEV-08", d, choice=verdict,
                       reason="; ".join(B.one_line(g.get("line") or "", 100) for g in gaps)[:300] or None)
     nums = set(f["number"] for f in facts)

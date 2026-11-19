@@ -62,6 +62,11 @@ def _ask_and_answer(case, h, choice, diff=()):
     return pend
 
 
+def _qa(h, diff):
+    """A qa stage run as the FSM runs it (K5r9-M2: `applied` is written once the answer's effect is)."""
+    return CONS.guarded(h.p, "qa", lambda: Q.run(h.p, diff_paths=list(diff)))
+
+
 def _back_to_qa(h, reset=False):
     iss = h.gh.fx["issues"]["7"]
     if reset:
@@ -89,9 +94,9 @@ class M1AnswerConsumedOnce(unittest.TestCase):
         h, calls = self._harness(["pass", "block"])
         pend = _ask_and_answer(self, h, "pass")
         self.assertEqual(pend.get("refs"), "conservative:QA:#7:qa:Q2.5:L0")
-        self.assertEqual(Q.run(h.p, diff_paths=[]).kind, StageResult.DONE)
+        self.assertEqual(_qa(h, []).kind, StageResult.DONE)
         _back_to_qa(h)                                                     # `/gld rollback` — no loop-back block
-        Q.run(h.p, diff_paths=["lib/login.dart"])
+        _qa(h, ["lib/login.dart"])
         self.assertEqual(len(calls), 2)                                    # judged again on the new code
         qa = [b for b in _blocks(h) if b.get("point") == "QA"][-1]
         self.assertEqual((qa.get("choice"), qa.get("by")), ("block", "judge:sonnet"))
@@ -100,7 +105,7 @@ class M1AnswerConsumedOnce(unittest.TestCase):
     def test_rollback_asks_a_new_question_when_the_judge_passes_again(self):
         h, calls = self._harness(["pass"])
         _ask_and_answer(self, h, "pass")
-        Q.run(h.p, diff_paths=[])
+        _qa(h, [])
         _back_to_qa(h)
         pend = _ask_and_answer(self, h, "pass")                            # a NEW question
         self.assertEqual(pend.get("refs"), "conservative:QA:#7:qa:Q2.5:L0:a1")
@@ -109,7 +114,7 @@ class M1AnswerConsumedOnce(unittest.TestCase):
     def test_reset_is_a_new_generation(self):
         h, calls = self._harness(["pass"])
         _ask_and_answer(self, h, "pass")
-        Q.run(h.p, diff_paths=[])
+        _qa(h, [])
         _back_to_qa(h, reset=True)                                         # rollback to design: loopback-reset
         pend = _ask_and_answer(self, h, "pass")
         self.assertEqual(pend.get("refs"), "conservative:QA:#7:qa:Q2.5:L1")   # never back to L0
@@ -119,7 +124,7 @@ class M1AnswerConsumedOnce(unittest.TestCase):
         # review-k5-r7 block_answer_stuck_bar.py: unattended `block` → pause; the person fixes and resumes
         h, calls = self._harness(["pass"], unattended=True)
         _ask_and_answer(self, h, "block")
-        r = Q.run(h.p, diff_paths=["lib/a.dart"])
+        r = _qa(h, ["lib/a.dart"])
         self.assertEqual(r.kind, StageResult.PAUSE)                        # the answer applied once
         iss = h.gh.fx["issues"]["7"]
         iss["labels"] = [lb for lb in iss["labels"] if (lb.get("name") if isinstance(lb, dict) else lb)
@@ -128,7 +133,7 @@ class M1AnswerConsumedOnce(unittest.TestCase):
         pend = _ask_and_answer(self, h, "pass")                            # §2.5 rule 3: judged again → asked anew
         self.assertEqual(pend.get("refs"), "conservative:QA:#7:qa:Q2.5:L0:a1")
         self.assertEqual(len(calls), 2)
-        self.assertEqual(Q.run(h.p, diff_paths=["lib/b.dart"]).kind, StageResult.DONE)   # the next answer is the way out
+        self.assertEqual(_qa(h, ["lib/b.dart"]).kind, StageResult.DONE)   # the next answer is the way out
         qa = [b for b in _blocks(h) if b.get("point") == "QA"]
         self.assertEqual([(b.get("choice"), b.get("by")) for b in qa], [("block", "human"), ("pass", "human")])
 
@@ -141,7 +146,9 @@ class M1AnswerConsumedOnce(unittest.TestCase):
         def judge_of(choice, key):
             def j(spec):
                 judged.append(spec.group)
-                return Decision(choice, {key: choice}, "judge:sonnet", "dg-%s" % spec.group)
+                # K5r9-M1: a judge's fields as the runner leaves them (QA `pass` with its quality bar met)
+                f = {key: choice, "quality_bar_met": "yes"} if key == "verdict" else {key: choice}
+                return Decision(choice, f, "judge:sonnet", "dg-%s" % spec.group)
             return j
 
         def stage_run():
@@ -160,6 +167,7 @@ class M1AnswerConsumedOnce(unittest.TestCase):
                 CONS.surface(h.p, "qa", a)
             ASK.answer(h.decisions, h.writer, 7, _pending(h)[-1].id, choice)
         self.assertEqual(stage_run(), ("pass", "all_effective"))           # QA's answer reused, not asked again
+        CONS.flush(h.p)                                                    # the stage's end (the FSM's `guarded`)
         self.assertEqual(len(_pending(h)), 2)
         self.assertEqual(judged, ["QA", "TEST"])
         try:                                                               # a later entry: both consumed → asked anew
@@ -171,7 +179,7 @@ class M1AnswerConsumedOnce(unittest.TestCase):
     def test_m1_human_block_survives_a_missing_quality_bar(self):
         h, calls = self._harness(["pass"], unattended=True, bar=False)
         _ask_and_answer(self, h, "block")
-        r = Q.run(h.p, diff_paths=[])
+        r = _qa(h, [])
         self.assertEqual(r.kind, StageResult.PAUSE)
         qa = [b for b in _blocks(h) if b.get("point") == "QA"][-1]
         self.assertEqual((qa.get("choice"), qa.get("by"), qa.get("coerced_by")), ("block", "human", "conservative"))

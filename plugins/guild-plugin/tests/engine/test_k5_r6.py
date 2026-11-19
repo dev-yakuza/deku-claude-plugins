@@ -63,6 +63,7 @@ class M1DecisionPoint(unittest.TestCase):
                 pend = _pending(h)[-1]
                 asked.append(pend.get("refs"))
                 ASK.answer(h.decisions, h.writer, 7, pend.id, "pass")
+        CONS.flush(h.p)                                                    # the stage's end (the FSM's `guarded`, K5r9-M2)
         self.assertEqual(result.kind, StageResult.DONE)
         self.assertEqual(len(asked), 1)                                    # one question
         self.assertEqual(n[0], 1)                                          # one qa role run

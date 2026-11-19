@@ -330,6 +330,13 @@ def digest(*parts):
 def record_judgment(p, stage, point, refs, dec, choice=None, reason=None, extra=None):
     """One decision-log block per SJ decision (§2.5 — every L0/SJ decision is logged; §9.5 grades
     from these fields). Returns D<n>."""
+    if getattr(dec, "replayed", False):
+        # K5r9: a person's answer reused by the same stage run's replay — already logged by the run that applied it
+        ch = choice if choice is not None else dec.choice
+        for b in reversed(DecisionLog.load(records(p)).blocks):
+            if (b.get("point"), b.get("stage"), b.get("by"), b.get("inputs"), b.get("choice")) == \
+                    (point, stage, dec.by, dec.digest[:12], ch):
+                return b.id
     f = {"point": point, "refs": refs, "stage": stage, "by": dec.by, "inputs": dec.digest[:12],
          "choice": choice if choice is not None else dec.choice,
          "unsure": "true" if dec.unsure else "false",

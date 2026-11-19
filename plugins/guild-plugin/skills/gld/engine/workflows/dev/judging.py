@@ -138,6 +138,31 @@ def coerce_integrate(fields):
     return fields, None
 
 
+def _test_gap(fields, why):
+    """TEST `overall: gap` while no AC (and no visual row) is left short of effective/covered: the gap the choice
+    names is not in the per-AC verdicts the test stage derives its outcome from (`_judge_coverage`) — every AC the
+    verdicts call effective becomes `unsure` (the coverage-gap path: repair once, then uncovered)."""
+    acs = [a for a in fields.get("ac") or [] if isinstance(a, dict)]
+    rows = [r for r in fields.get("visual_rows") or [] if isinstance(r, dict)]
+    if any(a.get("verdict") != "effective" for a in acs) or any(r.get("verdict") != "covered" for r in rows):
+        return fields, None
+    fields["ac"] = [dict(a, verdict="unsure", why=why) for a in acs]
+    return fields, "rule"
+
+
+def coerce_test(fields):
+    """K5r9-M1: the choice and the per-AC verdicts agree — `gap` with every AC effective names no gap the stage can
+    see (→ `_test_gap`); `all_effective` with an AC short of effective is a gap."""
+    o = fields.get("overall")
+    if o == "gap":
+        return _test_gap(fields, "the judgment named a gap without an AC")
+    acs = [a for a in fields.get("ac") or [] if isinstance(a, dict)]
+    if o == "all_effective" and any(a.get("verdict") != "effective" for a in acs):
+        fields["overall"] = "gap"
+        return fields, "rule"
+    return fields, None
+
+
 def coerce_handoff(fields):
     v = fields.get("verdict")
     if v == "upstream_gap" and fields.get("fixable_by_execute") and not fields.get("signature"):
@@ -150,9 +175,31 @@ def coerce_handoff(fields):
     return fields, None
 
 
-COERCIONS = {"QA": (coerce_qa,), "PRMATCH": (coerce_prmatch,), "FOLLOWUP": (coerce_followup,),
+COERCIONS = {"TEST": (coerce_test,), "QA": (coerce_qa,), "PRMATCH": (coerce_prmatch,), "FOLLOWUP": (coerce_followup,),
              "STAKES": (coerce_stakes,), "AN-PO": (coerce_an_po,), "DE-ARB": (coerce_de_arb,),
              "SPLIT": (coerce_split,), "INTEGRATE": (coerce_integrate,), "HANDOFF": (coerce_handoff,)}
+
+
+def apply_choice(spec, fields, choice, who=None):
+    """K5r9-M1/M2: a person's answer to a conservative question (conservative.gate) has EXACTLY the downstream effect
+    the judge's choosing that option would have had: the choice key is set and the group's coercions run over the
+    judge's fields — the same consistency rules the judge's own output went through (runner) — so a stage that derives
+    its outcome from other fields (TEST: per-AC verdicts, INTEGRATE: gaps) sees the person's choice there too.
+    `who` (e.g. "D12") names the person's decision in the line a rewrite writes. Returns (fields, final choice, by)."""
+    from guildcore.judges.runner import _get, _set
+    f = dict(fields or {})
+    _set(f, spec.choice_key, choice)
+    g = spec.group
+    if who and g == "TEST" and choice == "gap":
+        f, _ = _test_gap(f, "사람이 커버리지 간극으로 판정 (%s)" % who)
+    if who and g == "INTEGRATE" and choice == "gap" and not [x for x in f.get("gaps") or [] if isinstance(x, dict)]:
+        f["gaps"] = [{"kind": "coverage", "needs_decision": True, "child_to_fix": None,
+                      "line": "사람이 통합 간극으로 판정 (%s)" % who}]
+    by = None
+    for co in getattr(spec, "coercions", None) or ():
+        f, b = co(f)
+        by = by or b
+    return f, _get(f, spec.choice_key), by
 
 
 def hedged(items):
