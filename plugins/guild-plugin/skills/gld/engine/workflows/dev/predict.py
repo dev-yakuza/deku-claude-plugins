@@ -233,17 +233,22 @@ _SRC_EN = r"(?:the\s+)?(?:title|issue|request|body|description|report|ask|report
 # K5r8-m3: a source word or a lone `근거` / `根拠` / `素直` / `typical` / `literal` is not a rating by itself
 # ("근거 자료 링크 추가", "본문 그대로 표시", "タイトル通りに表示", "Literal string search", "Match title case") — only
 # with an evaluative tail (근거 없음 · 根拠が薄い) or as a reading of the Issue ("typical reading", "제목과 일치")
-_EN_NOUN = r"(?!\s+(?:case|style|format|font|layout|bar|text|colou?r|size|field|page|screen|row|column)s?\b)"
-_EVAL_KO = r"\s*(?:이|가|은|는)?\s*(?:없|부족|약하|약함|희박|박약|충분|있음|있다|있는|분명|명확|빈약|약한)"
+# K5r9-m1: an as-is reading of the SOURCE is fit language as a phrase — source + 그대로/通り + reading / scope / build
+# ("제목 그대로 해석", "요청 그대로의 범위", "タイトル通りに解釈") — never `그대로 표시` / `通りに表示` (a display, r8 m3)
+_AS_IS_KO = r"그대로\s*(?:의\s*)?(?:해석|읽|이해|받아들|범위|구현)"
+_AS_IS_JA = r"(?:の\s*)?(?:解釈|読|理解|受け取|範囲|実装)"
+_EN_NOUN = r"(?!\s+(?:case|style|format|font|layout|bar|colou?r|size|field|page|screen|row|column)s?\b)"
+_EVAL_KO = r"\s*(?:이|가|은|는)?\s*(?:없|부족|약하|약함|약해|희박|박약|충분|있음|있다|있는|분명|명확|빈약|약한)"
 _EVAL_JA = r"\s*(?:が|は)?\s*(?:薄|弱|乏し|な[いし]|無[いし]|十分|ある|あり|明確|不十分)"
-FIT = re.compile(_SRC_KO + r"\s*(?:과|와|에|이|의|에서)?\s*(?:일치|불일치|어울리|부합|들어맞|맞|그대로(?=\s*(?:$|[)）\],、，;；.])))|"
-                 r"근거" + _EVAL_KO + r"|" + _SRC_KO + r"\s*(?:에|을|를)?\s*근거|억지|무난|합리|"
-                 + _SRC_JA + r"\s*(?:と|に|の)?\s*(?:(?:通り|どおり)(?!に)|合う|合わ|沿う|沿った|沿わ|一致)|"
-                 r"根拠" + _EVAL_JA + r"|" + _SRC_JA + r"\s*(?:を|に)?\s*根拠|素直(?:な|に)?\s*(?:解釈|読|受け取)|無理|"
+FIT = re.compile(_SRC_KO + r"\s*(?:과|와|에|이|의|에서)?\s*(?:일치|불일치|어울리|부합|들어맞|맞|그대로(?=\s*(?:$|[)）\],、，;；.]))|"
+                 + _AS_IS_KO + r")|"
+                 r"근거" + _EVAL_KO + r"|근거\s*[:：]|" + _SRC_KO + r"\s*(?:에|을|를)?\s*근거|억지|무난|합리|"
+                 + _SRC_JA + r"\s*(?:と|に|の)?\s*(?:(?:通り|どおり)(?!に)|(?:通り|どおり)に?\s*" + _AS_IS_JA + r"|合う|合わ|沿う|沿った|沿わ|一致)|"
+                 r"根拠" + _EVAL_JA + r"|根拠\s*[:：]|" + _SRC_JA + r"\s*(?:を|に)?\s*根拠|素直(?:な|に)?\s*(?:解釈|読|受け取)|無理|"
                  r"(?:\bmatch(?:es|ing)?|\bfits?|\bconsistent with|\binconsistent with|\bin line with|\bsupported by|"
                  r"\bfollows)\s+" + _SRC_EN + r"\b" + _EN_NOUN + r"|\bmismatch|\bstretch\b|\bas asked\b|\basked for\b|"
-                 r"\b(?:typical(?:ly)?|literal(?:ly)?)\s+(?:reading|interpretation|meaning|intent|choice|read)\b|"
-                 r"\b(?:read|taken|interpreted)\s+(?:literally|typically)\b|"
+                 r"\b(?:typical(?:ly)?|literal(?:ly)?)\s+(?:reading|interpretation|meaning|intent|choice|read|sense|scope|case)\b|"
+                 r"\b(?:read(?:ing)?|tak(?:en|e|es|ing)|took|interpret(?:ed|ing)?)\s+(?:" + _SRC_EN + r"\s+)?(?:literally|typically)\b|"
                  r"\b(?:does|do|did)\s*(?:not|n't)\s+(?:mention|say|support|ask)", re.I)
 
 
