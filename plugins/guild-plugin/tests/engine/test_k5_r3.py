@@ -69,24 +69,30 @@ class M1NeutralText(unittest.TestCase):
             self.assertIsNone(TOK2.search(str(pend.get(f) or "")), f)
         self.assertIsNone(TOK2.search(r.line or ""))
 
-    def test_leaky_question_is_refused_not_blind(self):
-        # the r3 repro: a question that names the hidden token is never recorded as a blind answer
+    def test_leaky_question_is_withheld_not_shown(self):
+        # the r3 repro: a question that names the hidden token — K5r5-M1: the judge's text is WITHHELD (the person
+        # sees the engine's wording only) and revealed with the recommendation after the answer
         e = Env(self, labels=("guild:analyze",), unattended=False,
                 config={"version": "0.101.0", "language": "ko", "engine": {"first_sprint_mode": "off"}})
         p = e.h.p
-        p.git_dir, p.valves = e.common, {}
+        p.git_dir, p.valves, p.journal = e.common, {}, e.h.journal
         opts = [{"token": "i1", "label": "A reading"}, {"token": "i2", "label": "B reading"},
                 {"token": "stop", "label": "stop"}]
         q = ASK.Question("interpretation-surface", "해석 확인: i2", opts, recommended="i2", recommended_by="judge:opus")
         r = B.ask(p, "analyze", q, "해석 확인: i2")
         ev = [kw for w, kw in e.h.events if w == "ask"][-1]
-        self.assertFalse(ev["predict_first"])
-        self.assertEqual(ev["recommended"], "i2")                       # shown openly — the person sees it
+        self.assertTrue(ev["predict_first"])
+        self.assertNotIn("recommended", ev)
+        self.assertNotIn("i2", ev["question"])
         blk = [b for b in DecisionLog.load(e.h.gh.comments(7)).blocks if b.id == r.qid][0]
-        self.assertIsNone(blk.get("predict_first"))                      # §9.5 never counts it
-        self.assertTrue(blk.get("predict_first_refused").startswith("question (high-risk)"))
-        self.assertEqual(blk.get("recommended"), "i2")
-        self.assertIsNone(blk.get("recommended_sha"))
+        self.assertEqual(blk.get("predict_first"), "high-risk")
+        self.assertIsNone(blk.get("recommended"))
+        self.assertNotIn("i2", blk.get("question"))
+        self.assertNotIn("i2", blk.get("cause") or "")
+        did = ASK.answer(p.decisions, p.writer, 7, r.qid, "i1", journal=p.journal)
+        res = [b for b in DecisionLog.load(e.h.gh.comments(7)).blocks if b.id == did][0]
+        self.assertEqual(res.get("recommended"), "i2")
+        self.assertIn("해석 확인: i2", res.get("revealed_question"))
 
     def test_label_marker_and_reason_text_refuse(self):
         e = Env(self, labels=("guild:execute",), unattended=False)
@@ -99,10 +105,14 @@ class M1NeutralText(unittest.TestCase):
         q1 = PF.apply(p, mk(["go on (권장)", "go back"]), "execute")
         self.assertFalse(q1.predict_first)
         self.assertTrue(q1.blind_refused.startswith("options"))
+        # K5r5-M1: a text that goes out with the question is the judge's — withheld, so the answer stays blind
         q2 = PF.apply(p, mk(["proceed", "revert"]), "execute", texts=("the judge leans to go",))
-        self.assertTrue(q2.blind_refused.startswith("text"))
+        self.assertTrue(q2.predict_first)
+        self.assertIn("the judge leans to go", PF.withheld_text(q2))
         q3 = PF.apply(p, mk(["proceed", "revert"]), "execute", texts=("choose: go = proceed | back = revert",))
         self.assertTrue(q3.predict_first)                                # an enumeration of EVERY option is neutral
+        q4 = PF.apply(p, mk(["proceed — unlike back", "revert"]), "execute")
+        self.assertTrue(q4.blind_refused.startswith("options"))         # a label comparing with another option
 
     def test_stakes_reason_naming_the_chosen_refuses_the_pause(self):
         # r3-m1/m2: free text this Issue's decision log already shows for the stage (STAKES / KICKOFF reason)

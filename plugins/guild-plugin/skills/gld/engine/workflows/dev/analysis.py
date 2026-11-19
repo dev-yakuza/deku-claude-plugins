@@ -455,10 +455,17 @@ def canon_key(interp):
 ID_EDGE = "A-Za-z0-9_-"            # `A-F13` is not the id `A`
 
 
+HANGUL = "가-힣"
+
+
 def id_regex(name):
     """A judge id / engine token as a whole word: case-insensitive (`I2` = `i2` to a reader), except a one-letter id,
-    which matches its own case only (`A` is an id, `a` is an article)."""
-    return re.compile(r"(?<![%s])%s(?![%s])" % (ID_EDGE, re.escape(name), ID_EDGE), 0 if len(name) == 1 else re.I)
+    which matches its own case only (`A` is an id, `a` is an article) — K5r5-m5: or any case when a Hangul syllable
+    follows it (`b안`, `b가`: no article reads that way)."""
+    if len(name) == 1:
+        e = re.escape(name)
+        return re.compile(r"(?<![%s])(?:%s(?![%s])|(?i:%s)(?=[%s]))" % (ID_EDGE, e, ID_EDGE, e, HANGUL))
+    return re.compile(r"(?<![%s])%s(?![%s])" % (ID_EDGE, re.escape(name), ID_EDGE), re.I)
 
 
 def to_tokens(text, token_map):
@@ -473,11 +480,15 @@ def to_tokens(text, token_map):
     if not ids:
         return text
     ids.sort(key=lambda x: len(x[0]), reverse=True)
-    alt = "|".join(("(?-i:%s)" if len(o) == 1 else "%s") % re.escape(o) for o, _t in ids)
-    rx = re.compile(r"(?<![%s])(?:%s)(?![%s])" % (ID_EDGE, alt, ID_EDGE), re.I)
+    # a one-letter id: its own case at a word end, any case before a Hangul syllable (K5r5-m5: `b안` = `B안`)
+    alt = "|".join(("(?:(?-i:%s)(?![%s])|%s(?=[%s]))" % (re.escape(o), ID_EDGE, re.escape(o), HANGUL)
+                    if len(o) == 1 else "%s(?![%s])" % (re.escape(o), ID_EDGE)) for o, _t in ids)
+    rx = re.compile(r"(?<![%s])(?:%s)" % (ID_EDGE, alt), re.I)
     exact = dict((o, t) for o, t in ids if len(o) == 1)
+    one = dict((o.casefold(), t) for o, t in ids if len(o) == 1)
     folded = dict((o.casefold(), t) for o, t in ids if len(o) > 1)
-    return rx.sub(lambda mo: exact.get(mo.group(0)) or folded[mo.group(0).casefold()], text)
+    return rx.sub(lambda mo: exact.get(mo.group(0)) or one.get(mo.group(0).casefold()) or
+                  folded[mo.group(0).casefold()], text)
 
 
 def readiness_assumptions(k):

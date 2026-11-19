@@ -348,7 +348,12 @@ def pause(p, stage, cause_kind, line, token_cause, prose="", env_key=None, quest
         # also checks every text that goes out with the question (refused → not a blind answer)
         from workflows.dev import predict as PF
         PF.apply(p, question, stage, texts=(line, prose, directive_line, token_cause))
-        line, token_cause = PF.swap(question, line), PF.swap(question, token_cause)
+        if question.neutralized:
+            # K5r5-M1: a blind pause shows only engine text — the neutral wording, the cause kind, the option list;
+            # the judge's line / prose are withheld (journaled with the nonce, revealed with the recommendation)
+            line = question.text
+            token_cause = "%s: %s" % (cause_kind, question.text)
+            prose, directive_line = PF.enumeration(question), None
         token = ASK.journal_nonce(p.journal, question)
     pz = PAUSE.Pause(cause_kind, line, prose, env_key, directive_line)
     if extra_labels or remove_labels:
@@ -382,7 +387,7 @@ def ask(p, stage, question, needs_human_line, pause_args=None):
         # K6 predict-first: the ask event hides the recommendation; K5r3-M1: the one enforcement point checks every
         # text that goes out with the question (the event, the pending block's cause) — refused → not a blind answer
         PF.apply(p, question, stage, texts=(needs_human_line, pa.get("line"), pa.get("prose")))
-        needs_human_line = PF.swap(question, needs_human_line)
+        needs_human_line = PF.swap(question, needs_human_line)        # K5r5-M1: blind → the neutral wording only
         try:
             cause = needs_human.cause_line(pa.get("cause_kind") or "ambiguity",
                                            PF.swap(question, pa.get("line")) or needs_human_line, pa.get("env_key"))

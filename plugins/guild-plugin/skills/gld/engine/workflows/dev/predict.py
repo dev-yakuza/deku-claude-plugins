@@ -26,6 +26,14 @@ Only these answers count as a human judgment in §9.5 (G1, graduation, release).
               preference word, is neutral; an unreadable decision log refuses (K5r4-m2 — fail closed)
   KICKOFF     its decision block carries `chosen_sha` instead of `chosen` (the chosen interpretation IS the readiness
               question's recommendation); analyze:output names it once the stage goes on
+  withheld    (K5r5-M1, structural) a blind question does not evaluate options at all: everything a person sees
+              BEFORE the answer is engine-generated — the neutral template (`Question.neutral`, else
+              `default_neutral`) and each option's own summary; the judge's free text (the question it wrote,
+              `choice_needed`, context lines, the pause line / prose / cause built from them) is WITHHELD —
+              journaled with the nonce and revealed with the recommendation in the answer's resolution block
+              (`revealed_question`). The leak check stays as defence in depth: any text still going out that
+              mentions the options unevenly (the recommendation 0 times included) or evaluates them (a
+              preference OR a negative word) refuses the blind answer.
 
 First-sprint "auto" ends only on a recorded go (§10.4, R4C-m9): a trusted `<!-- guild:note -->` comment
 `first-sprint go/no-go` with `result: go` on a sprint tracker. Trackers are found by a REST list (`issue_rows`,
@@ -194,9 +202,17 @@ def _strip_enumeration(text, options):
 
 
 # K5r4-m6: a text that names every option equally often names none of them — unless it also states a preference
+# (or, K5r5-M1, a negative judgment: "i1 은 맞지 않음" eliminates i1, which recommends the rest)
 PREFERENCE = re.compile(r"맞아\s*보|맞는\s*것|적절|타당|바람직|나아\s*보|낫|좋아\s*보|유력|아마|것\s*같|가능성이\s*높|"
                         r"\bprefer|\blikely\b|\bbetter\b|\bbest\b|\bshould\b|\bseems?\b|\bappropriate\b|"
                         r"\bcorrect\b|\bsuggest|\bprobably\b|\bpick\b|\bgo with\b", re.I)
+NEGATIVE = re.compile(r"아니|않|못\s*하|약하|약함|부족|틀리|틀림|어긋|맞지|무리|부적절|과도|너무|어렵|의심|배제|제외|"
+                      r"\bnot\b|n't\b|\bunlikely\b|\bless\b|\bweak|\bwrong\b|\bpoor|\btoo\b|\bworse\b|"
+                      r"\bbad\b|\brule[sd]? out\b|\bexclude", re.I)
+
+
+def evaluative(text):
+    return bool(PREFERENCE.search(text) or NEGATIVE.search(text))
 
 
 class _Names(object):
@@ -232,19 +248,19 @@ class _Names(object):
             sum(tf.count(ph) for ph in self.phrases.get(tok, []))
 
     def names_rec(self, text, markers=True):
-        """True when `text` points at the recommendation: names it more often than some other option, or names
-        every option equally but with a preference word, or (`markers`) carries a recommendation marker."""
-        rec = self.q.recommended
+        """True when `text` evaluates the options — K5r5-M1: ANY uneven mention (some option named more often than
+        another — the recommendation named 0 times included: "i1 은 맞지 않음" eliminates i1), or an even mention with
+        a preference or negative word, or (`markers`) a recommendation marker. An even, plain enumeration
+        ("범위: i1 vs i2") is neutral."""
         t = _strip_enumeration(str(text or ""), self.q.options)
         if markers and MARKERS.search(t):
             return True
-        n = self.count(t, rec)
-        if not n:
+        counts = [self.count(t, o) for o in self.words]
+        if not any(counts):
             return False
-        others = [self.count(t, o) for o in self.words if o != rec]
-        if others and all(c == n for c in others) and not PREFERENCE.search(t):
-            return False                                      # a symmetric mention: "범위: i1 vs i2"
-        return True
+        if len(set(counts)) > 1:
+            return True                                       # uneven: one option singled out (for or against)
+        return evaluative(t)
 
 
 def leak(p, q, stage=None, texts=()):
@@ -265,7 +281,8 @@ def leak(p, q, stage=None, texts=()):
             return "text"
     for o in q.options:
         lb = str(o.get("label") or "")
-        if MARKERS.search(lb) or (o["token"] != rec and nm.count(lb, rec)):
+        # K5r5-M1: a label is the option's own summary — naming ANOTHER option is a comparison
+        if MARKERS.search(lb) or any(nm.count(lb, t) for t in nm.words if t != o["token"]):
             return "options"
     try:
         log = p.decisions._log()
@@ -285,12 +302,28 @@ def leak(p, q, stage=None, texts=()):
     return None
 
 
+def default_neutral(p, q):
+    """K5r5-M1: the engine's own wording of a blind question — the Issue and the kind, nothing the judge wrote."""
+    return "#%d: %s — 어느 선택지로 진행할까요?" % (int(getattr(p, "issue", 0) or 0), q.kind)
+
+
+def enumeration(q):
+    """The engine's option list (canonical order) — the only prose a blind pause shows."""
+    return "선택지: " + " | ".join("%s = %s" % (o["token"], o.get("label") or o["token"])
+                                   for o in q.options if o["token"] != "stop")
+
+
 def swap(q, s):
-    """A text that repeated the question's own (non-neutral) wording, with the neutral wording in its place."""
-    orig = getattr(q, "original", None)
-    if not getattr(q, "neutralized", False) or not orig or not s:
+    """K5r5-M1: once a question is blind (`withheld`), any text that goes out with it is the neutral wording —
+    never the judge's free text (revealed after the answer)."""
+    if not getattr(q, "neutralized", False) or not s:
         return s
-    return q.text if s == orig else str(s).replace(orig, q.text)
+    return q.text
+
+
+def withheld_text(q):
+    from guildcore import ask as ASK
+    return ASK.withheld_text(q)
 
 
 def apply(p, q, stage=None, texts=()):
@@ -307,14 +340,20 @@ def apply(p, q, stage=None, texts=()):
             q.pf_why = why
     if not q.predict_first or q.recommended is None:
         return q
-    if q.neutral and q.text != q.neutral:
-        q.original, q.text, q.neutralized = q.text, q.neutral, True
+    # K5r5-M1 (structural): the person sees only engine-generated text before answering — the neutral template and
+    # the options' own summaries; the judge's text is withheld (journaled, revealed after the answer)
+    q.withheld = {"question": q.text, "context": list(q.context_lines), "texts": [t for t in texts if t]}
+    q.original, q.text, q.neutralized = q.text, (q.neutral or default_neutral(p, q)), True
+    q.context_lines = []
     q.options = canonical(q.options)
     texts = [swap(q, t) for t in texts]
     where = ("inherent: %s" % INHERENT[q.kind]) if q.kind in INHERENT else leak(p, q, stage, texts)
     if where:
         q.predict_first, q.blind_refused = False, "%s (%s)" % (where, q.pf_why or "requested")
         q.pf_why = None
+        # not blind → nothing is withheld: the judge's own wording goes out with the recommendation shown openly
+        q.text, q.context_lines, q.neutralized = q.original, list(q.withheld["context"]), False
+        q.withheld = None
     return q
 
 

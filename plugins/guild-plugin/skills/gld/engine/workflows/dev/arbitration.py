@@ -21,7 +21,8 @@ from workflows.dev.stages import base as B
 LEVELS = ("low", "medium", "high")
 
 
-def stakes(p, stage, refs, question, options, about_to_take, body, areas, irreversible_paths, step):
+def stakes(p, stage, refs, question, options, about_to_take, body, areas, irreversible_paths, step,
+           record_question=None):
     brief = [("question", question),
              ("options", "\n".join("- %s" % o for o in options) or "-"),
              ("about_to_take", about_to_take or "-"),
@@ -34,9 +35,14 @@ def stakes(p, stage, refs, question, options, about_to_take, body, areas, irreve
     coerced = None if level == d.choice else "no local/reversible reason → high"
     if irreversible_paths and level == "low":
         level, coerced = "medium", "irreversible path → never low (§3.2)"
+    extra = {}
+    rq = record_question if record_question is not None else question
+    if rq:
+        extra["question"] = rq[:300]
+    if irreversible_paths:
+        extra["irreversible"] = "true"     # K5r5-M3: §9.5 rule 2 — a confirmed wrong here is the irreversible class
     B.record_judgment(p, stage, "STAKES", refs, d, choice=level,
-                      reason=(d.fields.get("local_reversible_reason") or coerced or "")[:300],
-                      extra={"question": question[:300]} if question else None)
+                      reason=(d.fields.get("local_reversible_reason") or coerced or "")[:300], extra=extra or None)
     return level
 
 

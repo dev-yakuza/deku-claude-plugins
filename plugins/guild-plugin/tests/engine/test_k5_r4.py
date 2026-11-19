@@ -56,6 +56,15 @@ def _ask_readiness(e, p, k):
     return ev, blk
 
 
+def _log_refuses(case, k, text):
+    """K5r5-M1: the question text is withheld now, so the alias / case / summary knowledge of the leak check guards
+    what still goes out BEFORE the answer — this stage's decision-log free text (defence in depth)."""
+    e, p = _env(case)
+    B.record_code(p, "analyze", "STAKES", "medium", reason=text)
+    ev, blk = _ask_readiness(e, p, k)
+    return ev, blk
+
+
 class M1Aliases(unittest.TestCase):
     def test_repro_judge_ids_are_rewritten_and_the_preference_refused(self):
         # review-k5-r4 repro: `chosen: I2`, choice_needed "범위: I1 vs I2 — … I2 가 맞아 보임"
@@ -65,13 +74,20 @@ class M1Aliases(unittest.TestCase):
         self.assertEqual(k.chosen, app)
         # the person sees the SAME names as the options (engine tokens), never the judge's
         self.assertEqual(k.choice_needed["goal"], "범위: %s vs %s — 제목이 '앱' 이라 %s 가 맞아 보임" % (login, app, app))
+        # K5r5-M1: as the question it is WITHHELD — the ask is blind and shows only the engine's wording
         e, p = _env(self)
         ev, blk = _ask_readiness(e, p, k)
+        self.assertTrue(ev["predict_first"])
+        self.assertNotIn("맞아", ev["question"])
+        self.assertNotIn(app, ev["question"])
+        self.assertTrue(blk.get("recommended_sha"))
+        # the same sentence anywhere that still goes out (the decision log) refuses the blind answer
+        ev, blk = _log_refuses(self, k, k.choice_needed["goal"])
         self.assertFalse(ev["predict_first"])                     # never a blind human judgment
         self.assertEqual(ev["recommended"], app)                  # shown openly
         self.assertIsNone(blk.get("predict_first"))
         self.assertIsNone(blk.get("recommended_sha"))
-        self.assertTrue(blk.get("predict_first_refused").startswith("question"), blk.get("predict_first_refused"))
+        self.assertTrue(blk.get("predict_first_refused").startswith("decision-log"), blk.get("predict_first_refused"))
 
     def test_three_id_styles_with_a_preference_are_refused(self):
         for ids, chosen, text in ((["I1", "I2"], "I2", "I2 가 맞아 보임"),
@@ -79,22 +95,17 @@ class M1Aliases(unittest.TestCase):
                                   (["narrow", "broad"], "broad", "Broad seems right given the title")):
             with self.subTest(ids=ids):
                 k = _kick(ids, chosen, text)
-                e, p = _env(self)
-                ev, blk = _ask_readiness(e, p, k)
+                ev, blk = _log_refuses(self, k, k.choice_needed["goal"])
                 self.assertFalse(ev["predict_first"], ev["question"])
                 self.assertTrue(blk.get("predict_first_refused"))
 
     def test_judge_id_alias_without_rewrite_is_still_caught(self):
-        # the leak check itself knows the judge id (a text the coercion did not rewrite, e.g. a context line)
+        # the leak check itself knows the judge id (a text the coercion did not rewrite)
         k = _kick(["I1", "I2"], "I2", "범위 선택")
-        e, p = _env(self)
-        opts = [{"token": i["id"], "label": i["summary"]} for i in k.interpretations] + [{"token": "stop", "label": "stop"}]
         orig = [i["orig"] for i in k.interpretations if i["id"] == k.chosen][0]
-        q = ASK.Question("readiness", "goal unclear — 범위 선택", opts, recommended=k.chosen, aliases=k.aliases,
-                         context_lines=["판단 메모: %s 쪽" % orig.lower()])
-        PF.apply(p, q, "analyze")
-        self.assertFalse(q.predict_first)
-        self.assertTrue(q.blind_refused.startswith("text"))
+        ev, blk = _log_refuses(self, k, "판단 메모: %s 쪽" % orig.lower())
+        self.assertFalse(ev["predict_first"])
+        self.assertTrue(blk.get("predict_first_refused").startswith("decision-log"))
 
     def test_full_summary_beyond_the_label_cut_is_caught(self):
         long_a = "앱 전체 화면에 다크 모드를 적용하고 설정 화면에서 사용자가 시스템 테마를 따를지 직접 고를지 선택할 수 있게 한다 — 저장은 기기 로컬 저장소에만 하고 서버 동기화는 하지 않는다"
@@ -104,18 +115,18 @@ class M1Aliases(unittest.TestCase):
         opts = [{"token": i["id"], "label": B.one_line(i["summary"], 80)} for i in k.interpretations] + \
             [{"token": "stop", "label": "stop"}]
         self.assertTrue(any(o["label"].endswith("…") for o in opts))  # the label is cut
-        e, p = _env(self)
-        q = ASK.Question("readiness", "goal unclear — 판단은 '%s' 로 읽음" % rec["summary"], opts,
-                         recommended=k.chosen, aliases=k.aliases)
-        PF.apply(p, q, "analyze")
-        self.assertFalse(q.predict_first)
-        self.assertTrue(q.blind_refused.startswith("question"))
+        q = ASK.Question("readiness", "x", opts, recommended=k.chosen, aliases=k.aliases)
+        self.assertTrue(PF._Names(q).names_rec("판단은 '%s' 로 읽음" % rec["summary"], markers=False))
+        ev, blk = _log_refuses(self, k, "판단은 '%s' 로 읽음" % rec["summary"])
+        self.assertTrue(blk.get("predict_first_refused").startswith("decision-log"))
 
     def test_token_match_is_case_insensitive(self):
-        e, p = _env(self)
         opts = [{"token": "i1", "label": "narrow reading"}, {"token": "i2", "label": "broad reading"},
                 {"token": "stop", "label": "stop"}]
-        q = ASK.Question("readiness", "goal unclear — I2 looks right", opts, recommended="i2")
+        q = ASK.Question("readiness", "x", opts, recommended="i2")
+        self.assertTrue(PF._Names(q).names_rec("goal unclear — I2 looks right", markers=False))
+        e, p = _env(self)
+        B.record_code(p, "analyze", "STAKES", "medium", reason="goal unclear — I2 looks right")
         PF.apply(p, q, "analyze")
         self.assertFalse(q.predict_first)
 
@@ -139,16 +150,13 @@ class M1Aliases(unittest.TestCase):
 class M6Symmetric(unittest.TestCase):
     def test_symmetric_mention_stays_blind(self):
         k = _kick(["I1", "I2"], "I2", "범위: I1 vs I2 중 어느 쪽인지 Issue 에 없음")
-        e, p = _env(self)
-        ev, blk = _ask_readiness(e, p, k)
+        ev, blk = _log_refuses(self, k, k.choice_needed["goal"])        # an even, plain mention goes out freely
         self.assertTrue(ev["predict_first"], blk.get("predict_first_refused"))
         self.assertNotIn("recommended", ev)
-        self.assertRegex(ev["question"], r"i1 vs i2|i2 vs i1")
 
     def test_symmetric_mention_with_a_preference_word_is_refused(self):
         k = _kick(["I1", "I2"], "I2", "I1 은 좁고 I2 가 맞아 보임")
-        e, p = _env(self)
-        ev, blk = _ask_readiness(e, p, k)
+        ev, blk = _log_refuses(self, k, k.choice_needed["goal"])
         self.assertFalse(ev["predict_first"])
         self.assertTrue(blk.get("predict_first_refused"))
 

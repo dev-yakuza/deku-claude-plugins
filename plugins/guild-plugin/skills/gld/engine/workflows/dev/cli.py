@@ -753,6 +753,8 @@ def cmd_answer(d, a):
         res = p.decisions._log().by_id(did)
         if res is not None and res.get("recommended") is not None:
             out["revealed"] = {"recommended": res.get("recommended"), "recommended_by": res.get("recommended_by")}
+            if res.get("revealed_question"):                 # K5r5-M1: the judge's withheld text, now
+                out["revealed"]["question"] = res.get("revealed_question")
     except Exception:                       # noqa: BLE001 — the answer landed; the reveal line is a courtesy
         pass
     _sent(d, out)

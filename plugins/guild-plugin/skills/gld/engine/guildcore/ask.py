@@ -31,7 +31,7 @@ parse_guild_answer = answer_rec.parse
 class Question(object):
     def __init__(self, kind, text, options, recommended=None, recommended_by=None,
                  context_lines=(), predict_first=False, point=None, refs=None, stakes=None, waits_at=None,
-                 group=None, neutral=None, aliases=None):
+                 group=None, neutral=None, aliases=None, raised_by=None):
         if kind not in ASK_KINDS:
             raise ValueError("ask kind must be one of the §2.6 set: %s" % kind)
         toks = [o["token"] for o in options]
@@ -59,6 +59,11 @@ class Question(object):
         self.aliases = dict(aliases or {})
         self.neutralized = False
         self.blind_refused = None
+        self.withheld = None              # K5r5-M1: the judge's text a blind question does not show (predict.apply)
+        # K5r5-M2 (user decision 2026-11-19): who raised the question — `judge-unclear` (the judge rated it
+        # undecidable), `judge-surface` (the judge asked a person), `confirm` (the engine asks although the judge was
+        # sure: first-sprint confirmation, a conservative group). Only a `confirm` answer is a §9.5 candidate.
+        self.raised_by = raised_by
 
     def commitment(self):
         if self.recommended is None:
@@ -74,6 +79,12 @@ class Question(object):
              "recommended_by": self.recommended_by}
         if self.waits_at and self.waits_at != stage:
             f["waits_at"] = self.waits_at
+        if self.group:
+            f["group"] = self.group                         # §9.5 group of the recommendation (K5r5-M3 conservative path)
+        if getattr(self, "irreversible", False):
+            f["irreversible"] = "true"                      # §9.5 rule 2: the irreversible class (STAKES)
+        if self.raised_by:
+            f["raised_by"] = self.raised_by                 # K5r5-M2: who raised it — §9.5 counts only `confirm`
         if self.predict_first:
             f["recommended_sha"] = self.commitment()
             f["predict_first"] = self.pf_why or "true"     # §9.5: only these answers count as a human judgment
@@ -115,9 +126,27 @@ def journal_nonce(journal, question):
         return None
     question.commitment()
     token = os.urandom(6).hex()
+    extra = {}
+    w = withheld_text(question)            # K5r5-M1: the judge's text a blind question withheld, revealed after the answer
+    if w:
+        extra["withheld"] = w
     journal.append("event", what="predict-first-nonce", token=token, nonce=question.nonce,
-                   recommended=question.recommended)
+                   recommended=question.recommended, **extra)
     return token
+
+
+def withheld_text(q):
+    """The judge's free text withheld from a blind question (`Question.withheld`, set by the predict-first
+    enforcement point) as one line — journaled with the nonce, revealed in the answer's resolution block."""
+    w = getattr(q, "withheld", None) or {}
+    parts = [w.get("question")] + list(w.get("context") or []) + list(w.get("texts") or [])
+    seen, out = set(), []
+    for x in parts:
+        x = " ".join(str(x or "").split())
+        if x and x not in seen:
+            seen.add(x)
+            out.append(x)
+    return " / ".join(out)[:600] or None
 
 
 def journal_qid(journal, token, qid):
@@ -156,7 +185,10 @@ def _reveal(journal, qid):
               if e.get("kind") == "event" and e.get("what") == "predict-first-qid" and e.get("qid") == qid]
     for e in reversed(journal.entries):
         if e.get("kind") == "event" and e.get("what") == "predict-first-nonce" and e.get("token") in tokens:
-            return {"recommended": e.get("recommended"), "nonce": e.get("nonce")}
+            out = {"recommended": e.get("recommended"), "nonce": e.get("nonce")}
+            if e.get("withheld"):
+                out["revealed_question"] = e.get("withheld")        # K5r5-M1: shown only now, after the answer
+            return out
     return {}
 
 
