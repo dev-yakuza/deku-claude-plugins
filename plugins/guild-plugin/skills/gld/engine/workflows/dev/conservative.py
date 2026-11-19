@@ -5,8 +5,9 @@ person (ask / pause)". One gate does it for every L0/SJ judgment, whatever stage
 
     Ports.judge(spec) → the judge's Decision → gate(p, spec, d)
 
-* not a gated group, a shadow (`HANDOFF-SHADOW`), the valve off, or the judge already took the group's conservative
-  default (§3.1 `judging.UNSURE` — STAKES high, QA block, TEST gap, DE-ARB pause …) → the Decision as it is;
+* not a gated group, a shadow (`HANDOFF-SHADOW`), a wording-only re-ask (`QA:relint`, K5r8-M1), the valve off, or
+  the judge already took the group's conservative default (§3.1 `judging.UNSURE` — STAKES high, QA block, TEST gap,
+  DE-ARB pause …) → the Decision as it is;
 * a person already answered this DECISION POINT's question (`refs: conservative:<G>:#<N>:<stage>:<step>:L<loop>` —
   K5r6-M1: the point, never the judge's input digest) → that answer applies FIRST (the judge's taped decision, no new
   judge call): a Decision carrying the person's choice (`by: human`, `coerced_by: conservative`, `raw_choice` = the
@@ -14,8 +15,8 @@ person (ask / pause)". One gate does it for every L0/SJ judgment, whatever stage
   there (`Hold`). K5r7-M1: an answer is CONSUMED by that application — the point re-entered later (a rerun, a
   `/gld rollback`, the resume after the pause the answer led to = §2.5 rule 3) is a new point `<key>:a<k>`, judged and
   asked again; the loop generation `L` only grows (numbered blocks + resets). Only the same stage run, replayed after a
-  later question, reuses an applied answer (the tape's `used`). The X→T hand-over marks `applied` after its effect
-  (`flush`, K5r7-m4);
+  later question, reuses an applied answer (the tape's `used`) — only while the replay matches (K5r8-M2). The X→T
+  hand-over marks `applied` after its effect (`flush`, K5r7-m4);
 * otherwise `Ask` is raised: the FSM turns it into an attended ask / unattended pause at that stage (`surface`) —
   predict-first (the judge's choice is the sealed recommendation; `raised_by: confirm`, so a different blind answer
   is a §9.5 wrong CANDIDATE — user decision 2026-11-19). The role results the stage got before asking are taped
@@ -215,14 +216,27 @@ def _strip_answers(v):
     return v
 
 
+def _salt(call):
+    s = getattr(call, "replay_salt", None)
+    if callable(s):
+        try:
+            s = s()
+        except Exception:                                                # noqa: BLE001 — unknown: no salt
+            s = None
+    return s
+
+
 def _sig(call):
     """K5r7-m3: the role call's INPUTS are part of it — an Issue edit / note / push between the question and the answer
     changes them, and the run goes live from that call (never a replayed result for other inputs)."""
     import hashlib
     import json
     try:
-        ins = json.dumps(_strip_answers([getattr(call, "inputs", None) or {}, getattr(call, "addendum", None)]),
-                         sort_keys=True, default=str, ensure_ascii=False)
+        parts = [getattr(call, "inputs", None) or {}, getattr(call, "addendum", None)]
+        salt = _salt(call)
+        if salt:                                                         # K5r8-m2 (qa: HEAD) — absent: as before
+            parts.append({"salt": str(salt)})
+        ins = json.dumps(_strip_answers(parts), sort_keys=True, default=str, ensure_ascii=False)
     except (TypeError, ValueError):
         ins = repr((getattr(call, "inputs", None), getattr(call, "addendum", None)))
     return [call.role, call.task, call.step, int(getattr(call, "attempt", 1) or 1),
@@ -287,7 +301,9 @@ def role(p, call, raw):
         return raw(call)
     live = p.__dict__.setdefault("_cons_live", [])
     rp = _replay(p, stage)
-    if rp is not None and rp["at"] < len(rp["roles"]) and rp["roles"][rp["at"]].get("sig") == _sig(call) \
+    sig = _sig(call)
+    if rp is not None and rp["at"] < len(rp["roles"]) and sig in (rp["roles"][rp["at"]].get("sig"),
+                                                                  rp["roles"][rp["at"]].get("sig_after")) \
             and rp["roles"][rp["at"]].get("result") is not None:
         ent = rp["roles"][rp["at"]]
         rp["at"] += 1
@@ -297,15 +313,28 @@ def role(p, call, raw):
         return _role_from(ent["result"])
     if rp is not None:                                   # the run went another way: live from here on
         p.__dict__["_cons_replay"] = None
+        # K5r8-M2: no longer the same stage run — the answers it had applied are not reused either (a point
+        # reached after the divergence is judged again under `_epoch_key`, never given an old answer)
+        p.__dict__.pop("_cons_used_replay", None)
     r = raw(call)
-    live.append({"sig": _sig(call), "result": _role_dict(r)})
+    ent = {"sig": sig, "result": _role_dict(r)}
+    if getattr(call, "replay_salt", None) is not None:
+        # K5r8-m2: the state the role itself left (qa's own test commits move HEAD) matches as well as the state
+        # it started from — only a change made by someone else (a push) runs the role live again
+        after = _sig(call)
+        if after != sig:
+            ent["sig_after"] = after
+    live.append(ent)
     return r
 
 
 def gate(p, spec, raw):
     """The judge's Decision through the conservative path (see the module doc). `raw` = the judge port."""
     g = getattr(spec, "group", None)
-    if g not in GATED or str(getattr(spec, "point", "") or "").endswith("-SHADOW"):
+    pt_name = str(getattr(spec, "point", "") or "")
+    # K5r8-M1: a `:relint` call re-asks the WORDING only (the verdict stays with the first decision) — no decision,
+    # so never a question: a second identical pass/block question would drop a person's `block` and grade nothing
+    if g not in GATED or pt_name.endswith("-SHADOW") or pt_name.endswith(":relint"):
         return raw(spec)
     if not any_active(p) or not active(p, g):
         return raw(spec)

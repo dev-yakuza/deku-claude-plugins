@@ -40,7 +40,7 @@ class RoleCall(object):
     """What a stage asks of a role. The real port builds a guildcore.roles.runner.RoleSpec."""
 
     def __init__(self, role, task, stage, step, inputs=None, addendum=None, schema_role=None,
-                 allowed_status=None, attempt=1, schema=None, model=None, pre_check=None):
+                 allowed_status=None, attempt=1, schema=None, model=None, pre_check=None, replay_salt=None):
         self.role, self.task, self.stage, self.step = role, task, stage, step
         self.inputs = inputs or {}
         self.addendum = addendum
@@ -50,6 +50,9 @@ class RoleCall(object):
         self.schema = schema              # a task-narrowed result.json schema (else the §5.2 role's)
         self.model = model                # a tier override (execute attempt 2: +1 rung, MT §A)
         self.pre_check = pre_check        # K3: runs before the scope check (refactor net cleanup)
+        # K5r8-m2: state the role reads that is not in `inputs` (qa: a callable → the checkout's HEAD) — part of the
+        # conservative replay signature only (a push between a question and its answer runs the role live)
+        self.replay_salt = replay_salt
 
 
 class StageResult(object):

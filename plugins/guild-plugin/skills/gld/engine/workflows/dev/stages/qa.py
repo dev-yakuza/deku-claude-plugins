@@ -116,6 +116,18 @@ def _diff_paths(p):
     return [x for x in out.split("\n") if x]
 
 
+def _head(p):
+    """K5r8-m2: the checkout's HEAD — the qa role reads the code, which `inputs` does not carry (a push between a
+    conservative question and its answer must not replay the old report). None when unknown."""
+    if not p.root:
+        return None
+    from guildcore.adapters import git as G
+    try:
+        return G.run(p.root, "rev-parse", "HEAD", check=False).decode().strip() or None
+    except Exception:                                                      # noqa: BLE001 — unknown: inputs only
+        return None
+
+
 def run(p, only=None, config_present=True, diff_paths=None):
     e = B.enter(p, STAGE, config_present, only)
     if isinstance(e, B.StageResult):
@@ -157,7 +169,8 @@ def run(p, only=None, config_present=True, diff_paths=None):
               "e2e.txt": str((cfg.get("commands") or {}).get("e2e")),
               "visual-available.txt": "yes" if V.visual_available(cfg) else "no",
               "unattended.txt": "yes — never run a real-dependency smoke" if p.unattended else "no"}
-    qres = p.run_role(B.RoleCall("qa", "run", STAGE, "Q1", inputs=inputs, schema=QA_RUN_SCHEMA))
+    qres = p.run_role(B.RoleCall("qa", "run", STAGE, "Q1", inputs=inputs, schema=QA_RUN_SCHEMA,
+                                 replay_salt=lambda: _head(p)))
     o = B.role_outcome(p, STAGE, "qa", qres)
     if o is not None:
         return o
