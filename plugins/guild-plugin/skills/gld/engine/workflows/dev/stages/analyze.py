@@ -419,8 +419,8 @@ def run(p, only=None, config_present=True):
             # K5r5-M1: the blind wording is the engine's (dimension names only); K5r5-M2: the judge said undecidable
             q = ASK.Question("readiness", what, opts, recommended=k.chosen if k.chosen in [o["token"] for o in opts] else None,
                              recommended_by=d.by, stakes="high" if k.high & set(unclear) else None, aliases=k.aliases,
-                             neutral="%s unclear — #%d: 어느 해석으로 진행할까요?" % (
-                                 ", ".join(AN.DIM_KEY[x] for x in unclear), p.issue), raised_by="judge-unclear")
+                             neutral=PF.neutral_text("readiness-unclear", ", ".join(AN.DIM_KEY[x] for x in unclear),
+                                                     p.issue), raised_by="judge-unclear")
             return B.ask(p, STAGE, q, what)
         judge_asked = bool(k.surface.get("ask"))
         surf = judge_asked or FS.confirm_interpretation(p)        # §10.4: on in the first sprint (and KICKOFF conservative)
@@ -429,7 +429,7 @@ def run(p, only=None, config_present=True):
             # K5r3-M1: KICKOFF is high-risk → this ask is predict-first; its neutral wording never names the chosen one
             q = ASK.Question("interpretation-surface", what, opts,
                              recommended=k.chosen if k.chosen in [o["token"] for o in opts] else None, recommended_by=d.by,
-                             neutral="#%d: 어느 해석으로 진행할까요?" % p.issue, aliases=k.aliases,
+                             neutral=PF.neutral_text("interpretation", p.issue), aliases=k.aliases,
                              raised_by="judge-surface" if judge_asked else "confirm")
             return B.ask(p, STAGE, q, what)
         if p.events is not None:                          # JR-M10 — the person can hold/note
@@ -462,10 +462,10 @@ def run(p, only=None, config_present=True):
             dim = high[0] if high else None
             if dim:
                 line = "%s %s — %s" % (AN.DIM_KEY[dim], k.readiness[dim], B.one_line(k.choice_needed.get(dim) or "-", 160))
-                neutral = "%s %s — #%d: 어느 해석으로 진행할까요?" % (AN.DIM_KEY[dim], k.readiness[dim], p.issue)
+                neutral = PF.neutral_text("readiness-high", AN.DIM_KEY[dim], k.readiness[dim], p.issue)
             else:
                 line = "group.KICKOFF.conservative — 해석 확인"
-                neutral = "#%d: group.KICKOFF.conservative — 어느 해석으로 진행할까요?" % p.issue
+                neutral = PF.neutral_text("kickoff-conservative", p.issue)
             opts = [{"token": i["id"], "label": B.one_line(i["summary"], 80)} for i in k.interpretations]
             opts.append({"token": "stop", "label": "stop"})
             q = ASK.Question("readiness" if dim else "interpretation-surface", line, opts,

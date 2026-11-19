@@ -78,7 +78,8 @@ class M1TemplateIgnored(unittest.TestCase):
                                                                {"token": "split", "label": "split"},
                                                                {"token": "stop", "label": "stop"}],
                          recommended="single", group="SPLIT", stakes="high",
-                         neutral="#7: group.SPLIT.conservative — SPLIT(E2.2) 를 어느 쪽으로 정할까요?")
+                         # K6 (item 44): a registered wording — an unregistered one is no longer stripped
+                         neutral=PF.neutral_text("conservative", 7, "E2.2"))
         q.predict_first = True
         return q
 
@@ -95,8 +96,11 @@ class M1TemplateIgnored(unittest.TestCase):
         self.assertIsNone(PF.leak(_P(), q, texts=[q.neutral]))
 
     def test_strip_template(self):
-        self.assertEqual(PF._strip_template("a T b T", "T"), "a   b  ")
+        t = PF.neutral_text("conservative", 7, "E2.2")
+        self.assertEqual(PF._strip_template("a %s b %s" % (t, t), t), "a   b  ")
         self.assertEqual(PF._strip_template("a T", None), "a T")
+        # K6 (r12 m1, item 44): text that is not a registered wording is never stripped
+        self.assertEqual(PF._strip_template("a T b", "T"), "a T b")
 
 
 # m2(a): the person confirms the judge's choice Y (X = Y) for EVERY Y the gate asks about — Y's own output shape

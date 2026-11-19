@@ -395,11 +395,19 @@ def gate(p, spec, raw):
                      recommended=d.choice, recommended_by=d.by, refs=key, group=g, stakes="high",
                      # K5r11-M1: the neutral wording never carries the group name (`SPLIT` IS the option `split`) —
                      # the issue, the gate and the step only; `predict.leak` also ignores this engine template
-                     neutral="#%d: 보수 경로 확인(%s) — 어느 쪽으로 정할까요?" % (
-                         int(p.issue), spec.step or spec.point or "-"), raised_by="confirm")
+                     neutral=_neutral(p, spec), raised_by="confirm")
     q.point = "conservative:%s" % g
     q.irreversible = irr
     raise Ask(q, line)
+
+
+def _neutral(p, spec):
+    """The registered blind wording (`predict.neutral_text`) — a step outside its closed slot is shown as `-`."""
+    from workflows.dev import predict as PF
+    try:
+        return PF.neutral_text("conservative", int(p.issue), spec.step or spec.point or "-")
+    except ValueError:
+        return PF.neutral_text("conservative", int(p.issue), "-")
 
 
 def guarded(p, stage, thunk):

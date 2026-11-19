@@ -31,10 +31,13 @@ Only these answers count as a human judgment in §9.5 (G1, graduation, release).
               `default_neutral`) and each option's own summary; the judge's free text (the question it wrote,
               `choice_needed`, context lines, the pause line / prose / cause built from them) is WITHHELD —
               journaled with the nonce and revealed with the recommendation in the answer's resolution block
-              (`revealed_question`). The leak check stays as defence in depth: any text still going out that
-              mentions the options unevenly (the recommendation 0 times included) or evaluates them (a
-              preference OR a negative word) refuses the blind answer. (K5r11-M1) Mentions are counted only
-              outside the engine's own template: the neutral wording itself is never read as naming an option.
+              (`revealed_question`). (K6, r12 m2 — corrected) On the operating path `apply` empties the context
+              and swaps every outgoing text for the template, so the question / text checks of `leak` see the
+              template only — and a REGISTERED template (`NEUTRAL_FORMS`, K6 item 44) is never counted. What still
+              defends in depth: the option LABELS (judge summaries — evaluative clauses cut, a label naming another
+              option or still rating refuses), this stage's decision-log free text on GitHub (`LOG_FIELDS`), and a
+              `neutral` that is not a registered wording (counted like any text — the slot check of
+              `neutral_text` keeps judge phrases out of the template itself).
 
 First-sprint "auto" ends only on a recorded go (§10.4, R4C-m9): a trusted `<!-- guild:note -->` comment
 `first-sprint go/no-go` with `result: go` on a sprint tracker. Trackers are found by a REST list (`issue_rows`,
@@ -390,16 +393,86 @@ def leak(p, q, stage=None, texts=()):
 
 def _strip_template(text, tmpl):
     """K5r11-M1: `text` without the engine-generated neutral template (every occurrence) — what is left is the only
-    text whose option mentions can say anything about the recommendation."""
+    text whose option mentions can say anything about the recommendation. K6 (r12 m1, item 44): only a template the
+    engine REGISTERED (`NEUTRAL_FORMS`, every variable slot within its own closed pattern) is stripped — a `neutral`
+    that is not one of them (a judge phrase that reached a caller) is counted like any other text."""
     text = str(text or "")
-    if tmpl:
+    if tmpl and is_template(tmpl):
         text = text.replace(str(tmpl), " ")
     return text
 
 
+# K6 (r12 m1, item 44): THE registry of blind-question wordings. A caller never formats its own `neutral=` — it calls
+# `neutral_text(form, *values)`, which checks every value against its slot's closed pattern (an issue number, a step
+# id, a dimension name, a rating, an ask kind) and refuses anything else; `is_template` accepts only text that one of
+# these forms produces. A static test (test_k6_neutral) fails on any `neutral=` that does not come from here.
+_ISSUE = r"[0-9]{1,7}"
+_STEP = r"(?:-|[A-Za-z0-9][A-Za-z0-9._:→-]{0,39})"   # E2.1 · HO · Q2.5 · X→T · TEST:repair · `-` — no spaces, no prose
+_DIMS = None
+_RATING = r"(?:clear|partial|unclear)"
+NEUTRAL_FORMS = {
+    "conservative": ("#%d: 보수 경로 확인(%s) — 어느 쪽으로 정할까요?", ("issue", "step")),
+    "readiness-unclear": ("%s unclear — #%d: 어느 해석으로 진행할까요?", ("dims", "issue")),
+    "interpretation": ("#%d: 어느 해석으로 진행할까요?", ("issue",)),
+    "readiness-high": ("%s %s — #%d: 어느 해석으로 진행할까요?", ("dim", "rating", "issue")),
+    "kickoff-conservative": ("#%d: group.KICKOFF.conservative — 어느 해석으로 진행할까요?", ("issue",)),
+    "default": ("#%d: %s — 어느 선택지로 진행할까요?", ("issue", "kind")),
+}
+
+
+def _slot(name):
+    global _DIMS
+    if name == "issue":
+        return _ISSUE
+    if name == "step":
+        return _STEP
+    if name == "rating":
+        return _RATING
+    if name in ("dim", "dims"):
+        if _DIMS is None:
+            from workflows.dev.analysis import DIM_KEY
+            _DIMS = "(?:%s)" % "|".join(re.escape(v) for v in sorted(DIM_KEY.values()))
+        return _DIMS if name == "dim" else r"%s(?:, %s)*" % (_DIMS, _DIMS)
+    if name == "kind":
+        from guildcore.records.decisions import ASK_KINDS
+        return "(?:%s)" % "|".join(re.escape(k) for k in sorted(ASK_KINDS, key=len, reverse=True))
+    raise KeyError(name)
+
+
+def _form_re(form):
+    fmt, slots = NEUTRAL_FORMS[form]
+    parts, i = re.split(r"(%[ds])", fmt), 0
+    out = []
+    for x in parts:
+        if x in ("%d", "%s"):
+            out.append(_slot(slots[i]))
+            i += 1
+        else:
+            out.append(re.escape(x))
+    return re.compile("^%s$" % "".join(out))
+
+
+def is_template(text):
+    """True when `text` is exactly one registered blind wording (every slot inside its closed pattern)."""
+    t = str(text or "")
+    return any(_form_re(f).match(t) for f in NEUTRAL_FORMS)
+
+
+def neutral_text(form, *values):
+    """The blind wording `form` with `values` — ValueError when a value is outside its slot (never formatted in)."""
+    fmt, slots = NEUTRAL_FORMS[form]
+    if len(values) != len(slots):
+        raise ValueError("neutral form %s takes %d values" % (form, len(slots)))
+    for name, v in zip(slots, values):
+        if not re.match("^%s$" % _slot(name), str(v)):
+            raise ValueError("neutral form %s: %r is not a %s" % (form, v, name))
+    vals = tuple(int(v) if name == "issue" else v for name, v in zip(slots, values))
+    return fmt % vals
+
+
 def default_neutral(p, q):
     """K5r5-M1: the engine's own wording of a blind question — the Issue and the kind, nothing the judge wrote."""
-    return "#%d: %s — 어느 선택지로 진행할까요?" % (int(getattr(p, "issue", 0) or 0), q.kind)
+    return neutral_text("default", int(getattr(p, "issue", 0) or 0), q.kind)
 
 
 def enumeration(q):
