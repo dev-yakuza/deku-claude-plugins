@@ -214,7 +214,10 @@ def predict_first_judgments(blocks, issue):
     Excluded: a refused blind (`predict_first_refused`), a resolution that could not reveal (`reveal: unavailable`
     / no `recommended`), every answer that saw the recommendation (no `predict_first`), every question the judge
     raised itself (`raised_by` ≠ confirm), and — K5r6-M2 — an answer equal to the recommendation on a question with
-    one real option (`predict_first_counted: false`). `stop` is a candidate (K5r6-M2(b))."""
+    one real option (`predict_first_counted: false`). `stop` is a candidate (K5r6-M2(b)). K6 r1 M2: a question asked
+    after an earlier answer of the same decision point (`predict_first_counted: false — after-reveal`) is neither an
+    `ok` nor a candidate — the recommendation of that time was revealed."""
+    from guildcore import ask as ASK
     from workflows.dev import predict as PF
     pend = dict((b.id, b) for b in blocks)
     counted, cands = [], []
@@ -229,6 +232,8 @@ def predict_first_judgments(blocks, issue):
             continue
         if q.get("raised_by") != CONFIRM:
             continue                     # the judge said it could not decide / asked a person — not its wrong
+        if str(q.get("predict_first_counted") or "").startswith("false — " + ASK.AFTER_REVEAL):
+            continue                     # K6 r1 M2: an earlier recommendation of the point was revealed — not blind
         # K5r6-M2(a): one real option (`i1 | stop`) is no blind judgment between options — never an `ok`
         real = [t for t in q.options() if t != "stop"]
         one = len(real) < 2 or str(q.get("predict_first_counted") or "").startswith("false")
@@ -434,7 +439,7 @@ def on_release(common):
         J.atomic_write(state_path(common), json.dumps(st, sort_keys=True, indent=1))
 
 
-def apply_judgments(common, rows, repo, version, irreversible=lambda row: False):
+def apply_judgments(common, rows, repo, version, irreversible=lambda row: False, candidates=None):
     """Human judgments (sheet rows or predict-first answers) → grades.jsonl (key (repo, issue, D-id, version),
     present keys skipped) → the count rules. K5r6-M3: `conservative` lists only groups whose valve is IN FORCE after
     this import (the count rule set it now, or it already was); a set the valves refused is `blocked_by_release`."""
@@ -444,6 +449,8 @@ def apply_judgments(common, rows, repo, version, irreversible=lambda row: False)
     st.setdefault("watch", {})
     st.setdefault("streak", {})
     sync_releases(common, st)
+    if candidates is not None:
+        UV.note_candidates(st, candidates)            # K6 r1 m1: no release while a candidate of the group is open
     released_at = VALVES.load(common)["human"].get("released_at") or {}
     blocked, forgiven, released = [], [], []
     n, cons, watch = 0, [], []
@@ -462,7 +469,7 @@ def apply_judgments(common, rows, repo, version, irreversible=lambda row: False)
         g = row.get("group") or "?"
         # K6 item 4: a person's verdict on a blind answer of an unverified group counts toward its release (a wrong
         # forgiven by a valve release below still keeps the group unverified)
-        rel_g = UV.count(st, dict(row, given_info=gi), _now())
+        rel_g = UV.count(st, dict(row, given_info=gi), _now(), source=version)
         if rel_g:
             released.append(rel_g)
         rel = released_at.get("group.%s.conservative" % g.replace(":", "-"))
@@ -722,10 +729,11 @@ def main(d, a):
             texts[n] = "%s\n\n%s" % (it.get("title") or "", (it.get("body") or "")[:8000])
         except Exception:                                        # noqa: BLE001
             texts[n] = "#%d" % n
-    pf = apply_judgments(common, pf_rows, repo, "predict-first")         # `ok`s only (K5r5-M2)
     confirmed = set((str(g.get("issue")), g.get("decision_id")) for g in grades(common)
                     if g.get("repo") == repo and g.get("grader_version") == "human")
     pf_cands = [r for r in pf_cands if (str(r["issue"]), r["decision_id"]) not in confirmed]
+    # `ok`s only (K5r5-M2); K6 r1 m1: the candidates still open hold back their group's §10.2-6 release
+    pf = apply_judgments(common, pf_rows, repo, "predict-first", candidates=pf_cands)
     watch = sorted((load_state(common).get("watch") or {}).keys())
     valves = VALVES.effective(common, d.env)
     cfg = d.config(d.toplevel())

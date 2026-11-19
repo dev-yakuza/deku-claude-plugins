@@ -11,7 +11,12 @@ failure directions, measured offline:
 * LEAK — an evaluative label that passes uncut. Corpus: the review paraphrases (r7 16, r10 m5 16 — fit / faithfulness
   language) and their mirror descriptive set (r8 9 + r10 m5 descriptive 12).
 
-    label_audit.py --logs '<glob>' --out <dir> [--sample 400]
+    label_audit.py --logs '<glob>' --out <dir> [--sample 400] [--heldout <set.json> …]
+
+K6 r1 M4: the paraphrase lists above are the CALIBRATION set (FIT was tuned on them — a 0/32 there is by
+construction). The leak is measured on HELD-OUT sets (`--heldout`): written by another model (local qwen, sealed by
+sha256 before the measurement, never read to tune a word list), each label paired with its neighbour and shown
+through `predict.blind_labels` exactly as a blind question shows two options. A label shown unchanged is a leak.
 
 Output: rates over the corpus, every flagged descriptive line (for the person to confirm as a false refusal or a real
 rating), the leak list. No model; the logs are only read.
@@ -95,13 +100,46 @@ def run(logs, out_dir, sample=400):
     return rep
 
 
+def heldout(path):
+    """{kind: {n, unchanged, cut, refused}, "leaked": [...]} — `path` = {"sets": {lang: {"evaluative": [...],
+    "descriptive": [...]}}}; labels paired (i, i+1) per language through `predict.blind_labels`."""
+    with open(path, encoding="utf-8") as fh:
+        raw = fh.read()
+    d = json.loads(raw)
+    out = {"file": os.path.basename(path), "sha256": hashlib.sha256(raw.encode("utf-8")).hexdigest(),
+           "generator": d.get("generator"), "leaked": [], "descriptive_changed": []}
+    for kind in ("evaluative", "descriptive"):
+        t = {"n": 0, "unchanged": 0, "cut": 0, "refused": 0}
+        for lang, v in sorted((d.get("sets") or {}).items()):
+            labels = list(v.get(kind) or [])
+            for i in range(0, len(labels) - 1, 2):
+                pair = labels[i:i + 2]
+                for s0, shown in zip(pair, PF.blind_labels(pair)):
+                    t["n"] += 1
+                    k = "refused" if shown is None else "unchanged" if shown == s0 else "cut"
+                    t[k] += 1
+                    if kind == "evaluative" and k == "unchanged":
+                        out["leaked"].append(s0)
+                    if kind == "descriptive" and k != "unchanged":
+                        out["descriptive_changed"].append([s0, shown])
+        out[kind] = t
+    return out
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser()
     ap.add_argument("--logs", required=True)
     ap.add_argument("--out", required=True)
     ap.add_argument("--sample", type=int, default=400)
+    ap.add_argument("--heldout", action="append", default=[])
     a = ap.parse_args(argv)
     rep = run(glob.glob(a.logs, recursive=True), a.out, a.sample)
+    if a.heldout:
+        rep["heldout"] = [heldout(h) for h in a.heldout]
+        with open(os.path.join(a.out, "label_audit.json"), "w", encoding="utf-8") as fh:
+            json.dump(rep, fh, indent=1, ensure_ascii=False)
+        for h in rep["heldout"]:
+            print("held-out %s: evaluative %s · descriptive %s" % (h["file"], h["evaluative"], h["descriptive"]))
     print(json.dumps(dict((k, v) for k, v in rep.items() if k != "flagged_descriptive_lines"), ensure_ascii=False)[:1500])
     print("flagged descriptive:", len(rep["flagged_descriptive_lines"]))
     return 0

@@ -34,6 +34,7 @@ from guildcore import state as ST
 from workflows.dev import exec_audit as XA
 from workflows.dev import firstsprint as FS
 from workflows.dev import judging as JG
+from workflows.dev import predict as PF
 from workflows.dev import tripwire as TW
 from workflows.dev import unattended_log as UL
 from workflows.dev import variants as VR
@@ -968,8 +969,11 @@ def arbitrate_step(p, cx, attempt, scan, scan_ran, head, untracked, role_trigger
             for k, _c in new_bm:
                 if (ex.get(k) or {}).get("verdict") in ("dismiss", "dispute"):
                     would.append(k)
+                    # K6 r1 M6: the conservative source is named as the person can act on it (a valve or the
+                    # §10.2-6 unverified state — never a valve that is not set)
                     ex[k] = {"verdict": "accept", "reason": "%s (would-dismiss: %s)" % (
-                        {"first-sprint": "first-sprint", "conservative": "group.EX-ARB-dismiss.conservative"}.get(
+                        {"first-sprint": "first-sprint",
+                         "conservative": PF.conservative_label(p, "EX-ARB:dismiss")}.get(
                             why, "exarb.no_unattended_dismiss"),
                         ex[k].get("reason") or "")}
         extra = {"coerced": "true"} if coerced else {}

@@ -464,7 +464,7 @@ def run(p, only=None, config_present=True):
                 line = "%s %s — %s" % (AN.DIM_KEY[dim], k.readiness[dim], B.one_line(k.choice_needed.get(dim) or "-", 160))
                 neutral = PF.neutral_text("readiness-high", AN.DIM_KEY[dim], k.readiness[dim], p.issue)
             else:
-                line = "group.KICKOFF.conservative — 해석 확인"
+                line = "%s — 해석 확인" % PF.conservative_label(p, "KICKOFF")
                 neutral = PF.neutral_text("kickoff-conservative", p.issue)
             opts = [{"token": i["id"], "label": B.one_line(i["summary"], 80)} for i in k.interpretations]
             opts.append({"token": "stop", "label": "stop"})

@@ -91,6 +91,26 @@ def conservative(p, group):
     return group.replace(":", "-") in (getattr(p, "unverified", None) or ())
 
 
+def conservative_source(p, group):
+    """K6 r1 M6: why `group` is on the conservative path — "valve" (`group.<g>.conservative` in force: a person or the
+    §9.5 count rule set it), "unverified" (§10.2-6, not released yet — no valve exists to clear), or None."""
+    key = "group.%s.conservative" % group.replace(":", "-")
+    if _truthy((getattr(p, "valves", None) or {}).get(key)):
+        return "valve"
+    if group.replace(":", "-") in (getattr(p, "unverified", None) or ()):
+        return "unverified"
+    return None
+
+
+def conservative_label(p, group):
+    """The engine's words for that source — what a person can act on (K6 r1 M6: never a valve name that is not set)."""
+    g = group.replace(":", "-")
+    src = conservative_source(p, group)
+    if src == "unverified":
+        return "unverified %s (§10.2-6: released after its human verdicts — `dev health` shows the count)" % g
+    return "group.%s.conservative" % g
+
+
 def _go_cache(p):
     from guildcore import journal as J
     c = _common(p)
@@ -281,13 +301,46 @@ def rates(label):
 _CLAUSE = re.compile(r"\s*[(（\[][^)）\]]*[)）\]]|\s*(?:—|–|--| - |;|；|:|：|,|、|，)[^—–;；:：,、，(（]*")
 
 
+# K6 r1 M4 (structural — three review rounds found new evaluative paraphrases the word lists missed): an ASIDE is
+# never shown blind, whatever it says — every parenthesis / bracket (an unclosed one, cut by the one-line cap, to the
+# end) and every spaced-dash tail. A blind label is the summary's head: what the option builds. Two options that
+# differ only in their asides become indistinct → the blind answer is refused (shown openly, never counted).
+_ASIDE = re.compile(r"\s*[(（\[【][^)）\]】]*(?:[)）\]】]|$)|\s+(?:—|–|--|-)\s+.*$|\s*—.*$")
+
+
+def aside_cut(label):
+    return _ASIDE.sub("", str(label or "")).strip(" —–-;:,、")
+
+
+_HEAD_SPLIT = re.compile(r"\s*(?:[,、，;；]|[:：](?=\s|$))\s*")
+
+
+def blind_labels(labels):
+    """K6 r1 M4: the labels of one blind question, as shown — each `neutral_label`; then, when the HEADS (each label up
+    to its first comma / colon / semicolon) still tell every option apart and none rates, only the heads: the least
+    that distinguishes the options is all a blind question needs, and a tail is where a summary drifts into a remark
+    the word lists do not know. Returns [label or None (refused)]."""
+    # a recommendation MARKER (권장 · recommend · (rec) …) is the judge naming its pick — never cut away silently:
+    # the label stays as written so the leak check refuses the blind answer (K5r3-M1)
+    nl = [(str(x or "") if MARKERS.search(str(x or "")) else neutral_label(x)) for x in labels]
+    if any(MARKERS.search(str(x or "")) for x in labels):
+        return nl
+    if any(x is None for x in nl):
+        return nl
+    heads = [_HEAD_SPLIT.split(x, 1)[0].strip() for x in nl]
+    keys = [re.sub(r"\s+", " ", h).strip().lower() for h in heads]
+    if all(keys) and len(set(keys)) == len(keys) and not any(rates(h) for h in heads):
+        return heads
+    return nl
+
+
 def neutral_label(label):
-    """K5r6-M2: an option label as the engine shows it blind — the judge's summary with every evaluative clause (a
-    parenthesis, a dash / colon / comma tail that rates the option) cut. None when what is left still evaluates
-    (or nothing is left): the blind answer is then refused."""
-    lb = str(label or "")
+    """K5r6-M2 / K6 r1 M4: an option label as the engine shows it blind — the judge's summary without its asides
+    (`aside_cut` — always) and without a comma / colon tail that rates the option. None when what is left still
+    evaluates (or nothing is left): the blind answer is then refused."""
+    lb = aside_cut(label)
     if not rates(lb):
-        return lb
+        return lb or None
     out = _CLAUSE.sub(_cut, lb).strip(" —–-;:,、")
     if not out or rates(out):
         return None
@@ -426,7 +479,8 @@ NEUTRAL_FORMS = {
     "readiness-unclear": ("%s unclear — #%d: 어느 해석으로 진행할까요?", ("dims", "issue")),
     "interpretation": ("#%d: 어느 해석으로 진행할까요?", ("issue",)),
     "readiness-high": ("%s %s — #%d: 어느 해석으로 진행할까요?", ("dim", "rating", "issue")),
-    "kickoff-conservative": ("#%d: group.KICKOFF.conservative — 어느 해석으로 진행할까요?", ("issue",)),
+    # K6 r1 M6: never a valve name (an unverified KICKOFF has no `group.KICKOFF.conservative` to clear)
+    "kickoff-conservative": ("#%d: 해석 확인(보수 경로) — 어느 해석으로 진행할까요?", ("issue",)),
     "default": ("#%d: %s — 어느 선택지로 진행할까요?", ("issue", "kind")),
 }
 
@@ -530,11 +584,13 @@ def apply(p, q, stage=None, texts=()):
     q.withheld["labels"] = [dict(o) for o in q.options]
     where = None
     opts = []
+    real = [o for o in q.options if o["token"] != "stop"]
+    shown = dict(zip([o["token"] for o in real], blind_labels([o.get("label") for o in real])))
     for o in q.options:
         if o["token"] == "stop":
             opts.append(o)
             continue
-        nl = neutral_label(o.get("label"))
+        nl = shown.get(o["token"])
         if nl is None:
             where = "label-evaluative %s" % o["token"]
             nl = o.get("label")

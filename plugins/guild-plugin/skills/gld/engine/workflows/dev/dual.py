@@ -5,7 +5,10 @@ A deterministic share of judge decisions (`config.engine.dual_judge_rate`, defau
 decision never changes the flow — it is monitoring (kind `monitoring`, no cache). The decision block records
 `dual: agree|disagree`, `dual_choice`, `dual_model`; a disagreement is a §9.5 trigger (the decision is always graded)
 and `dev health` reports the disagreement rate against its band (> 25 %).
-Not dual-judged: a person's decision, a coerced / cached replay, a shadow, the grader's own calls.
+Only the §9.5 DECISION groups (`valves.GROUPS` — KICKOFF, STAKES, SPLIT, QA, TEST, EX-ARB …; K6 r1 m4): a helper
+judgment (IDENT, SAMECAUSE, PRMATCH, RUNNER, FOLLOWUP, MUTATION, GATECAST, DWC, BRANCH …) is never recorded as a
+decision block — doubling it would cost a second tier on every call of a selected Issue for nothing to read.
+Not dual-judged: a person's decision, a coerced / cached replay, a shadow, the grader's own calls, a helper.
 """
 
 import copy
@@ -23,6 +26,13 @@ def other_tier(model):
     return "opus"
 
 
+def decision_group(group):
+    """K6 r1 m4: is `group` a §9.5 decision group (its result is a recorded decision block)?"""
+    from guildcore import valves as VALVES
+    g = str(group or "")
+    return g in VALVES.GROUPS or ("%s-dismiss" % g) in VALVES.GROUPS
+
+
 def selected(p, spec, rate):
     if not rate or rate <= 0:
         return False
@@ -36,6 +46,8 @@ def check(p, spec, d, raw):
     if d is None or not str(getattr(d, "by", "")).startswith("judge:") or getattr(d, "cached", False):
         return d
     if getattr(spec, "kind", "score") != "score" or str(spec.point or "").endswith("-SHADOW"):
+        return d
+    if not decision_group(getattr(spec, "group", None)):
         return d
     if not selected(p, spec, rate):
         return d

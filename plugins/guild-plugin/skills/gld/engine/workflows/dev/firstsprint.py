@@ -35,7 +35,9 @@ def confirm_interpretation(p):
 def no_dismiss(p, attended=False):
     """None | 'first-sprint' | 'valve' | 'conservative' — why a BLOCKER/MAJOR dismiss is forced to accept. Unattended:
     first-sprint mode, the `exarb.no_unattended_dismiss` valve, or (K5r5-M3) `group.EX-ARB-dismiss.conservative`;
-    attended: the conservative valve only (EX-ARB's conservative side — §9.5 rule 2)."""
+    attended: the conservative path only (EX-ARB's conservative side — §9.5 rule 2) — the valve, or (K6 item 4) the
+    §10.2-6 unverified EX-ARB-dismiss, released by the person's verdicts on these would-dismiss decisions on the
+    grading sheet (K6 r1 M6, `unverified.SHEET_RELEASED`)."""
     if not attended:
         if on(p):
             return "first-sprint"

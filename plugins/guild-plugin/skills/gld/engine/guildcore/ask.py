@@ -28,6 +28,8 @@ from guildcore.records.decisions import ASK_KINDS
 parse_guild_answer = answer_rec.parse
 
 
+AFTER_REVEAL = "after-reveal"     # K6 r1 M2: `predict_first_counted: false — after-reveal …` — excluded from §9.5 wholly
+
 class Question(object):
     def __init__(self, kind, text, options, recommended=None, recommended_by=None,
                  context_lines=(), predict_first=False, point=None, refs=None, stakes=None, waits_at=None,
@@ -67,6 +69,7 @@ class Question(object):
         # K6 (items 33/40): engine-only fields the pending block carries for the engine itself (the conservative
         # gate's `cons_used` / `cons_run` — the stage run's identity on GitHub, read when the local tape is gone)
         self.extra = {}
+        self.after_reveal = None          # K6 r1 M2: set by the conservative gate on a re-asked decision point
 
     def commitment(self):
         if self.recommended is None:
@@ -95,7 +98,11 @@ class Question(object):
         if self.predict_first:
             f["recommended_sha"] = self.commitment()
             f["predict_first"] = self.pf_why or "true"     # §9.5: only these answers count as a human judgment
-            if getattr(self, "uncounted", None):
+            if getattr(self, "after_reveal", None):
+                # K6 r1 M2: an earlier answer of the same decision point revealed the recommendation of that time —
+                # this answer is no blind judgment (neither an `ok` nor a wrong candidate)
+                f["predict_first_counted"] = "false — %s: %s" % (AFTER_REVEAL, self.after_reveal)
+            elif getattr(self, "uncounted", None):
                 f["predict_first_counted"] = "false — %s" % self.uncounted   # K5r6-M2(a)
         else:
             f["recommended"] = self.recommended

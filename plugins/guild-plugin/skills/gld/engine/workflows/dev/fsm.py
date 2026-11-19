@@ -422,6 +422,9 @@ class Driver(object):
                 if p.journal is not None:
                     for point in ("KICKOFF", "STAKES", "SPLIT", "DE-ARB", "INTEGRATE", "HANDOFF", blk.get("point")):
                         p.journal.cache_invalidate(point)
+                    # K6 r1 m8 (§4.2 "사람 결정(답·라벨 해제)마다 0"): the person's label removal is a human decision —
+                    # the L0-ESCALATE count starts again (an engine FAIL pause resumed this way four times is no cap)
+                    p.journal.bump_epoch("needs-human removed %s" % blk.id)
                 continue
             cause = blk.get("cause") or "defect: engine pause interrupted — %s" % (blk.get("question") or "-")
             kind, _, rest = cause.partition(": ")

@@ -736,7 +736,11 @@ state lives. Do **not** report outcomes for a run still in progress.
 
 ⚠ **`state: halted:*` — a separate arm, and it did not exist.** Without it a run that died in
 the first second over a one-character typo produces a *"done 0 / failed 0"* report that says
-nothing. Match on the wildcard and name the action for each:
+nothing. Match on the wildcard and name the action for each.
+⚠ **Read `halt_reason` first** (the marker / `.sprint-logs/<tracker>/dag/ledger.json`): a 0.102 supervisor writes a
+reason 0.101.3 does not document FOLDED into one it does (`state` — so a rolled-back 0.101.3 can still render it) and
+puts the precise reason in `halt_reason` with the person's action in `halt_note` (K6 user decision 2). When
+`halt_reason` is present, the row is `halted:<halt_reason>` and `halt_note` is the line to show:
 
 | `state` | What to say |
 |---|---|

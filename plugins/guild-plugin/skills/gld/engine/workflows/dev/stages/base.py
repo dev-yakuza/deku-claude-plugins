@@ -389,8 +389,8 @@ def pending_answer(p, stage, kind, comments=None):
     return None, None
 
 
-def mark_applied(p, stage, resolution):
-    return record_code(p, stage, "applied", resolution.get("choice"), refs=resolution.id)
+def mark_applied(p, stage, resolution, extra=None):
+    return record_code(p, stage, "applied", resolution.get("choice"), refs=resolution.id, extra=extra)
 
 
 # ---- pause / ask / FAIL ---------------------------------------------------------------------

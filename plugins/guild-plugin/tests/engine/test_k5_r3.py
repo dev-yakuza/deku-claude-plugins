@@ -111,8 +111,12 @@ class M1NeutralText(unittest.TestCase):
         self.assertIn("the judge leans to go", PF.withheld_text(q2))
         q3 = PF.apply(p, mk(["proceed", "revert"]), "execute", texts=("choose: go = proceed | back = revert",))
         self.assertTrue(q3.predict_first)                                # an enumeration of EVERY option is neutral
-        q4 = PF.apply(p, mk(["proceed — unlike back", "revert"]), "execute")
+        q4 = PF.apply(p, mk(["proceed unlike back", "revert"]), "execute")
         self.assertTrue(q4.blind_refused.startswith("options"))         # a label comparing with another option
+        # K6 r1 M4: the same comparison as a dash ASIDE is cut (never shown blind) — the answer stays blind, no leak
+        q5 = PF.apply(p, mk(["proceed — unlike back", "revert"]), "execute")
+        self.assertTrue(q5.predict_first)
+        self.assertEqual(sorted(o["label"] for o in q5.options if o["token"] != "stop"), ["proceed", "revert"])
 
     def test_stakes_reason_naming_the_chosen_refuses_the_pause(self):
         # r3-m1/m2: free text this Issue's decision log already shows for the stage (STAKES / KICKOFF reason)

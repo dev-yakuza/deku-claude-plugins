@@ -32,6 +32,9 @@
      },
      "summary": {
       "type": "string"
+     },
+     "rationale": {
+      "type": "string"
      }
     }
    }

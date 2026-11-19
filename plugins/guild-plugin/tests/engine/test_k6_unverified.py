@@ -33,7 +33,8 @@ class Shipped(unittest.TestCase):
         s = UV.shipped()
         self.assertEqual(s.get("verified"), [])
         self.assertEqual(int(s.get("release_after")), 5)
-        self.assertEqual(UV.unverified(), list(VALVES.GROUPS))
+        # K6 r1 M6: every §9.5 group but the EXEMPT ones (no less conservative path to gate)
+        self.assertEqual(UV.unverified(), [g for g in VALVES.GROUPS if g not in UV.EXEMPT])
 
     def test_a_verified_group_is_not_unverified(self):
         d = tmpdir(self)
@@ -46,7 +47,7 @@ class Shipped(unittest.TestCase):
         self.assertIn("STAKES", u)
 
     def test_no_common_dir_is_all_pending(self):
-        self.assertEqual(UV.pending(None), frozenset(VALVES.GROUPS))
+        self.assertEqual(UV.pending(None), frozenset(g for g in VALVES.GROUPS if g not in UV.EXEMPT))
 
 
 class Release(unittest.TestCase):

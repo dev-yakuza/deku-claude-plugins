@@ -187,7 +187,7 @@ nothing to add. A non-zero exit → one line *"스택 동기화 상태 확인 �
 
 **4. Failure reasons come from `failures.jsonl`, not from the console.**
 `<repo>/.claude/guild/.sprint-logs/<tracker>/failures.jsonl` — one JSON object per line:
-`{at, tracker, run, issue, class, detail}`. Read it with its own Bash call:
+`{at, tracker, run, issue, class, detail}` (+ `class_exact` — see below). Read it with its own Bash call:
 ```bash
 tail -50 .claude/guild/.sprint-logs/<tracker>/failures.jsonl
 ```
@@ -202,6 +202,10 @@ The classes the supervisor writes — **this list is the code's, verbatim**:
 | `create-settle-wait` · `create-unsettled` | **대기 / 차단**(0.102) — 엔진의 이슈 생성 착지가 불명(종료 75, `reason: create-settle` — rate limit 아님). `create-settle-wait` 는 settle 시각까지의 제자리 대기 기록(자체 한도 6회), `create-unsettled` 는 6회가 지나도 불명이라 needs-human 으로 남김. 실패로 렌더하지 말 것, `account-rate-limited` 로도 렌더하지 말 것 — **재실행이 이어받는다** |
 | `gh-service-wait` · `gh-unavailable` | **대기 / 차단**(0.102) — GitHub 장애로 엔진이 `env: service` pause 조차 쓰지 못함(종료 75, `reason: gh-service`). 자체 한도 6회 대기 후 `gh-unavailable` 로 남김. 실패가 아니다(하류 차단 없음) — **재실행이 이어받는다** |
 | `busy` · `busy-skipped` | **미처리**(0.102) — 다른 엔진 실행이 그 이슈를 잡고 있었다(종료 4). `busy` 는 제자리 대기 기록, `busy-skipped` 는 두 번 기다려도 잡혀 있어 이번 실행에서 건너뜀. 실패도 차단도 아니다 — **재실행이 이어받는다** |
+
+⚠ **`class_exact` 가 있으면 그것이 class 다**(0.102, K6 사용자 결정 2): 0.102 감독기는 0.101.3 이 모르는 class 를 0.101.3 이 아는
+가장 가까운 class 로 접어 `class` 에 쓰고(`create-settle-wait`·`gh-service-wait` → `busy`, `create-unsettled`·`gh-unavailable` →
+`busy-skipped`) 정확한 class 를 `class_exact` 에 남긴다 — 롤백한 0.101.3 도 실패로 오독하지 않게. 렌더는 `class_exact` 로.
 
 ⚠ `base-decision-failed`와 `base-unresolved`는 **다른 일**이다. 앞은 base 결정 자체가 실패한
 것(입력이 깨졌거나 출력을 파싱할 수 없다 — 의존에 대해 아는 것이 없으므로 하류가 추측 위에
@@ -447,6 +451,12 @@ Sprint #99 — 결제 흐름 안정화      (시작 3일 전 · state: rate-limi
   `plugin-version-changed` · `engine-gh-auth` · `engine-env-<reason>` · `engine-env-missing`. `halted:marker-unwritable`
   is the one whose reason may exist **only** in `.sprint-logs/<tracker>/dag/ledger.json` —
   the marker write is what failed.
+  ⚠ **0.101.3 folds (K6 user decision 2)**: a 0.102 supervisor writes `state` in a form 0.101.3 documents and the
+  precise token beside it — `halt_reason` (+ `halt_note`, the action) for a halted state (`engine-gh-auth` →
+  `halted:marker-unwritable`, `engine-env-missing` → `halted:engine-env-python`, `engine-env-ignored-missing` /
+  `engine-env-build-inputs-changed` → `halted:engine-env-uninitialized`, `engine-env-unknown` → `halted:interrupted`),
+  `wait_reason` (`create-settle` / `gh-service`) for a `rate-limited-until-<epoch>` / `-remaining-<n>s` state. Read
+  those keys first: `halted:<halt_reason>` and the `create-settle` / `gh-service` wording above are what to render.
 - **How to stop it.** ⚠ For any live state, print the marker's `pid` with the command:
   *"중단: `kill <pid>` — 대기 중이면 최대 60초, 멤버 작업 중이면 그 멤버가 끝난 뒤에 멈춥니다.
   (`kill -9` 는 쓰지 마십시오 — 카드가 `In progress` 에 남습니다)"*. Ctrl-C cannot work: the

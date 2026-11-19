@@ -132,9 +132,9 @@ class M1AnswerConsumedOnce(unittest.TestCase):
         CONS.begin(h.p)
         pend = _ask_and_answer(self, h, "pass")                            # §2.5 rule 3: judged again → asked anew
         self.assertEqual(pend.get("refs"), "conservative:QA:#7:qa:Q2.5:L0:a1")
-        # K6 (item 40): the run that applies `block` sees another diff (lib/a.dart) than the run that asked — the judge
-        # is called again first (it still says `pass`, the question the person answered → the answer applies)
-        self.assertEqual(len(calls), 3)
+        # K6 r1 M1: `block` is the conservative answer — safe for any run, never re-judged (the run that applies it
+        # sees another diff than the run that asked, and still no judge call)
+        self.assertEqual(len(calls), 2)
         self.assertEqual(_qa(h, ["lib/b.dart"]).kind, StageResult.DONE)   # the next answer is the way out
         qa = [b for b in _blocks(h) if b.get("point") == "QA"]
         self.assertEqual([(b.get("choice"), b.get("by")) for b in qa], [("block", "human"), ("pass", "human")])
@@ -261,7 +261,9 @@ class M2Labels(unittest.TestCase):
                           ("ログイン画面のみ（根拠が薄い）", "ログイン画面のみ"),
                           ("アプリ全体（タイトル通り）", "アプリ全体"),
                           ("Login screen only (a stretch)", "Login screen only"),
-                          ("다크 모드 (앱 전체, 가능성 높음)", "다크 모드 (앱 전체)")):
+                          # K6 r1 M4: an aside is never shown blind, whatever it says (r7 m2(b) kept its
+                          # non-rating comma clauses — the r7/r10/K6-r1 paraphrases leaked through exactly there)
+                          ("다크 모드 (앱 전체, 가능성 높음)", "다크 모드")):
             self.assertEqual(PF.neutral_label(raw), want, raw)
 
     def test_descriptive_labels_are_kept(self):
@@ -284,9 +286,10 @@ class M2Labels(unittest.TestCase):
                   summaries=("다크 모드 (로그인만, 가능성 낮음)", "다크 모드 (앱 전체, 가능성 높음)"))
         e, p = _env(self)
         ev, blk = _ask_readiness(e, p, k)
-        self.assertTrue(ev["predict_first"])
-        self.assertEqual(sorted(o["label"] for o in ev["options"] if o["token"] != "stop"),
-                         ["다크 모드 (로그인만)", "다크 모드 (앱 전체)"])
+        # K6 r1 M4: the options differ only in their asides → after the cut they are the same → the blind answer is
+        # refused (the recommendation shown openly, never a counted judgment) — an aside is never shown blind
+        self.assertFalse(ev["predict_first"])
+        self.assertTrue(str(blk.get("predict_first_refused")).startswith("label-indistinct"), blk.fields)
 
 
 def _w(did, at):

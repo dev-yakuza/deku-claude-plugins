@@ -39,6 +39,9 @@ ENGINE_DEFAULTS = {
     "roles": {},
     "judges": {},
     "grading": {},                                # §9.5 grader: {"grader_model": "opus"} (K5r4)
+    # §9.4-7 dual judgment (K6 item 11; user decision 4, 2026-11-19: ON from the first sprint — first-sprint mode
+    # never turns it off): the deterministic share of §9.5 decisions judged again by another tier (monitoring)
+    "dual_judge_rate": 0.10,
     # K2 r3 (user decision): git-ignored paths an OFFLINE TEST `effective` re-run may copy into its
     # temp tree — explicit relative paths (no globs), realpath-contained, never present during a
     # networked step; default empty = `unverified(secret-required)` when a test needs them.

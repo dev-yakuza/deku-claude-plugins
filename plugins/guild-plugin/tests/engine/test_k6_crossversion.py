@@ -126,12 +126,18 @@ class OldConsumers(unittest.TestCase):
         for k, v in self.BLOCK.items():
             self.assertEqual(b.get(k), v, k)
 
-    def test_health_and_sheet_read_the_executed_choice(self):
+    def test_current_readers_tolerate_the_new_keys(self):
+        """K6 r1 m9: the CURRENT parser / `dev health` / the sheet on a block with the K6 keys — not an old (0.101.3)
+        parser: 0.101.3 never reads engine decision blocks (its H§M skips every `<!-- guild:` marker)."""
         h = _h(self)
         h.decisions.record(dict(self.BLOCK))
+        h.decisions.record(dict(self.BLOCK, by="judge:sonnet", coerced_by="rule"))   # a judged, rule-coerced twin
         blocks = _blocks(h)
         m = HE.metrics({7: blocks})
         self.assertEqual(m["issues"], 1)
+        # the person's block is no judged decision; the judged twin's executed choice `pause` is no dismiss / unsure,
+        # and its rule coercion counts (the K6 keys human_choice / coerced_to / grounds change nothing)
+        self.assertEqual((m["coercion"], m["unsure"]), (1.0, 0.0))
         ok, cands = G.predict_first_judgments(blocks, 7)
         self.assertEqual((ok, cands), ([], []))
 

@@ -455,6 +455,10 @@ board_breaker() {   # board_breaker <0|1: did this board_col succeed entirely>
 board_col() {            # board_col <issue> <column-token> [reason-token]
   [ -n "$BOARD_NUMBER" ] || return 0
   local name=""
+  if [ -n "${3:-}" ] && command -v compat_fold >/dev/null 2>&1; then   # K6 decision 2: 0.102-only reason → its 0.101.3 fold
+    local _f; _f="$(compat_fold "board:$3")"
+    set -- "$1" "$2" "${_f#board:}"
+  fi
   case "$2" in
     ready)       name="$BOARD_COL_READY" ;;
     in_progress) name="$BOARD_COL_IN_PROGRESS" ;;
@@ -823,7 +827,8 @@ except Exception:
 for k in ("board_fails", "board_bugs", "board_account_mismatch",
           "board_disabled_after", "board_last_write", "board_reason_disabled",
           "board_unknown_col", "board_off_reason",
-          "completion", "window"):
+          "completion", "window",
+          "halt_reason", "halt_note", "wait_reason"):      # K6 decision 2: compat_fold's precise fields
     led.pop(k, None)
 tmp = path + ".tmp"
 with open(tmp, "w") as fh:
@@ -831,13 +836,68 @@ with open(tmp, "w") as fh:
 os.replace(tmp, path)
 PY
 
+# ── 0.101.3 compatibility: FOLDED tokens (K6 user decision 2, 2026-11-19 — "0.102 에서 접어 쓰기") ──────────
+# 0.101.3 — the rollback target (§10.5) — documents only part of what this supervisor writes. Every 0.102-only token
+# is written as the 0.101.3 token of the nearest meaning in the field 0.101.3 reads, and the precise token rides
+# beside it, where 0.102's own readers look first (run.md · daily.md · board.md):
+#   marker/ledger `state: halted:<r>`   → folded state + `halt_reason: <r>` + `halt_note: <what to do>`
+#   ledger `state: <w>-until-/-remaining-` (create-settle · gh-service waits) → `rate-limited-…` + `wait_reason: <w>`
+#   failures.jsonl `class`              → folded class + `class_exact: <class>`
+#   board reason token (blocked)        → folded token (the precise class stays in failures.jsonl)
+# ⚠ ONE table. `replay/k6_downgrade_drill.py` runs `compat_fold` on every token this file can write and checks the
+# result against the 0.101.3 tree — a new 0.102-only token without a fold here fails the drill.
+compat_fold() {     # compat_fold <token> → the token 0.101.3 documents (the token itself when it already does)
+  case "$1" in
+    halted:engine-gh-auth)                    echo "halted:marker-unwritable" ;;
+    halted:engine-env-missing)                echo "halted:engine-env-python" ;;
+    halted:engine-env-ignored-missing|halted:engine-env-build-inputs-changed)
+                                              echo "halted:engine-env-uninitialized" ;;
+    halted:engine-env-unknown)                echo "halted:interrupted" ;;
+    create-settle-wait|gh-service-wait)       echo "busy" ;;
+    create-unsettled|gh-unavailable)          echo "busy-skipped" ;;
+    create-settle-until-*|gh-service-until-*) echo "rate-limited-until-${1##*-until-}" ;;
+    create-settle-remaining-*|gh-service-remaining-*)
+                                              echo "rate-limited-remaining-${1##*-remaining-}" ;;
+    board:create-unsettled|board:gh-unavailable) echo "board:account-rate-limited" ;;
+    *)                                        echo "$1" ;;
+  esac
+}
+compat_note() {     # compat_note <halted:reason> → the line a person acts on (0.101.3 has no row for it)
+  case "$1" in
+    halted:engine-gh-auth)
+      echo "engine-gh-auth: the engine's gh auth failed (exit 3) — every member would fail the same way. Re-authenticate (\`gh auth login\`, or refresh GH_TOKEN for the sprint's account), then call \`/gld sprint run\` again" ;;
+    halted:engine-env-missing)
+      echo "engine-env-missing: the engine file is gone from the plugin cache — reinstall / re-enable the Guild plugin, then \`/gld sprint run\`" ;;
+    halted:engine-env-ignored-missing)
+      echo "engine-env-ignored-missing: tracked tests need git-ignored files the engine cannot copy — list them in config.engine.effective.copy_ignored, then \`/gld sprint run\`" ;;
+    halted:engine-env-build-inputs-changed)
+      echo "engine-env-build-inputs-changed: the change touched build inputs the engine cannot prepare offline — prepare them (dependency install), then \`/gld sprint run\`" ;;
+    halted:engine-env-unknown)
+      echo "engine-env-unknown: the engine stopped the sprint without a known reason — read the member's issue-<N>-*.log, then \`/gld sprint run\`" ;;
+    *) echo "" ;;
+  esac
+}
+
 # marker_write <state>  — in-place replace of the run marker on the tracking Issue.
 # ONE --paginate query returns id AND body together. `_bash_rules.md:206`: needing both and
 # paginating only one lookup "is worse than paginating neither" — the body read finds the
 # record while the id read comes back empty and the "empty -> create" branch posts a
 # duplicate. Fetching both in one call removes the failure mode rather than managing it.
 marker_write() {
-  local state="$1"
+  # K6 decision 2: `$1` is the precise 0.102 state; the marker and the ledger carry its 0.101.3 fold (`compat_fold`)
+  # with the precise one beside it. A halted fold goes to the LOCAL ledger first — the gh read below is what fails
+  # when the reason is gh auth, and 0.101.3's `halted:marker-unwritable` row sends the reader to ledger.json.
+  local exact="$1" state note
+  state="$(compat_fold "$1")"
+  note="$(compat_note "$1")"
+  if [ "$state" != "$exact" ] && [ "${exact#halted:}" != "$exact" ]; then
+    ledger_set state "\"$state\"" 2>/dev/null || true
+    ledger_set halt_reason "${exact#halted:}" 2>/dev/null || true
+    [ -n "$note" ] && ledger_set halt_note "$note" 2>/dev/null || true
+  elif [ "$state" != "$exact" ]; then
+    local w="${exact%%-until-*}"; w="${w%%-remaining-*}"
+    ledger_set wait_reason "$w" 2>/dev/null || true
+  fi
   gh api "repos/$OWNER_REPO/issues/$TRACKER/comments" --paginate \
     --jq '[.[] | select((.body // "") | contains("<!-- guild:sprint:run -->")) | {id, body}]' \
     > "$D/marker.json" 2>"$D/marker.err" || { echo "[sprint] WARN: marker fetch failed"; return 1; }
@@ -846,12 +906,22 @@ marker_write() {
   # leaving the group open forever — `bash -n` then reports "unexpected end of file" at the
   # end of the file, hundreds of lines away. `|| MRC=$?` completes on this line, so it is safe.
   MRC=0
-  "$PY" - "$D" "$LEDGER" "$state" "$HOSTNAME_S" "$$" "$RUN_START" <<'PY' > "$D/marker.out" 2>"$D/marker.err2" || MRC=$?
+  "$PY" - "$D" "$LEDGER" "$state" "$HOSTNAME_S" "$$" "$RUN_START" "$exact" "$note" <<'PY' > "$D/marker.out" 2>"$D/marker.err2" || MRC=$?
 import datetime, json, os, sys
-d, ledger_path, state, host, pid, started = sys.argv[1:7]
+d, ledger_path, state, host, pid, started, exact, note = (sys.argv[1:9] + ["", ""])[:8]
 OPEN, CLOSE = "<!-- guild:sprint:run -->", "<!-- /guild:sprint:run -->"
 with open(ledger_path) as fh:
     led = json.load(fh)
+# K6 decision 2 — the 0.101.3 fold in `state`, the precise 0.102 token beside it (and gone once it no longer holds)
+for k in ("halt_reason", "halt_note", "wait_reason"):
+    led.pop(k, None)
+if exact and exact != state:
+    if exact.startswith("halted:"):
+        led["halt_reason"] = exact[len("halted:"):]
+        if note:
+            led["halt_note"] = note
+    else:
+        led["wait_reason"] = exact.split("-until-")[0].split("-remaining-")[0]
 led.update({
     "host": host, "pid": int(pid), "state": state,
     # Not utcfromtimestamp/utcnow — both are deprecated in 3.12+ and emit a DeprecationWarning
@@ -1065,12 +1135,15 @@ EVENTS="$RUNDIR/failures.jsonl"
 # the failure silently. `marker_write` uses the same API and would abort the run at 3 strikes.
 _record() {   # _record <issue> <class> <detail> <failed-path-or-empty>
   RRC=0
-  "$PY" - "$EVENTS" "$TRACKER" "$TIMESTAMP" "$1" "$2" "$3" "${4:-}" <<'PY' || RRC=$?
+  # K6 decision 2: `class` is what 0.101.3's daily.md knows (`compat_fold`), `class_exact` the 0.102 class
+  "$PY" - "$EVENTS" "$TRACKER" "$TIMESTAMP" "$1" "$(compat_fold "$2")" "$3" "${4:-}" "$2" <<'PY' || RRC=$?
 import datetime, json, sys
-out, tracker, run, issue, cls, detail, failed = (sys.argv[1:8] + [""])[:7]
+out, tracker, run, issue, cls, detail, failed, exact = (sys.argv[1:9] + ["", ""])[:8]
 stamp = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-row = json.dumps({"at": stamp, "tracker": int(tracker), "run": run, "issue": int(issue),
-                  "class": cls, "detail": detail[:200]}, sort_keys=True)
+rec = {"at": stamp, "tracker": int(tracker), "run": run, "issue": int(issue), "class": cls, "detail": detail[:200]}
+if exact and exact != cls:
+    rec["class_exact"] = exact
+row = json.dumps(rec, sort_keys=True)
 with open(out, "a") as fh:
     fh.write(row + "\n")
 if failed:

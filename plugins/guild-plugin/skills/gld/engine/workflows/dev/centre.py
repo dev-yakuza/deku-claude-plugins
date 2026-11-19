@@ -9,9 +9,11 @@ output on held-out Issues — a paid run), and optionally the LEGACY rates of th
 * `first_sprint` centre (R4J-M4) = the SAME recorded decisions passed through the first-sprint forcing in code — no
   new call: an unattended EX-ARB BLOCKER/MAJOR dismiss → accept (`coerced_by: first-sprint`, excluded from the
   coercion rate); an analyze/design HANDOFF `ok_with_assumption` → an `ambiguity:` pause (the Issue counts as
-  paused); every decision of an unverified group (`unverified.pending` at the replay's time) → the conservative
+  paused); a decision of an unverified group (`unverified.pending` at the replay's time) → the conservative
   question (a pause on an unattended Issue) — the "first-sprint path" G4 explains away, recorded separately as
-  `explained_pause_issues`;
+  `explained_pause_issues`. K6 r1 m5: as the gate does — only a NON-conservative choice is asked (QA `block`, TEST
+  `gap`, STAKES `high` … go on without a question), and only a group's first `release_after` questions (in Issue
+  order — the release after that ends its conservative path);
 * written to `<engine>/health-center.json` as {"normal": …, "first_sprint": …, "source": …, "n": …}; `dev health`
   compares against `first_sprint` with `--first-sprint`, else `normal` (a flat legacy file = `normal`).
 """
@@ -31,9 +33,14 @@ def _set(b, **kv):
 
 def first_sprint_view(blocks_by_issue, unattended=True, unverified=()):
     """(blocks_by_issue as first-sprint mode would have recorded them, {issue: True} explained by that path)."""
+    from workflows.dev import judging as JG
+    from workflows.dev import unverified as UV
     uv = set(str(g).replace(":", "-") for g in unverified)
+    limit = int(UV.shipped().get("release_after") or 5)
+    asked = {}
     out, explained = {}, {}
-    for n, blocks in blocks_by_issue.items():
+    for n in sorted(blocks_by_issue, key=lambda x: int(x) if str(x).isdigit() else str(x)):
+        blocks = blocks_by_issue[n]
         nb = []
         for b in blocks:
             b = dict(b)
@@ -52,7 +59,9 @@ def first_sprint_view(blocks_by_issue, unattended=True, unverified=()):
                 explained[n] = True
                 continue
             g = pt.split(":")[0]
-            if judged and unattended and (g in uv or g.replace(":", "-") in uv):
+            if judged and unattended and (g in uv or g.replace(":", "-") in uv) and ch != JG.UNSURE.get(g) and \
+                    asked.get(g, 0) < limit:
+                asked[g] = asked.get(g, 0) + 1
                 nb.append(b)
                 nb.append({"point": "conservative:%s" % g, "status": "pending-human", "by": "code"})
                 explained[n] = True
