@@ -155,7 +155,10 @@ class M2UsedStopsWithTheReplay(unittest.TestCase):
         # the Issue changed while the second question was open: the qa role goes live and reports a crash
         a, t = stage_run("login — reproduces a crash on login")
         self.assertEqual((a.choice, a.by), ("block", "judge:sonnet"))    # judged again, never the old `pass`
-        self.assertEqual(judged, ["QA", "TEST", "QA"])
+        # K6 (item 40): the TEST answer was given to a run this one no longer is — the point is judged again and the
+        # answer applies only because the judge chooses what the person was asked about (all_effective)
+        self.assertEqual(judged, ["QA", "TEST", "QA", "TEST"])
+        self.assertEqual((t.choice, t.by), ("all_effective", "human"))
 
     def test_repro_used_leak_through_the_stage(self):
         # review-k5-r8 used_leak.py, with the second conservative point a TEST judgment (relint is no point any more)

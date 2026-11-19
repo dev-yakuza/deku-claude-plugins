@@ -132,7 +132,9 @@ class M1AnswerConsumedOnce(unittest.TestCase):
         CONS.begin(h.p)
         pend = _ask_and_answer(self, h, "pass")                            # §2.5 rule 3: judged again → asked anew
         self.assertEqual(pend.get("refs"), "conservative:QA:#7:qa:Q2.5:L0:a1")
-        self.assertEqual(len(calls), 2)
+        # K6 (item 40): the run that applies `block` sees another diff (lib/a.dart) than the run that asked — the judge
+        # is called again first (it still says `pass`, the question the person answered → the answer applies)
+        self.assertEqual(len(calls), 3)
         self.assertEqual(_qa(h, ["lib/b.dart"]).kind, StageResult.DONE)   # the next answer is the way out
         qa = [b for b in _blocks(h) if b.get("point") == "QA"]
         self.assertEqual([(b.get("choice"), b.get("by")) for b in qa], [("block", "human"), ("pass", "human")])

@@ -64,6 +64,9 @@ class Question(object):
         # undecidable), `judge-surface` (the judge asked a person), `confirm` (the engine asks although the judge was
         # sure: first-sprint confirmation, a conservative group). Only a `confirm` answer is a §9.5 candidate.
         self.raised_by = raised_by
+        # K6 (items 33/40): engine-only fields the pending block carries for the engine itself (the conservative
+        # gate's `cons_used` / `cons_run` — the stage run's identity on GitHub, read when the local tape is gone)
+        self.extra = {}
 
     def commitment(self):
         if self.recommended is None:
@@ -86,6 +89,9 @@ class Question(object):
             f["irreversible"] = "true"                      # §9.5 rule 2: the irreversible class (STAKES)
         if self.raised_by:
             f["raised_by"] = self.raised_by                 # K5r5-M2: who raised it — §9.5 counts only `confirm`
+        for k, v in sorted((getattr(self, "extra", None) or {}).items()):
+            if k not in f and v not in (None, ""):
+                f[k] = v
         if self.predict_first:
             f["recommended_sha"] = self.commitment()
             f["predict_first"] = self.pf_why or "true"     # §9.5: only these answers count as a human judgment

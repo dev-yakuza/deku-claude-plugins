@@ -32,6 +32,7 @@ EX-ARB is not gated here: its conservative side is the first-sprint coercion (`f
 
 from guildcore import ask as ASK
 
+STALE = "stale"                 # K6 (item 40): the point of the block that retires an answer its run no longer matches
 GATED = ("STAKES", "SPLIT", "INTEGRATE", "TEST", "QA", "DE-ARB", "AN-PO", "VIS-ENV", "DIRECTIVE", "HANDOFF", "EX-DWC")
 KIND = "group-conservative"
 NOT_OPTIONS = ("unsure",)
@@ -141,7 +142,8 @@ def _answer(p, key):
     from guildcore.decisions import DecisionLog
     from workflows.dev.stages import base as B
     log = DecisionLog.load(B.records(p))
-    applied = set(b.get("refs") for b in log.blocks if b.get("point") == "applied")
+    # K6 (item 40): a `stale` answer (its stage run did not reach the gate the same way) is consumed like an applied one
+    applied = set(b.get("refs") for b in log.blocks if b.get("point") in ("applied", STALE))
     for blk in reversed(log.blocks):
         if blk.get("kind") != KIND or blk.get("refs") != key or blk.get("status") != "pending-human":
             continue
@@ -165,7 +167,8 @@ def answered_unapplied(p, group, stage, step, point=None):
 # -- the replay tape: a stage that asked is run again after the answer WITHOUT re-running its LLM roles -----------------
 def begin(p):
     """A stage run starts (the FSM): forget the per-run counters/tape of a previous run on the same ports."""
-    for k in ("_cons_seen", "_cons_live", "_cons_replay", "_cons_used", "_cons_used_replay", "_cons_defer"):
+    for k in ("_cons_seen", "_cons_live", "_cons_replay", "_cons_used", "_cons_used_replay", "_cons_defer",
+              "_cons_diverged"):
         p.__dict__.pop(k, None)
 
 
@@ -252,10 +255,10 @@ def _tapes(p):
     return _MEM.get((p.root, int(p.issue)), [])
 
 
-def _save_tape(p, key, stage, d):
+def _save_tape(p, key, stage, d, brief=None):
     live = p.__dict__.get("_cons_live")
     rec = {"what": "conservative-tape", "key": key, "stage": stage, "roles": live, "decision": d.as_dict(),
-           "used": dict(p.__dict__.get("_cons_used") or {})}
+           "used": dict(p.__dict__.get("_cons_used") or {}), "brief": brief}
     try:
         import json
         json.dumps(rec)
@@ -281,18 +284,139 @@ def _replay(p, stage):
         return p.__dict__["_cons_replay"]
     rp = None
     if any_active(p):
+        local = False
         for t in reversed(_tapes(p)):
             if t.get("stage") != stage or t.get("roles") is None:
                 continue
+            local = True
             ans, _res, applied = _answer(p, t.get("key"))
             if ans is not None and not applied:
-                rp = {"roles": list(t.get("roles") or []), "at": 0}
+                rp = {"roles": list(t.get("roles") or []), "at": 0, "key": t.get("key")}
                 # K5r7-M1: the answers this stage run had applied before that later question are the same run's —
                 # reused, not consumed again (else a stage with two conservative points re-asks the first)
                 p.__dict__["_cons_used_replay"] = dict(t.get("used") or {})
             break
+        if not local:
+            rp = _remote_replay(p, stage)
     p.__dict__["_cons_replay"] = rp
     return rp
+
+
+def _h(sig):
+    """K6 (item 33): one role call's identity on GitHub — a short hash of its `_sig` (role · task · step · attempt ·
+    input hash). Never the inputs themselves (the block is public)."""
+    import hashlib
+    import json
+    return hashlib.sha256(json.dumps(sig, sort_keys=True).encode("utf-8")).hexdigest()[:12]
+
+
+def _run_field(live):
+    """`cons_run`: the stage run up to its question, one `h[/h_after]` per role call (K6 item 33)."""
+    out = []
+    for e in live or []:
+        sig = e.get("sig")
+        if not sig:
+            continue
+        x = _h(sig)
+        if e.get("sig_after"):
+            x += "/" + _h(e["sig_after"])
+        out.append(x)
+    return ",".join(out)
+
+
+def _strip_epoch(key):
+    import re
+    return re.sub(r":a[0-9]+$", "", str(key or ""))
+
+
+def _remote_replay(p, stage):
+    """K6 (items 33/40): no local tape of `stage` (another clone, a lost journal) — the latest pending conservative
+    block of `stage` that a person answered and nothing applied yet carries the run's identity (`cons_run`) and the
+    answers that run had already applied (`cons_used`). The run then goes LIVE (no role result to replay) but is the
+    SAME run only while each role call's identity matches — that keeps the earlier answers (no 2ⁿ−1 re-asks) and
+    lets the answered point apply; any difference = a different run (`_cons_diverged`). A block without `cons_run`
+    (written before K6) → None: the pre-K6 behaviour (the answer applies to the judge's decision now)."""
+    from guildcore.decisions import DecisionLog
+    from workflows.dev.stages import base as B
+    try:
+        log = DecisionLog.load(B.records(p))
+    except Exception:                                    # noqa: BLE001 — unreadable: no remote tape
+        return None
+    for blk in reversed(log.blocks):
+        if blk.get("kind") != KIND or blk.get("status") != "pending-human" or blk.get("stage") != stage:
+            continue
+        ans, _res, applied = _answer(p, blk.get("refs"))
+        if ans is None or applied or blk.get("cons_run") is None:
+            return None
+        roles = []
+        for x in str(blk.get("cons_run") or "").split(","):
+            if x.strip() and x.strip() != "-":
+                h, _s, ha = x.strip().partition("/")
+                roles.append({"h": h, "ha": ha or None})
+        used = {}
+        for k in str(blk.get("cons_used") or "").split(","):
+            if k.strip():
+                used[_strip_epoch(k.strip())] = k.strip()
+        p.__dict__["_cons_used_replay"] = used
+        return {"roles": roles, "at": 0, "remote": True, "key": blk.get("refs")}
+    return None
+
+
+def _open_recommendation(p, key):
+    """The recommendation a pending block shows openly (`recommended` — not blind), or None (blind / not found)."""
+    from guildcore.decisions import DecisionLog
+    from workflows.dev.stages import base as B
+    try:
+        for blk in reversed(DecisionLog.load(B.records(p)).blocks):
+            if blk.get("kind") == KIND and blk.get("refs") == key and blk.get("status") == "pending-human":
+                return blk.get("recommended")
+    except Exception:                                    # noqa: BLE001
+        return None
+    return None
+
+
+def _brief_h(spec):
+    """K6 (item 40): the judge's brief at this gate, hashed (a person's answer line is no new input). A run that
+    reaches the gate with the same role calls but another brief (rework the roles never saw: the diff, a new CI
+    result, an edited comment) is not the run that asked."""
+    import hashlib
+    import json
+    try:
+        b = json.dumps(_strip_answers([list(x) for x in (getattr(spec, "brief_parts", None) or [])]),
+                       sort_keys=True, default=str, ensure_ascii=False)
+    except (TypeError, ValueError):
+        b = repr(getattr(spec, "brief_parts", None))
+    return hashlib.sha256(b.encode("utf-8", "replace")).hexdigest()[:12]
+
+
+def _asked_brief(p, key):
+    t = _tape_for(p, key)
+    if t and t.get("brief"):
+        return t["brief"]
+    from guildcore.decisions import DecisionLog
+    from workflows.dev.stages import base as B
+    try:
+        for blk in reversed(DecisionLog.load(B.records(p)).blocks):
+            if blk.get("kind") == KIND and blk.get("refs") == key and blk.get("status") == "pending-human":
+                return blk.get("cons_brief")
+    except Exception:                                    # noqa: BLE001
+        return None
+    return None
+
+
+def _matched(p, spec=None, key=None):
+    """K6 (item 40): did this stage run reach the gate the SAME way as the run that asked? — every taped role call
+    replayed (or, remote, matched) in order, none left over, and the judge's brief the same. None = nothing to
+    compare (a block and tape written before K6)."""
+    if p.__dict__.get("_cons_diverged"):
+        return False
+    was = _asked_brief(p, key) if key else None
+    if was and spec is not None and _brief_h(spec) != was:
+        return False
+    rp = p.__dict__.get("_cons_replay")
+    if rp is None:
+        return True if was else None
+    return rp["at"] == len(rp["roles"])
 
 
 def role(p, call, raw):
@@ -304,6 +428,22 @@ def role(p, call, raw):
     live = p.__dict__.setdefault("_cons_live", [])
     rp = _replay(p, stage)
     sig = _sig(call)
+    if rp is not None and rp.get("remote"):
+        # K6 (item 33): the run goes live, and stays "the same run" while each call's identity matches the block's
+        want = rp["roles"][rp["at"]] if rp["at"] < len(rp["roles"]) else None
+        if want is not None and _h(sig) in (want["h"], want.get("ha")):
+            rp["at"] += 1
+            r = raw(call)
+            ent = {"sig": sig, "result": _role_dict(r)}
+            after = _sig(call) if getattr(call, "replay_salt", None) is not None else sig
+            if after != sig:
+                ent["sig_after"] = after
+            live.append(ent)
+            return r
+        p.__dict__["_cons_replay"] = None
+        p.__dict__.pop("_cons_used_replay", None)
+        p.__dict__["_cons_diverged"] = True
+        rp = None
     if rp is not None and rp["at"] < len(rp["roles"]) and sig in (rp["roles"][rp["at"]].get("sig"),
                                                                   rp["roles"][rp["at"]].get("sig_after")) \
             and rp["roles"][rp["at"]].get("result") is not None:
@@ -318,6 +458,7 @@ def role(p, call, raw):
         # K5r8-M2: no longer the same stage run — the answers it had applied are not reused either (a point
         # reached after the divergence is judged again under `_epoch_key`, never given an old answer)
         p.__dict__.pop("_cons_used_replay", None)
+        p.__dict__["_cons_diverged"] = True             # K6 (item 40): its unapplied answer is stale, too
     r = raw(call)
     ent = {"sig": sig, "result": _role_dict(r)}
     if getattr(call, "replay_salt", None) is not None:
@@ -348,12 +489,32 @@ def gate(p, spec, raw):
     pt, key = _point(p, spec)
     ans, res, applied = _answer(p, key)
     opts = options_of(spec)
+    fresh = None
+    if ans is not None and not applied and spec.stage in REPLAY_STAGES and _matched(p, spec, key) is False:
+        # K6 (item 40, review-k5-r10 m3): the answer was given to a stage run this one no longer is (a crash after
+        # the gate, then a rollback / rework / an Issue edit changed a role's inputs before this gate). The point is
+        # judged again; the answer applies only when the judge chooses what the person was asked about (the taped
+        # choice — the same question); otherwise it is retired (`stale`) and the new judgment goes on (asked again
+        # when still gated). Unknown taped choice (another clone, a blind block) → retired (the conservative side).
+        fresh = raw(spec)
+        t = _tape_for(p, key)
+        was = (t.get("decision") or {}).get("choice") if t else _open_recommendation(p, key)
+        if fresh is None or was is None or fresh.choice != was:
+            from workflows.dev.stages import base as B
+            B.record_code(p, spec.stage or "-", STALE, ans, refs=res.id,
+                          reason="the stage run that asked is not the run that reached this gate again "
+                                 "and the judge now chooses differently")
+            if getattr(p, "journal", None) is not None:
+                p.journal.append("event", what="conservative-stale", key=key, resolution=res.id)
+            key = _epoch_key(p, pt)
+            ans, res, applied = _answer(p, key)
     if ans is not None and (ans == "stop" or (opts and ans in opts)):
         # K5r6-M1: the answer of this decision point applies BEFORE anything is judged again — the judge's decision
         # taped when the question was asked (no new judge call), else (no tape: another clone) the judge's now.
         # K5r7-M1: applied ONCE — the next entry of this point is a new point (`_epoch_key`), judged again
         t = _tape_for(p, key)
-        d = Decision.from_dict(t["decision"]) if t and t.get("decision") else raw(spec)
+        d = fresh if fresh is not None else (Decision.from_dict(t["decision"]) if t and t.get("decision")
+                                             else raw(spec))
         if not applied:
             # K5r7-m4 / K5r9-M2: `applied` is written only after the answer's effect is (the FSM's `flush`: the stage
             # ended without FAIL, held, or went on to its next question) — a crash in between leaves it unapplied
@@ -374,7 +535,7 @@ def gate(p, spec, raw):
         # the decision is the one already logged — `record_judgment` does not log it a second time
         out.replayed = bool(applied)
         return out
-    d = raw(spec)
+    d = fresh if fresh is not None else raw(spec)
     if d is None:
         return d
     safe = JG.UNSURE.get(g)
@@ -382,7 +543,10 @@ def gate(p, spec, raw):
         return d
     if not opts or d.choice not in opts:
         return d
-    _save_tape(p, key, spec.stage, d)
+    brief = _brief_h(spec)
+    _save_tape(p, key, spec.stage, d, brief)
+    run_id = _run_field(p.__dict__.get("_cons_live")) if spec.stage in REPLAY_STAGES else None
+    used_keys = ",".join(sorted(set((p.__dict__.get("_cons_used") or {}).values())))
     p.__dict__.pop("_cons_live", None)
     p.__dict__.pop("_cons_replay", None)
     p.__dict__.pop("_cons_seen", None)
@@ -398,6 +562,10 @@ def gate(p, spec, raw):
                      neutral=_neutral(p, spec), raised_by="confirm")
     q.point = "conservative:%s" % g
     q.irreversible = irr
+    if run_id is not None:
+        # K6 (item 33): the stage run's identity and the answers it already applied ride on the GitHub block — a clone
+        # without the local tape reuses those answers while the run's role calls match (no 2ⁿ−1 re-asks)
+        q.extra = {"cons_run": run_id or "-", "cons_used": used_keys, "cons_brief": brief}
     raise Ask(q, line)
 
 
