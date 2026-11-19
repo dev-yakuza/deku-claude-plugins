@@ -225,15 +225,29 @@ NEG_RATING = re.compile(r"약하|약함|부족|틀리|틀림|어긋|맞지|무�
                         r"\bunlikely\b|\bweak|\bwrong\b|\bpoor|\btoo\b|\bworse\b|\bbad\b", re.I)
 
 
+# K5r7-m2: fit / match language — a label that says how well its option agrees with the Issue ("matches the title",
+# "제목과 어울리지 않음", "タイトル通り", "a stretch", "근거 없음") rates it as surely as a likelihood word does
+_SRC_KO = r"(?:제목|본문|요청|이슈|설명|보고)"
+_SRC_JA = r"(?:タイトル|本文|要望|依頼|説明|イシュー|報告)"
+_SRC_EN = r"(?:the\s+)?(?:title|issue|request|body|description|report|ask|reporter)"
+FIT = re.compile(_SRC_KO + r"\s*(?:과|와|에|이|의|에서)?\s*(?:일치|불일치|어울리|부합|들어맞|맞|그대로)|근거|억지|무난|합리|"
+                 r"말\s*그대로|" +
+                 _SRC_JA + r"\s*(?:と|に|の)?\s*(?:通り|どおり|合う|合わ|沿う|沿った|沿わ|一致)|根拠|素直|無理|"
+                 r"(?:\bmatch(?:es|ing)?|\bfits?|\bconsistent with|\binconsistent with|\bin line with|\bsupported by|"
+                 r"\bfollows)\s+" + _SRC_EN + r"\b|\bmismatch|\bstretch\b|\bas asked\b|\basked for\b|"
+                 r"\btypical(?:ly)?\b|\bliteral(?:ly)?\b|"
+                 r"\b(?:does|do|did)\s*(?:not|n't)\s+(?:mention|say|support|ask)", re.I)
+
+
 def evaluative(text):
-    return bool(PREFERENCE.search(text) or NEGATIVE.search(text) or LIKELIHOOD.search(text))
+    return bool(PREFERENCE.search(text) or NEGATIVE.search(text) or LIKELIHOOD.search(text) or FIT.search(text))
 
 
 def rates(label):
     """K5r6-M2: does an option label rate its option (how likely / good / fitting)? — preference, likelihood and
     rating words; a plain negation that describes the option ("설정 화면은 바꾸지 않는다") is not a rating."""
     t = str(label or "")
-    return bool(PREFERENCE.search(t) or LIKELIHOOD.search(t) or NEG_RATING.search(t))
+    return bool(PREFERENCE.search(t) or LIKELIHOOD.search(t) or NEG_RATING.search(t) or FIT.search(t))
 
 
 _CLAUSE = re.compile(r"\s*[(（\[][^)）\]]*[)）\]]|\s*(?:—|–|--| - |;|；|:|：|,|、|，)[^—–;；:：,、，(（]*")
@@ -246,10 +260,27 @@ def neutral_label(label):
     lb = str(label or "")
     if not rates(lb):
         return lb
-    out = _CLAUSE.sub(lambda m: "" if rates(m.group(0)) else m.group(0), lb).strip(" —–-;:,、")
+    out = _CLAUSE.sub(_cut, lb).strip(" —–-;:,、")
     if not out or rates(out):
         return None
     return out
+
+
+_PAREN = re.compile(r"^(\s*)([(（\[])([^)）\]]*)([)）\]])$")
+_COMMA = re.compile(r"\s*[,、，;；]\s*")
+
+
+def _cut(m):
+    """One clause of a label: kept when it does not rate. K5r7-m2(b): a parenthesis is cut by its comma clauses —
+    `(앱 전체, 가능성 높음)` keeps `(앱 전체)` (cutting it whole made two labels the same)."""
+    c = m.group(0)
+    if not rates(c):
+        return c
+    pm = _PAREN.match(c)
+    if not pm:
+        return ""
+    keep = [x for x in _COMMA.split(pm.group(3)) if x.strip() and not rates(x)]
+    return "%s%s%s%s" % (pm.group(1), pm.group(2), ", ".join(keep), pm.group(4)) if keep else ""
 
 
 class _Names(object):
@@ -398,6 +429,17 @@ def apply(p, q, stage=None, texts=()):
             nl = o.get("label")
         opts.append(dict(o, label=nl))
     q.options = canonical(opts)
+    # K5r7-m2(b): blind labels must still tell the options apart — two the same (or empty) after the cut refuse
+    if where is None:
+        seen = set()
+        for o in q.options:
+            if o["token"] == "stop":
+                continue
+            k = re.sub(r"\s+", " ", str(o.get("label") or "")).strip().lower()
+            if not k or k in seen:
+                where = "label-indistinct %s" % o["token"]
+                break
+            seen.add(k)
     # K5r6-M2(a): with one real option (`i1 | stop`) the answer is no judgment between interpretations — it stays
     # blind but is never counted as one (§9.5 / §10.2-6 releases read only counted answers)
     if len([o for o in q.options if o["token"] != "stop"]) < 2:
