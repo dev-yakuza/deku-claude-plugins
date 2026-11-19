@@ -261,11 +261,15 @@ class Driver(object):
         from workflows.dev import conservative as CONS
         CONS.begin(p)
         try:
-            return thunk()
+            r = thunk()
         except CONS.Ask as a:
             return CONS.surface(p, stage, a)
         except CONS.Hold as h:
+            CONS.flush(p)
             return CONS.hold(p, stage, h)
+        if r is None or r.kind != B.StageResult.FAIL:
+            CONS.flush(p)                       # K5r7-m4: an `applied` mark the gate deferred, now its effect is written
+        return r
 
     def _drive_child(self, c):
         """K5r1-M1/M2: a child runs under its own IssueLock; only an explicit DONE lets the parent go on

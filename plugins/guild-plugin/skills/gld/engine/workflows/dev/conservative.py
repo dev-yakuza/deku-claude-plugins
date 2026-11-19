@@ -11,7 +11,11 @@ person (ask / pause)". One gate does it for every L0/SJ judgment, whatever stage
   K5r6-M1: the point, never the judge's input digest) → that answer applies FIRST (the judge's taped decision, no new
   judge call): a Decision carrying the person's choice (`by: human`, `coerced_by: conservative`, `raw_choice` = the
   judge's) — the stage goes on with it, and a `point: applied` block records the application; `stop` → the run holds
-  there (`Hold`);
+  there (`Hold`). K5r7-M1: an answer is CONSUMED by that application — the point re-entered later (a rerun, a
+  `/gld rollback`, the resume after the pause the answer led to = §2.5 rule 3) is a new point `<key>:a<k>`, judged and
+  asked again; the loop generation `L` only grows (numbered blocks + resets). Only the same stage run, replayed after a
+  later question, reuses an applied answer (the tape's `used`). The X→T hand-over marks `applied` after its effect
+  (`flush`, K5r7-m4);
 * otherwise `Ask` is raised: the FSM turns it into an attended ask / unattended pause at that stage (`surface`) —
   predict-first (the judge's choice is the sealed recommendation; `raised_by: confirm`, so a different blind answer
   is a §9.5 wrong CANDIDATE — user decision 2026-11-19). The role results the stage got before asking are taped
@@ -54,9 +58,9 @@ def active(p, group):
 
 
 def any_active(p):
-    v = getattr(p, "valves", None) or {}
-    return any(k.startswith("group.") and k.endswith(".conservative") and v.get(k) not in (None, False, "false", "off")
-               for k in v)
+    """K5r7-m6: the same predicate as `active` over every gated group — a source the K6 `conservative.active` list
+    adds to `predict.conservative` reaches the role tape and the hand-over check too (not the valves only)."""
+    return any(active(p, g) for g in GATED)
 
 
 def options_of(spec):
@@ -71,17 +75,35 @@ _MEM = {}                                               # tapes when a port has 
 
 
 def _loop_index(p):
-    """The loop-back generation of the Issue (numbered blocks of the loop-back record): a decision point re-reached
-    after a loop-back is a NEW decision point (a new question); the same point re-reached in the same generation —
-    a stage run again after the answer — is the SAME one (K5r6-M1)."""
+    """The loop-back generation of the Issue: a decision point re-reached after a loop-back is a NEW decision point
+    (a new question; K5r6-M1). K5r7-M1: MONOTONIC — every numbered heading plus every `### loopback-reset` (a reset
+    never brings back an earlier generation's key; the active-block count would)."""
     from guildcore.records import loopback as LB
     from guildcore.records import markers
     from workflows.dev.stages import base as B
     try:
         c = markers.find(B.records(p), LB.NAME)
-        return len(LB.LoopbackRecord.parse(markers.body_of(c)).numbered()) if c is not None else 0
+        if c is None:
+            return 0
+        rec = LB.LoopbackRecord.parse(markers.body_of(c))
+        resets = [b for b in rec.blocks if markers.clean(b.heading) == "### loopback-reset"]
+        return len(rec.numbered()) + len(resets)
     except Exception:                                    # noqa: BLE001 — an unreadable record is generation 0
         return 0
+
+
+def _epoch_key(p, key):
+    """K5r7-M1: an answer is CONSUMED once — the decision point re-entered after its answer was applied (a rerun, a
+    `/gld rollback`, a resume after the pause the answer led to: §2.5 rule 3 = judge again) is a new point
+    `<key>:a<k>` (k = the answers of this point already applied). A crash right after `applied` asks again (the
+    conservative side); the same stage run re-entered after a LATER question reuses it through the tape (`used`)."""
+    k, cur = 0, key
+    while True:
+        ans, _res, applied = _answer(p, cur)
+        if ans is None or not applied:
+            return cur
+        k += 1
+        cur = "%s:a%d" % (key, k)
 
 
 def point_key(p, spec, bump=True):
@@ -98,6 +120,13 @@ def point_key(p, spec, bump=True):
     if bump:
         seen[base] = k
     return base if k <= 1 else "%s#%d" % (base, k)
+
+
+def _point(p, spec, bump=True):
+    """(point, key): the decision point (per stage run) and the key its question goes by now (`_epoch_key`)."""
+    pt = point_key(p, spec, bump)
+    used = p.__dict__.get("_cons_used_replay") or {}
+    return pt, (used.get(pt) or _epoch_key(p, pt))
 
 
 def key_of(group, d):                                   # pre-r6 keys (input digest) — read by nothing new
@@ -127,15 +156,24 @@ def answered_unapplied(p, group, stage, step, point=None):
         pass
     s = _S()
     s.group, s.stage, s.step, s.point = group, stage, step, point or group
-    ans, res, applied = _answer(p, point_key(p, s, bump=False))
+    ans, res, applied = _answer(p, _epoch_key(p, point_key(p, s, bump=False)))
     return ans is not None and not applied
 
 
 # -- the replay tape: a stage that asked is run again after the answer WITHOUT re-running its LLM roles -----------------
 def begin(p):
     """A stage run starts (the FSM): forget the per-run counters/tape of a previous run on the same ports."""
-    for k in ("_cons_seen", "_cons_live", "_cons_replay"):
+    for k in ("_cons_seen", "_cons_live", "_cons_replay", "_cons_used", "_cons_used_replay", "_cons_defer"):
         p.__dict__.pop(k, None)
+
+
+def flush(p):
+    """K5r7-m4: the `applied` marks a gate deferred (the execute→test hand-over: its effect — a loop-back, a pause —
+    is written by the FSM AFTER the gate) are written once that effect is (the caller: the result is not FAIL). A
+    crash or a failed write in between leaves the answer unapplied: the test-entry check applies it again."""
+    from workflows.dev.stages import base as B
+    for stage, res in p.__dict__.pop("_cons_defer", None) or []:
+        B.mark_applied(p, stage, res)
 
 
 def _role_dict(r):
@@ -157,8 +195,38 @@ def _role_from(d):
                       d.get("notes") or ())
 
 
+_ANSWER_COMMENT = None
+
+
+def _strip_answers(v):
+    """The person's answer line is not a new input (it is what the replay waits for): a comment that is only
+    `guild-answer:` lines is dropped from the role inputs before they are hashed; any other text in it is kept."""
+    import re
+    global _ANSWER_COMMENT
+    if _ANSWER_COMMENT is None:
+        _ANSWER_COMMENT = (re.compile(r"(?m)^comment \S+ by [^\n]*:\n(?:[ \t]*guild-answer:[^\n]*(?:\n|$))+\n*"),
+                           re.compile(r"(?m)^[ \t]*guild-answer:[^\n]*$"))
+    if isinstance(v, str):
+        return _ANSWER_COMMENT[1].sub("", _ANSWER_COMMENT[0].sub("", v)).strip()
+    if isinstance(v, dict):
+        return dict((k, _strip_answers(x)) for k, x in v.items())
+    if isinstance(v, (list, tuple)):
+        return [_strip_answers(x) for x in v]
+    return v
+
+
 def _sig(call):
-    return [call.role, call.task, call.step, int(getattr(call, "attempt", 1) or 1)]
+    """K5r7-m3: the role call's INPUTS are part of it — an Issue edit / note / push between the question and the answer
+    changes them, and the run goes live from that call (never a replayed result for other inputs)."""
+    import hashlib
+    import json
+    try:
+        ins = json.dumps(_strip_answers([getattr(call, "inputs", None) or {}, getattr(call, "addendum", None)]),
+                         sort_keys=True, default=str, ensure_ascii=False)
+    except (TypeError, ValueError):
+        ins = repr((getattr(call, "inputs", None), getattr(call, "addendum", None)))
+    return [call.role, call.task, call.step, int(getattr(call, "attempt", 1) or 1),
+            hashlib.sha256(ins.encode("utf-8", "replace")).hexdigest()[:16]]
 
 
 def _tapes(p):
@@ -170,7 +238,8 @@ def _tapes(p):
 
 def _save_tape(p, key, stage, d):
     live = p.__dict__.get("_cons_live")
-    rec = {"what": "conservative-tape", "key": key, "stage": stage, "roles": live, "decision": d.as_dict()}
+    rec = {"what": "conservative-tape", "key": key, "stage": stage, "roles": live, "decision": d.as_dict(),
+           "used": dict(p.__dict__.get("_cons_used") or {})}
     try:
         import json
         json.dumps(rec)
@@ -202,6 +271,9 @@ def _replay(p, stage):
             ans, _res, applied = _answer(p, t.get("key"))
             if ans is not None and not applied:
                 rp = {"roles": list(t.get("roles") or []), "at": 0}
+                # K5r7-M1: the answers this stage run had applied before that later question are the same run's —
+                # reused, not consumed again (else a stage with two conservative points re-asks the first)
+                p.__dict__["_cons_used_replay"] = dict(t.get("used") or {})
             break
     p.__dict__["_cons_replay"] = rp
     return rp
@@ -239,18 +311,25 @@ def gate(p, spec, raw):
         return raw(spec)
     from guildcore.judges.runner import Decision
     from workflows.dev import judging as JG
-    key = point_key(p, spec)
+    if spec.stage in REPLAY_STAGES:
+        _replay(p, spec.stage)                           # the run's replay tape (and the answers it already used)
+    pt, key = _point(p, spec)
     ans, res, applied = _answer(p, key)
     opts = options_of(spec)
     if ans is not None and (ans == "stop" or (opts and ans in opts)):
         # K5r6-M1: the answer of this decision point applies BEFORE anything is judged again — the judge's decision
-        # taped when the question was asked (no new judge call), else (no tape: another clone) the judge's now
+        # taped when the question was asked (no new judge call), else (no tape: another clone) the judge's now.
+        # K5r7-M1: applied ONCE — the next entry of this point is a new point (`_epoch_key`), judged again
         t = _tape_for(p, key)
         d = Decision.from_dict(t["decision"]) if t and t.get("decision") else raw(spec)
         if not applied:
-            from workflows.dev.stages import base as B
-            B.mark_applied(p, spec.stage or "-", res)
+            if g == "HANDOFF" and spec.step == "X→T":   # K5r7-m4: marked after the FSM writes its effect
+                p.__dict__.setdefault("_cons_defer", []).append((spec.stage or "-", res))
+            else:
+                from workflows.dev.stages import base as B
+                B.mark_applied(p, spec.stage or "-", res)
             p.__dict__["_cons_replay"] = None
+        p.__dict__.setdefault("_cons_used", {})[pt] = key
         if ans == "stop":
             raise Hold("group.%s.conservative: a person answered stop (%s)" % (g, res.id))
         f = dict(d.fields or {})
@@ -269,6 +348,8 @@ def gate(p, spec, raw):
     p.__dict__.pop("_cons_live", None)
     p.__dict__.pop("_cons_replay", None)
     p.__dict__.pop("_cons_seen", None)
+    p.__dict__.pop("_cons_used", None)
+    p.__dict__.pop("_cons_used_replay", None)
     irr = any(n == "irreversible" and str(t).strip() not in ("", "none") for n, t in (spec.brief_parts or []))
     # stakes high always: a conservative group's answer is a gate answer (§2.5 — the answerer removes the label)
     line = "group.%s.conservative — %s %s 결정을 사람이 정함" % (g, g, spec.step or spec.point or "")
