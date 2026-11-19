@@ -51,7 +51,8 @@ class RoleCall(object):
         self.model = model                # a tier override (execute attempt 2: +1 rung, MT §A)
         self.pre_check = pre_check        # K3: runs before the scope check (refactor net cleanup)
         # K5r8-m2: state the role reads that is not in `inputs` (qa: a callable → the checkout's HEAD) — part of the
-        # conservative replay signature only (a push between a question and its answer runs the role live)
+        # conservative replay signature only (a worktree commit / reset between a question and its answer runs the role
+        # live; K5r9-m2: a remote push does not move it — the engine never fetches; its own push then fails non-ff)
         self.replay_salt = replay_salt
 
 

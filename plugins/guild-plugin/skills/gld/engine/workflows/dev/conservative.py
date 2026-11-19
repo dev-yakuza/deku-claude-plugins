@@ -322,7 +322,8 @@ def role(p, call, raw):
     ent = {"sig": sig, "result": _role_dict(r)}
     if getattr(call, "replay_salt", None) is not None:
         # K5r8-m2: the state the role itself left (qa's own test commits move HEAD) matches as well as the state
-        # it started from — only a change made by someone else (a push) runs the role live again
+        # it started from — only a change someone else made to the worktree (a local commit / reset) runs the role
+        # live again (K5r9-m2: a remote push never reaches the worktree — the engine's push after qa fails non-ff)
         after = _sig(call)
         if after != sig:
             ent["sig_after"] = after

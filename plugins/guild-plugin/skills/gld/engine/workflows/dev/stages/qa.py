@@ -117,8 +117,10 @@ def _diff_paths(p):
 
 
 def _head(p):
-    """K5r8-m2: the checkout's HEAD — the qa role reads the code, which `inputs` does not carry (a push between a
-    conservative question and its answer must not replay the old report). None when unknown."""
+    """K5r8-m2: the checkout's HEAD — the qa role reads the code, which `inputs` does not carry (a commit / reset in the
+    engine worktree between a conservative question and its answer must not replay the old report; K5r9-m2: the
+    engine never fetches, so a person's push to the remote leaves HEAD as it was — the replayed report reads the same
+    local code, and the engine's own push after qa then fails as non-fast-forward). None when unknown."""
     if not p.root:
         return None
     from guildcore.adapters import git as G
