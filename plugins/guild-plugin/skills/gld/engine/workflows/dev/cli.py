@@ -696,6 +696,9 @@ def _child_of_bare(common, n, bare):
     return n
 
 
+LOCK_POLL_S = 2.0
+
+
 def cmd_answer(d, a):
     """`dev answer --issue N --qid <qid>`. K5r3-M2: `qid` is issue-qualified as the ask event gave it (`#8/D2`) —
     a child's question asked on its parent's driver is answered on the CHILD (routed, `routed_to`); a bare `D<k>`
@@ -720,14 +723,25 @@ def cmd_answer(d, a):
     # and journal epoch — so it holds the target's IssueLock while it does; a live run holding it (an unattended
     # run, a parent driving it, a worker not yet ended) → busy, nothing written
     lk = W.IssueLock(d.common(), target)
-    try:
-        lk.acquire("attended")
-    except W.Busy as b:
+    polls = int(max(0.0, float(getattr(a, "wait_lock", 0.0) or 0.0)) // LOCK_POLL_S)
+    while True:
+        try:
+            lk.acquire("attended")
+            busy = None
+            break
+        except W.Busy as b:
+            busy = b
+            if polls <= 0:                   # K5r5-m1: poll the LOCK, never the event stream (no ask comes again)
+                break
+            polls -= 1
+            d.sleep(LOCK_POLL_S)
+    if busy is not None:
+        b = busy
         info = b.holder or {}
         why = ("#%d is driven by #%d's run" % (target, info["driven_by"]) if info.get("driven_by") is not None
                else "an %s run holds #%d" % (info.get("mode") or "engine", target))
         _sent(d, {"answered": False, "busy": True,
-                  "error": "%s — answer once it stops (`dev wait --issue %d`)" % (why, n)})
+                  "error": "%s — answer once it stops (`dev answer … --wait-lock 120`)" % why})
         return EXIT_BUSY
     try:
         p = _ports_for_issue(d, target)
@@ -918,6 +932,8 @@ def parser():
     an.add_argument("--qid", required=True)
     an.add_argument("--choice", required=True)
     an.add_argument("--text")
+    # K5r5-m1: a busy Issue (the worker still ending, a parent driving it) — poll its lock this long, then answer
+    an.add_argument("--wait-lock", type=float, default=0.0, dest="wait_lock")
     no = sub.add_parser("note")
     no.add_argument("--issue", required=True, type=int)
     no.add_argument("--text", required=True)

@@ -25,6 +25,8 @@ SJ_POINTS = ("TEST", "QA", "VIS-ENV", "DIRECTIVE", "HANDOFF", "EX-ARB", "EX-DWC"
 
 def _worthy(b):
     ch = b.get("choice") or ""
+    if str(b.get("shadow")).lower() == "true":      # K5r5-m2: a first-sprint shadow never changed the flow
+        return False
     if b.get("point") in ("dwc-recorded", "local-check", "net-unverified", "legacy-pending-unreadable"):        # K3r2-M1/M2: always to the human
         return True
     if b.get("assumption") or b.get("effective_check") == "bypassed":
