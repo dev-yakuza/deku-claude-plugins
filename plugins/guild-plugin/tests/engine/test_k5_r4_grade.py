@@ -34,8 +34,10 @@ def blk(n, **f):
     return DecisionBlock(n, list(f.items()))
 
 
-def pf_log(pf="high-risk", refused=None, reveal=None, rec="i2", choice="i1", kind="readiness"):
+def pf_log(pf="high-risk", refused=None, reveal=None, rec="i2", choice="i1", kind="readiness", raised_by="confirm"):
     q = dict(point="ask:%s" % kind, kind=kind, stage="analyze", by="code", status="pending-human")
+    if raised_by:
+        q["raised_by"] = raised_by
     if pf:
         q.update(predict_first=pf, recommended_sha="abc")
     if refused:
@@ -49,23 +51,34 @@ def pf_log(pf="high-risk", refused=None, reveal=None, rec="i2", choice="i1", kin
 
 
 class PredictFirstCount(unittest.TestCase):
+    """K5r5-M2 (user decision 2026-11-19): a different blind answer is a wrong CANDIDATE only."""
+
     def test_blind_answers_count_ok_and_wrong(self):
-        self.assertEqual([(r["group"], r["given_info"]) for r in G.predict_first_judgments(pf_log(), 7)],
-                         [("KICKOFF", "wrong")])
-        self.assertEqual(G.predict_first_judgments(pf_log(choice="i2"), 7)[0]["given_info"], "ok")
+        ok, cands = G.predict_first_judgments(pf_log(), 7)
+        self.assertEqual(ok, [])
+        self.assertEqual([(r["group"], r["given_info"]) for r in cands], [("KICKOFF", "")])   # a person confirms
+        ok, cands = G.predict_first_judgments(pf_log(choice="i2"), 7)
+        self.assertEqual((ok[0]["given_info"], cands), ("ok", []))
 
     def test_excluded_answers(self):
         for log in (pf_log(pf=None, refused="question (high-risk)"),        # refused: saw the recommendation
                     pf_log(reveal="unavailable"),                           # could not be revealed
                     pf_log(pf=None, rec="i2"),                              # not blind at all
-                    pf_log(choice="stop")):                                  # no judgment
-            self.assertEqual(G.predict_first_judgments(log, 7), [])
+                    pf_log(choice="stop"),                                   # no judgment
+                    pf_log(raised_by="judge-unclear"),                       # the judge said it could not decide
+                    pf_log(raised_by="judge-surface", choice="i2"),          # … or asked a person itself
+                    pf_log(raised_by=None)):                                 # unknown origin — out (conservative)
+            self.assertEqual(G.predict_first_judgments(log, 7), ([], []))
 
     def test_counted_once_and_drive_the_count_rules(self):
         common = os.path.join(tmpdir(self), "c")
-        rows = G.predict_first_judgments(pf_log(), 7)
-        self.assertEqual(G.apply_judgments(common, rows, "o/r", "predict-first")["watch"], ["KICKOFF"])
-        self.assertEqual(G.apply_judgments(common, rows, "o/r", "predict-first")["imported"], 0)
+        ok, cands = G.predict_first_judgments(pf_log(), 7)
+        res = G.apply_judgments(common, cands, "o/r", "predict-first")       # an unconfirmed candidate: nothing
+        self.assertEqual((res["imported"], res["watch"]), (0, []))
+        self.assertEqual(G.load_state(common)["watch"], {})
+        confirmed = [dict(cands[0], given_info="wrong")]                     # the person's confirmation
+        self.assertEqual(G.apply_judgments(common, confirmed, "o/r", "human")["watch"], ["KICKOFF"])
+        self.assertEqual(G.apply_judgments(common, confirmed, "o/r", "human")["imported"], 0)
 
 
 class Triggers(unittest.TestCase):
@@ -113,18 +126,25 @@ class Settle(unittest.TestCase):
         self.assertEqual((gi, why[:18]), ("unsure", "citation not found"))
         self.assertEqual(GD.settle(self.B, {"given_info": "ok", "cited_evidence": []}, base)[0], "unsure")
         gi, why, _c = GD.settle(self.B, {"given_info": "ok", "cited_evidence": ["CI green"]}, base)
-        self.assertEqual((gi, why), ("unsure", "ok without a citation of the decision's own object"))
-        self.assertEqual(GD.settle(self.B, {"given_info": "ok", "cited_evidence": ["F1 at lib/a.dart:3"]}, base)[0], "ok")
+        self.assertEqual((gi, why), ("unsure", "ok without an independent citation of the decision's own object"))
+        # K5r5-M4: the bare object id is not evidence in its own right
+        self.assertEqual(GD.settle(self.B, {"given_info": "ok", "cited_evidence": ["F1 at lib/a.dart:3"]}, base)[0],
+                         "unsure")
+        self.assertEqual(GD.settle(self.B, {"given_info": "ok", "cited_evidence": ["F1 at lib/a.dart:3 was a real bug"]},
+                                   base)[0], "ok")
 
     def test_test_effective_needs_the_code_check_and_two_citations(self):
         t = blk(6, point="TEST", stage="test", by="judge:sonnet", choice="effective:AC #1;uncovered:none",
-                checks="AC #1:pass")
+                checks="AC #1=pass")
         base = "AC #1: the count shows 3\nexpect(find.text('3'), findsOneWidget);"
         one = {"given_info": "ok", "cited_evidence": ["AC #1: the count shows 3"]}
         two = dict(one, cited_evidence=["AC #1: the count shows 3", "expect(find.text('3'), findsOneWidget);"])
         self.assertEqual(GD.settle(t, one, base)[0], "unsure")
         self.assertEqual(GD.settle(t, two, base)[0], "ok")
-        self.assertEqual(GD.settle(blk(6, **dict(t.fields, checks="AC #1:fail")), two, base)[0], "unsure")
+        self.assertEqual(GD.settle(blk(6, **dict(t.fields, checks="AC #1=fail")), two, base)[0], "unsure")
+        # K5r5-m3: `unverified` / `unsure` is not a passed code check (no "fail" in it, still not `=pass`)
+        for c in ("AC #1=unverified(no base)", "AC #1=unsure(cited test file not found)", ""):
+            self.assertEqual(GD.settle(blk(6, **dict(t.fields, checks=c)), two, base)[0], "unsure", c)
 
     def test_blind_call_never_sees_the_choice_and_reveal_does(self):
         def script(spec, call):
@@ -149,7 +169,7 @@ class Cli(unittest.TestCase):
         rec = e.h.decisions.record
         rec({"point": "STAKES", "by": "judge:opus", "stage": "analyze", "choice": "low", "reason": "local AC #1"})
         rec({"point": "TEST", "by": "judge:sonnet", "stage": "test", "choice": "effective:AC #1;uncovered:none",
-             "checks": "AC #1:pass"})
+             "checks": "AC #1=pass"})
         rec({"point": "QA", "by": "judge:sonnet", "stage": "qa", "choice": "pass"})
         rec({"point": "KICKOFF", "by": "judge:opus", "stage": "analyze", "choice": "goal=clear"})
         it = e.h.gh.fx["issues"]["7"]
@@ -157,7 +177,8 @@ class Cli(unittest.TestCase):
         it["comments"].append(comment("looks right to me — AC #1 shown", 777))
         e.h.gh.fx.setdefault("prs", []).append({"number": 31, "state": "MERGED", "mergedAt": "2026-11-17T00:00:00Z",
                                                  "headRefOid": "abc1234", "url": "u", "body": "Closes #7"})
-        e.h.gh.fx["reviews"] = {"31": [{"state": "APPROVED", "body": "AC #1 verified", "user": {"login": "rev"}}]}
+        e.h.gh.fx["reviews"] = {"31": [{"state": "APPROVED", "body": "AC #1 verified on device: the count shows 3",
+                                        "user": {"login": "rev"}, "author_association": "MEMBER"}]}
         e.h.gh.fx["check_runs"] = {"abc1234": [{"id": 1, "name": "ci", "conclusion": "success"}]}
         e.h.gh.fx["diffs"] = {"31": "+ Text('3')"}
         return e
@@ -169,10 +190,10 @@ class Cli(unittest.TestCase):
             grp = spec.point.split(":")[1]
             if call == "blind":
                 return decision("x", {"choice": "low" if grp == "STAKES" else "pass", "reason": "r",
-                                      "cited_evidence": ["AC #1 verified"]})
+                                      "cited_evidence": ["AC #1 verified on device"]})
             gi = {"STAKES": "ok", "TEST": "unsure", "QA": "ok"}[grp]
             return decision(gi, {"given_info": gi, "outcome": "consistent", "reason": "r",
-                                 "cited_evidence": ["AC #1 verified"]})
+                                 "cited_evidence": ["AC #1 verified on device: the count shows 3"]})
         j = _fake(script)
         e.d.grader_judge = j
         out = os.path.join(tmpdir(self), "sheet")
@@ -230,7 +251,7 @@ class Cli(unittest.TestCase):
         q = ASK.Question("readiness", "goal unclear — 범위", [{"token": "i1", "label": "a reading"},
                                                              {"token": "i2", "label": "b reading"},
                                                              {"token": "stop", "label": "stop"}],
-                         recommended="i2", recommended_by="judge:opus", predict_first=True)
+                         recommended="i2", recommended_by="judge:opus", predict_first=True, raised_by="confirm")
         q.pf_why = "high-risk"
         e.h.p.journal = e.h.journal
         tok = ASK.journal_nonce(e.h.journal, q)
@@ -241,11 +262,30 @@ class Cli(unittest.TestCase):
         out = os.path.join(tmpdir(self), "sheet")
         self.assertEqual(CLI.main(["grade", "--issues", "7", "--out", out], e.d), 0)
         res = json.loads(e.lines()[-1].split(">>> ENGINE <<<")[-1])
-        self.assertEqual(res["predict_first"]["judgments"], 1)
-        self.assertEqual(res["predict_first"]["watch"], ["KICKOFF"])
+        # K5r5-M2: a different blind answer is a candidate on the sheet — no watch before a person confirms it
+        self.assertEqual((res["predict_first"]["judgments"], res["predict_first"]["candidates"]), (0, 1))
+        self.assertEqual(res["predict_first"]["watch"], [])
         self.assertEqual(res["graded"], 0)
         rows = list(csv.DictReader(open(os.path.join(out, "issues.csv"))))
-        self.assertNotIn("KICKOFF", [r["group"] for r in rows])              # a person judged that KICKOFF
+        cand = [r for r in rows if r["mode"] == "predict-first"]
+        self.assertEqual([(r["decision_id"], r["group"], r["choice"]) for r in cand], [(qid, "KICKOFF", "i2")])
+        self.assertNotIn("KICKOFF", [r["group"] for r in rows if r["mode"] != "predict-first"])
+        # the person confirms → only now a §9.5 wrong (watch)
+        cand[0]["given_info"] = "wrong"
+        buf = io.StringIO()
+        w = csv.DictWriter(buf, fieldnames=G.COLUMNS)
+        w.writeheader()
+        w.writerow(cand[0])
+        p = os.path.join(out, "filled.csv")
+        with open(p, "w") as fh:
+            fh.write(buf.getvalue())
+        self.assertEqual(CLI.main(["grade", "--import", p], e.d), 0)
+        imp = json.loads(e.lines()[-1].split(">>> ENGINE <<<")[-1])
+        self.assertEqual(imp["watch"], ["KICKOFF"])
+        # a confirmed candidate is not put on the next sheet again
+        self.assertEqual(CLI.main(["grade", "--issues", "7", "--out", out], e.d), 0)
+        rows = list(csv.DictReader(open(os.path.join(out, "issues.csv"))))
+        self.assertEqual([r for r in rows if r["mode"] == "predict-first"], [])
 
 
 if __name__ == "__main__":

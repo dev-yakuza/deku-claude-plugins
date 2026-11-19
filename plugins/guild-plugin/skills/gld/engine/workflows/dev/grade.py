@@ -6,12 +6,15 @@
 
 Human judgments (§9.5 "사람 판정 = 블라인드 채점표 답 + predict-first 답"):
 * the blind sheet rows a person fills (`--import`);
-* K5r4 (b): predict-first ANSWERS — a resolved question whose pending block carried `predict_first` (never
+* predict-first ANSWERS — a resolved question whose pending block carried `predict_first` (never
   `predict_first_refused`), whose resolution revealed `recommended` (never `reveal: unavailable`) and whose answer
-  is an option other than `stop`: the answer equal to the hidden recommendation → `ok`, another option → `wrong`
-  (the person, blind, chose differently). Collected by every `dev grade` run into grades.jsonl
-  (grader_version `predict-first`, key-deduplicated) and fed to the same count rules. An answer that saw the
-  recommendation stays a decision (`by: human`) only.
+  is an option other than `stop`. K5r5-M2 (user decision 2026-11-19): only a question the ENGINE raised although
+  the judge was sure (`raised_by: confirm` — the first-sprint confirmation, a conservative group) counts; a question
+  the judge itself raised (`judge-unclear`, `judge-surface`, or no `raised_by`) is out of the count either way. The
+  answer equal to the hidden recommendation → `ok` (grades.jsonl, grader_version `predict-first`, the count rules);
+  a DIFFERENT answer is only a wrong CANDIDATE: it goes on the sheet (`predict-first candidate`) for a person to
+  confirm — only that person's `given_info=wrong` (imported like any sheet row) is a §9.5 / G1 wrong; nothing sets
+  `watch` / `conservative` before. An answer that saw the recommendation stays a decision (`by: human`) only.
 
 Selection (deterministic — `(repo, issue, D-id)` hash, never random):
 * only L0/SJ decisions the engine made (`by: judge:*` / `leader:*`); a decision a person already decided (an
@@ -19,6 +22,7 @@ Selection (deterministic — `(repo, issue, D-id)` hash, never random):
   readiness / interpretation / close question a person answered;
 * high-risk groups (KICKOFF · STAKES · EX-ARB dismiss/dispute · ESCALATE · SPLIT · INTEGRATE): first sprint
   100 %, after that `grading.highrisk_human_rate` (default 0.3, a valve may only lower it, floor 0.2);
+* K5r5-M3: a group on `watch` → every engine decision of that group (§9.5 "그 그룹 결정 전부 사람 + 채점자");
 * triggered items always — K5r4-m5: from the Issue's HISTORY, not its current label: `unsure`, coerced (not by
   first-sprint / valve), a later loop-back (the loop-back record), a later needs-human (a later pending question
   in the log, or a `guild:needs-human` label event in the timeline), a later QA fail, a review that requested
@@ -55,7 +59,7 @@ HIGH_RISK = ("KICKOFF", "STAKES", "EX-ARB:dismiss", "ESCALATE", "SPLIT", "INTEGR
 SELECTIVE = ("TEST", "QA", "EX-ARB:accept", "DE-ARB", "AN-PO", "VIS-ENV", "DIRECTIVE", "HANDOFF", "EX-DWC")
 IRREVERSIBLE = ("SPLIT",)
 COLUMNS = ("decision_id", "issue", "stage", "group", "mode", "choice", "reason", "coerced", "coerced_by",
-           "unsure", "evidence", "given_info", "outcome", "note")
+           "unsure", "irreversible", "evidence", "given_info", "outcome", "note")
 WATCH_CLEAR_AFTER = 10
 
 
@@ -84,7 +88,7 @@ def triggered(b, later_events):
     rejection on the Issue (K5r4-m5: from its history — `history_triggers`)."""
     if str(b.get("unsure")).lower() == "true":
         return "unsure"
-    if str(b.get("coerced")).lower() == "true" and b.get("coerced_by") not in ("first-sprint", "valve"):
+    if str(b.get("coerced")).lower() == "true" and b.get("coerced_by") not in ("first-sprint", "valve", "conservative"):
         return "coerced"
     if later_events:
         return later_events
@@ -134,12 +138,14 @@ def history_triggers(blocks, loopbacks=(), needs_human_events=0, review_rejectio
     return later
 
 
-def select(blocks_by_issue, repo, first_sprint, rate, later, grader=None):
+def select(blocks_by_issue, repo, first_sprint, rate, later, grader=None, watch=()):
     """[(issue, block, why)] for the sheet. `later(issue, block) -> str|None` names a later loop-back /
     needs-human. `blocks_by_issue` = {issue: [blocks]} (trusted records, superseded ones dropped). `grader` =
-    {(issue, D-id): grader row} (latest pass) — flagged ones go to the person, calibration from its `ok`s."""
+    {(issue, D-id): grader row} (latest pass) — flagged ones go to the person, calibration from its `ok`s.
+    `watch` = the groups on watch (K5r5-M3): all of their decisions go to the person."""
     out, calib = [], {}
     grader = grader or {}
+    watch = set(watch or ())
     for issue in sorted(blocks_by_issue):
         human_resolved = _human_decided(blocks_by_issue[issue])
         for b in blocks_by_issue[issue]:
@@ -150,6 +156,8 @@ def select(blocks_by_issue, repo, first_sprint, rate, later, grader=None):
             why = triggered(b, later(issue, b))
             if why:
                 out.append((issue, b, "triggered: %s" % why))
+            elif g in watch:
+                out.append((issue, b, "watch: 100%"))
             elif g in HIGH_RISK and (first_sprint or _h(repo, issue, b.id) < rate):
                 out.append((issue, b, "high-risk sample"))
             elif gr is not None and gr.get("flagged"):
@@ -163,10 +171,12 @@ def select(blocks_by_issue, repo, first_sprint, rate, later, grader=None):
     return out
 
 
-def grader_select(blocks_by_issue, repo, first_sprint, rate, later):
+def grader_select(blocks_by_issue, repo, first_sprint, rate, later, watch=()):
     """[(issue, block, why)] the grader grades: never KICKOFF; a HANDOFF shadow only when it reported a gap;
-    triggered always; the rest 100 % in the first sprint, `rate` after (its own hash salt)."""
+    triggered always; a `watch` group 100 % (K5r5-M3); the rest 100 % in the first sprint, `rate` after (its own
+    hash salt)."""
     out = []
+    watch = set(watch or ())
     for issue in sorted(blocks_by_issue):
         human_resolved = _human_decided(blocks_by_issue[issue])
         for b in blocks_by_issue[issue]:
@@ -184,18 +194,26 @@ def grader_select(blocks_by_issue, repo, first_sprint, rate, later):
             why = triggered(b, later(issue, b))
             if why:
                 out.append((issue, b, "triggered: %s" % why))
+            elif g in watch:
+                out.append((issue, b, "watch: 100%"))
             elif first_sprint or _h("grader|" + repo, issue, b.id) < rate:
                 out.append((issue, b, "sample"))
     return out
 
 
+CONFIRM = "confirm"
+
+
 def predict_first_judgments(blocks, issue):
-    """K5r4 (b): the blind human judgments in one Issue's log — [row] (see the module doc). Excluded: a refused
-    blind (`predict_first_refused`), a resolution that could not reveal (`reveal: unavailable` / no `recommended`),
-    `stop`, and every answer that saw the recommendation (no `predict_first` on its pending block)."""
+    """The blind human answers in one Issue's log → (counted, candidates) — see the module doc (K5r5-M2).
+    `counted` = `ok` rows (the person, blind, chose the hidden recommendation on a `confirm` question);
+    `candidates` = sheet rows for a person to confirm (a different blind answer on a `confirm` question).
+    Excluded: a refused blind (`predict_first_refused`), a resolution that could not reveal (`reveal: unavailable`
+    / no `recommended`), `stop`, every answer that saw the recommendation (no `predict_first`), and every question
+    the judge raised itself (`raised_by` ≠ confirm)."""
     from workflows.dev import predict as PF
     pend = dict((b.id, b) for b in blocks)
-    rows = []
+    counted, cands = [], []
     for r in blocks:
         q = pend.get(r.get("resolves")) if r.get("by") == "human" else None
         if q is None or not q.get("predict_first") or q.get("predict_first_refused"):
@@ -205,18 +223,27 @@ def predict_first_judgments(blocks, issue):
         ch = r.get("choice")
         if not ch or ch == "stop":
             continue
+        if q.get("raised_by") != CONFIRM:
+            continue                     # the judge said it could not decide / asked a person — not its wrong
 
         class _Q(object):
-            kind, point, group = q.get("kind") or "", q.get("point") or "", None
+            kind, point, group = q.get("kind") or "", q.get("point") or "", q.get("group")
         g = PF.group_of(_Q(), q.get("stage"))
         if g is None:
             continue
-        rows.append({"decision_id": q.id, "issue": issue, "stage": q.get("stage") or "", "group": g,
-                     "mode": "predict-first", "choice": ch, "reason": "recommended %s (%s)" % (
-                         r.get("recommended"), q.get("predict_first")),
-                     "given_info": "ok" if ch == r.get("recommended") else "wrong", "outcome": "",
-                     "note": "resolution %s" % r.id})
-    return rows
+        row = {"decision_id": q.id, "issue": issue, "stage": q.get("stage") or "", "group": g,
+               "mode": "predict-first", "choice": r.get("recommended"), "coerced": "false", "coerced_by": "",
+               "unsure": "false", "irreversible": "true" if q.get("irreversible") == "true" else "",
+               "outcome": "", "note": "resolution %s" % r.id}
+        if ch == r.get("recommended"):
+            counted.append(dict(row, reason="blind answer = recommended %s (%s)" % (ch, q.get("predict_first")),
+                                given_info="ok", evidence=""))
+        else:
+            cands.append(dict(row, reason="wrong candidate: the person, blind, chose %s; the engine recommended %s "
+                                          "(%s)" % (ch, r.get("recommended"), q.get("predict_first")),
+                              given_info="", evidence="predict-first candidate — confirm: was %s clearly better on "
+                                                      "what the engine knew?" % ch))
+    return counted, cands
 
 
 def sheet_rows(selected, mode, evidence):
@@ -226,7 +253,9 @@ def sheet_rows(selected, mode, evidence):
                      "mode": mode, "choice": b.get("raw_choice") or b.get("choice") or "",
                      "reason": " ".join((b.get("reason") or "").split())[:300],
                      "coerced": b.get("coerced") or "false", "coerced_by": b.get("coerced_by") or "",
-                     "unsure": b.get("unsure") or "false", "evidence": "%s; %s" % (why, evidence(issue)),
+                     "unsure": b.get("unsure") or "false",
+                     "irreversible": "true" if b.get("irreversible") == "true" else "",
+                     "evidence": "%s; %s" % (why, evidence(issue)),
                      "given_info": "", "outcome": "", "note": ""})
     return rows
 
@@ -279,7 +308,13 @@ def grades(common):
     return out
 
 
-def import_sheet(common, text, repo, irreversible=lambda row: False):
+def irreversible_row(row):
+    """§9.5 rule 2's irreversible class (K5r5-M3): SPLIT always (IRREVERSIBLE), a STAKES decision whose block the code
+    marked `irreversible: true` (an irreversible path — `arbitration.stakes`) — carried on the sheet row."""
+    return str(row.get("irreversible") or "").strip().lower() == "true"
+
+
+def import_sheet(common, text, repo, irreversible=irreversible_row):
     """Rows with given_info filled → grades.jsonl (key (repo, issue, D-id, "human"); a key already present is
     skipped); then the count rules. Returns {"imported": n, "watch": [...], "conservative": [...], "grader": [...]}
     — `grader` = the grader's output for the imported rows, revealed only now (R4J-m4)."""
@@ -372,10 +407,13 @@ def collect_evidence(gh, n, repo):
     except Exception as e:                                       # noqa: BLE001
         comments = []
         summ.append("comments unreadable (%s)" % str(e)[:60])
+    uparts = []                          # K5r5-m4 (P2): outsider / unknown authors — never evidence for `ok`
     people = [c for c in comments if "<!-- guild:" not in markers.body_of(c)]
     for c in people[-20:]:
-        parts.append("comment by %s (%s): %s" % ((c.get("user") or {}).get("login"), c.get("author_association"),
-                                                 " ".join(markers.body_of(c).split())[:600]))
+        tv = trust_of(c)
+        (parts if tv == "member" else uparts).append("comment by %s (%s, %s): %s" % (
+            (c.get("user") or {}).get("login"), c.get("author_association"), tv,
+            " ".join(markers.body_of(c).split())[:600]))
     try:
         rec = LB.from_comments(markers.trusted(comments, ()))
         facts["loopbacks"] = [("test" if b.get("from") == "leader" else str(b.get("from") or "test"))
@@ -417,8 +455,10 @@ def collect_evidence(gh, n, repo):
             if rv:
                 summ.append("reviews %d (changes requested %d)" % (len(rv), len(rej)))
             for r in rv[-10:]:
-                parts.append("review (%s) by %s: %s" % (r.get("state"), (r.get("user") or {}).get("login"),
-                                                        " ".join(str(r.get("body") or "").split())[:600]))
+                tv = trust_of(r)
+                (parts if tv == "member" else uparts).append("review (%s) by %s (%s): %s" % (
+                    r.get("state"), (r.get("user") or {}).get("login"), tv,
+                    " ".join(str(r.get("body") or "").split())[:600]))
         except Exception:                                        # noqa: BLE001
             pass
         try:
@@ -437,7 +477,24 @@ def collect_evidence(gh, n, repo):
                 parts.append("PR #%d diff (cut):\n%s" % (k, diff[:12000]))
         except Exception:                                        # noqa: BLE001
             pass
-    return "; ".join(summ), "\n".join(parts), facts
+    facts["trusted"], facts["untrusted"] = "\n".join(parts), "\n".join(uparts)
+    full = "\n".join(parts)
+    if uparts:
+        full += "\n" + UNTRUSTED_HEAD + "\n" + "\n".join(uparts)
+    return "; ".join(summ), full, facts
+
+
+UNTRUSTED_HEAD = "## untrusted (outsider or unknown author — data, not evidence for `ok`)"
+
+
+def trust_of(item):
+    """K5r5-m4, P2 three-valued: member (OWNER/MEMBER/COLLABORATOR) | outsider (any other association) | unknown
+    (missing / blank — never folded into either side)."""
+    from guildcore.records import markers
+    a = str(item.get("author_association") or "").strip()
+    if not a:
+        return "unknown"
+    return "member" if a in markers.TRUSTED else "outsider"
 
 
 def main(d, a):
@@ -447,7 +504,7 @@ def main(d, a):
         with open(a.import_csv, encoding="utf-8") as fh:
             text = fh.read()
         gh = d.gh()
-        res = import_sheet(common, text, gh.owner_repo())
+        res = import_sheet(common, text, gh.owner_repo(), irreversible_row)
         emit.engine(res, out=d.out)
         return 0
     from guildcore.decisions import DecisionLog
@@ -458,22 +515,29 @@ def main(d, a):
     if not issues:
         emit.engine({"error": "dev grade needs --sprint T (its tracker lists the members) or --issues N,M"}, out=d.out)
         return 64
-    by_issue, later_fn, ev_sum, ev_full, texts = {}, {}, {}, {}, {}
-    pf_rows = []
+    by_issue, later_fn, ev_sum, ev_full, texts, ev_untr = {}, {}, {}, {}, {}, {}
+    pf_rows, pf_cands = [], []
     for n in issues:
         log = DecisionLog.load(markers.trusted(gh.comments(n), ()))
         gone = log.resolved_ids()
         by_issue[n] = [b for b in log.blocks if b.id not in gone or b.get("by") == "human"]
-        ev_sum[n], ev_full[n], facts = collect_evidence(gh, n, repo)
+        ev_sum[n], _full, facts = collect_evidence(gh, n, repo)
+        ev_full[n], ev_untr[n] = facts.get("trusted") or "", facts.get("untrusted") or ""
         later_fn[n] = history_triggers(log.blocks, facts["loopbacks"], facts["needs_human_events"],
                                        facts["review_rejections"])
-        pf_rows += predict_first_judgments(log.blocks, n)
+        ok_rows, cands = predict_first_judgments(log.blocks, n)
+        pf_rows += ok_rows
+        pf_cands += cands
         try:
             it = gh.issue(n)
             texts[n] = "%s\n\n%s" % (it.get("title") or "", (it.get("body") or "")[:8000])
         except Exception:                                        # noqa: BLE001
             texts[n] = "#%d" % n
-    pf = apply_judgments(common, pf_rows, repo, "predict-first")
+    pf = apply_judgments(common, pf_rows, repo, "predict-first")         # `ok`s only (K5r5-M2)
+    confirmed = set((str(g.get("issue")), g.get("decision_id")) for g in grades(common)
+                    if g.get("repo") == repo and g.get("grader_version") == "human")
+    pf_cands = [r for r in pf_cands if (str(r["issue"]), r["decision_id"]) not in confirmed]
+    watch = sorted((load_state(common).get("watch") or {}).keys())
     valves = VALVES.effective(common, d.env)
     cfg = d.config(d.toplevel())
     eng = ((getattr(cfg, "raw", None) or {}).get("engine") or {}) if cfg else {}
@@ -484,14 +548,15 @@ def main(d, a):
     graded = []
     if getattr(a, "grader", False):
         graded = run_grader(d, common, repo, by_issue, later, first, valves, eng, ev_full, texts,
-                            int(getattr(a, "pass_no", 1) or 1))
+                            int(getattr(a, "pass_no", 1) or 1), watch, ev_untr)
         if isinstance(graded, dict):                                       # an error result
             emit.engine(graded, out=d.out)
             return 64
     from workflows.dev import grader as GD
     gv = GD.version(((eng.get("grading") or {}).get("grader_model")) or GD.DEFAULT_TIER)
-    sel = select(by_issue, repo, first, rate, later, grader=latest_grader_rows(common, repo, gv))
+    sel = select(by_issue, repo, first, rate, later, grader=latest_grader_rows(common, repo, gv), watch=watch)
     rows = sheet_rows(sel, "first-sprint" if first else "steady", lambda i: ev_sum.get(i) or "")
+    rows += [dict((c, r.get(c, "")) for c in COLUMNS) for r in pf_cands]   # K5r5-M2: a person confirms
     out_dir = a.out or os.path.join(J.engine_dir(common), "grading")
     os.makedirs(out_dir, exist_ok=True)  # fs-ok: the engine's grading sheet dir under <git-common-dir>/guild/engine or the person's --out
     tag = ("sprint-%s" % a.sprint) if a.sprint else "issues"
@@ -499,12 +564,14 @@ def main(d, a):
     J.atomic_write(os.path.join(out_dir, "%s.md" % tag), render_md(rows))
     emit.engine({"rows": len(rows), "csv": os.path.join(out_dir, "%s.csv" % tag), "first_sprint": first,
                  "predict_first": {"judgments": len(pf_rows), "imported": pf["imported"], "watch": pf["watch"],
-                                   "conservative": pf["conservative"]},
+                                   "conservative": pf["conservative"], "candidates": len(pf_cands)},
+                 "watch": watch,
                  "graded": len(graded)}, out=d.out)
     return 0
 
 
-def run_grader(d, common, repo, by_issue, later, first, valves, eng, ev_full, texts, pass_no):
+def run_grader(d, common, repo, by_issue, later, first, valves, eng, ev_full, texts, pass_no, watch=(),
+               ev_untrusted=None):
     """The grader pass: pass 1 = the grader's selection; pass 2 = only pass-1 `unsure`s. Already graded keys
     (repo, issue, D-id, grader_version, pass) are never called again. Rows → grades.jsonl (`kind: grader`)."""
     from workflows.dev import grader as GD
@@ -526,7 +593,7 @@ def run_grader(d, common, repo, by_issue, later, first, valves, eng, ev_full, te
                and g.get("repo") == repo)
     if pass_no == 1:
         rate = valves.get("grading.grader_rate", VALVES.GRADING_DEFAULT["grading.grader_rate"])
-        todo = grader_select(by_issue, repo, first, rate, later)
+        todo = grader_select(by_issue, repo, first, rate, later, watch)
     else:
         prev = latest_grader_rows(common, repo, gv)
         blocks = dict(((i, b.id), b) for i, bs in by_issue.items() for b in bs)
@@ -537,7 +604,7 @@ def run_grader(d, common, repo, by_issue, later, first, valves, eng, ev_full, te
         if (issue, b.id, pass_no) in done:
             continue
         row = GD.grade(judge, b, issue, group_of(b), ev_full.get(issue) or "", tier, texts.get(issue) or "",
-                       gv, pass_no)
+                       gv, pass_no, untrusted=(ev_untrusted or {}).get(issue) or "")
         row.update(kind="grader", repo=repo, selected=why)
         J.fsync_append(grades_path(common), json.dumps(row, ensure_ascii=False, sort_keys=True))
         out.append(row)
