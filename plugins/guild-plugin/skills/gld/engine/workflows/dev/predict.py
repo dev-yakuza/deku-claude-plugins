@@ -243,7 +243,7 @@ _SRC_EN = r"(?:the\s+)?(?:title|issue|request|body|description|report|ask|report
 # with an evaluative tail (근거 없음 · 根拠が薄い) or as a reading of the Issue ("typical reading", "제목과 일치")
 # K5r9-m1: an as-is reading of the SOURCE is fit language as a phrase — source + 그대로/通り + reading / scope / build
 # ("제목 그대로 해석", "요청 그대로의 범위", "タイトル通りに解釈") — never `그대로 표시` / `通りに表示` (a display, r8 m3)
-_AS_IS_KO = r"그대로\s*(?:의\s*)?(?:해석|읽|이해|받아들|범위|구현)"
+_AS_IS_KO = r"그대로\s*(?:의\s*)?(?:해석|읽|이해|받아들|범위|구현|반영)"
 _AS_IS_JA = r"(?:の\s*)?(?:解釈|読|理解|受け取|範囲|実装)"
 _EN_NOUN = r"(?!\s+(?:case|style|format|font|layout|bar|colou?r|size|field|page|screen|row|column)s?\b)"
 _EVAL_KO = r"\s*(?:이|가|은|는)?\s*(?:없|부족|약하|약함|약해|희박|박약|충분|있음|있다|있는|분명|명확|빈약|약한)"
@@ -254,7 +254,14 @@ FIT = re.compile(_SRC_KO + r"\s*(?:과|와|에|이|의|에서)?\s*(?:일치|불�
                  + _SRC_JA + r"\s*(?:と|に|の)?\s*(?:(?:通り|どおり)(?!に)|(?:通り|どおり)に?\s*" + _AS_IS_JA + r"|合う|合わ|沿う|沿った|沿わ|一致)|"
                  r"根拠" + _EVAL_JA + r"|根拠\s*[:：]|" + _SRC_JA + r"\s*(?:を|に)?\s*根拠|素直(?:な|に)?\s*(?:解釈|読|受け取)|無理|"
                  r"(?:\bmatch(?:es|ing)?|\bfits?|\bconsistent with|\binconsistent with|\bin line with|\bsupported by|"
-                 r"\bfollows)\s+" + _SRC_EN + r"\b" + _EN_NOUN + r"|\bmismatch|\bstretch\b|\bas asked\b|\basked for\b|"
+                 r"\bfollows)\s+" + _SRC_EN + r"\b" + _EN_NOUN + r"|\bstretch\b|\bas asked\b|\basked for\b|"
+                 # K6 item 29: `mismatch` only against a source (a bare `mismatch` is a domain word — account
+                 # mismatch — in 3 of 377 real AC lines); the r10 m5 paraphrases (faithful / beyond / departs …)
+                 r"\bmismatch(?:es|ed)?\s+(?:with|to)\s+" + _SRC_EN + r"\b|" + _SRC_EN + r"\s+mismatch|"
+                 r"\baligns?\s+with\s+" + _SRC_EN + r"\b|\bfaithful\b|\bgoes\s+beyond\b|\bbeyond\s+" + _SRC_EN +
+                 r"\b|\bstrict\s+reading\b|\bliteral\s+take\b|\bdepart(?:s|ed|ing)?\s+from\s+" + _SRC_EN + r"\b|"
+                 r"충실|벗어(?:난|나)|(?:확대|축소|과대|과소)\s*해석|상통|취지(?:에|와|를)?\s*(?:부합|맞|어긋|벗어|충실)|"
+                 r"文字通り|忠実|(?:から|を)\s*(?:は)?\s*外れ|食い違|"
                  r"\b(?:typical(?:ly)?|literal(?:ly)?)\s+(?:reading|interpretation|meaning|intent|choice|read|sense|scope|case)\b|"
                  r"\b(?:read(?:ing)?|tak(?:en|e|es|ing)|took|interpret(?:ed|ing)?)\s+(?:" + _SRC_EN + r"\s+)?(?:literally|typically)\b|"
                  r"\b(?:does|do|did)\s*(?:not|n't)\s+(?:mention|say|support|ask)", re.I)
