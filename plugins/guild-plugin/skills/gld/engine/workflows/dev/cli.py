@@ -8,7 +8,7 @@
     dev valve set KEY VALUE | clear KEY | halt [--now] [--all] | resume [--all] | show
     dev unattended-log --issue N
     dev cost [--by role|who|model|tier|local|arm|kind|stage|endpoint] [--issue N]
-    dev health [--first-sprint] [--sprint T]
+    dev health [--first-sprint] [--sprint T] [--set-centre <replay.json> [--legacy <rates.json>]]
     dev grade --sprint T [--import CSV] [--out DIR] [--grader [--pass 2]]
 
 `run` (every mode) before any stage: the kill switch (`HALT` → exit 6 `halted: kill-switch`), the ACTIVE
@@ -959,6 +959,8 @@ def parser():
     he.add_argument("--first-sprint", action="store_true")
     he.add_argument("--sprint", type=int)
     he.add_argument("--issues")
+    he.add_argument("--set-centre", dest="set_centre")      # K6 item 18: replay decisions JSON → health-center.json
+    he.add_argument("--legacy")
     g = sub.add_parser("grade")
     g.add_argument("--sprint", type=int)
     g.add_argument("--issues")

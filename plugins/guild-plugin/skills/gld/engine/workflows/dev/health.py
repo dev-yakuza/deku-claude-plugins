@@ -161,6 +161,20 @@ def main(d, a):
     from workflows.dev import grade as G
     from workflows.dev import unverified as UV
     common = d.common()
+    if getattr(a, "set_centre", None):
+        # K6 item 18: the replay's recorded decisions → the normal and first-sprint centres (no model call)
+        from workflows.dev import centre as CE
+        from workflows.dev import unverified as UV
+        with open(a.set_centre, encoding="utf-8") as fh:
+            rec = json.load(fh)
+        legacy = None
+        if getattr(a, "legacy", None):
+            with open(a.legacy, encoding="utf-8") as fh:
+                legacy = json.load(fh)
+        c = CE.compute(dict((int(k), v) for k, v in (rec.get("blocks_by_issue") or rec).items()), legacy,
+                       UV.unverified(), source=os.path.basename(a.set_centre))
+        emit.engine({"written": CE.write(common, c), "n": c["n"]}, out=d.out)
+        return 0
     gh = d.gh()
     issues = G._issues(d, a, gh) or sorted(set(int(r["issue"]) for r in COST.rows(common) if r.get("issue")))
     by_issue, texts = {}, {}
@@ -177,7 +191,8 @@ def main(d, a):
             centre = json.load(fh)
     except (IOError, ValueError):
         pass
-    cmp = compare(m, centre)
+    from workflows.dev import centre as CE
+    cmp = compare(m, CE.pick(centre, bool(getattr(a, "first_sprint", False))))   # K6 item 18
     trips = absolute_tripwires(common, issues, texts)
     gstate = G.load_state(common)
     auto = VALVES.load(common)["auto"]

@@ -3,7 +3,7 @@
 # (design: design/guild/23-engine/design.md §10.2 release gates, §9.5, §10.4, §10.5; k6-notes.md).
 #
 # Runs the Python unittest modules tests/engine/test_k6_*.py — the offline part of the K6 gate items
-# (review-k5-r12 "K6 이월"): registered blind wordings (44), an answer belongs to the run that asked (33, 40), grounds for an option that cannot run (39), unverified groups (4), gated groups from the §9.5 table + every table question blind (27, 43), the escalation cap (14), cross-version resume (17), grader evidence · quality rules · dual judgment (11), see k6-notes.md for the full list.
+# (review-k5-r12 "K6 이월"): registered blind wordings (44), an answer belongs to the run that asked (33, 40), grounds for an option that cannot run (39), unverified groups (4), gated groups from the §9.5 table + every table question blind (27, 43), the escalation cap (14), cross-version resume (17), grader evidence · quality rules · dual judgment (11), tripwire centres from the replay (18), see k6-notes.md for the full list.
 # No test calls `claude`, a model or GitHub (a failing `gh` is first on PATH).
 #
 # Usage: bash plugins/guild-plugin/tests/engine_k6_test.sh
@@ -33,7 +33,7 @@ if [ "$RC" -ne 0 ]; then
 fi
 echo "engine K6: $PASS passed, $FAIL failed"
 # ⚠ Keep equal to the measured PASS count; raise it only when tests are added on purpose.
-ENGINE_K6_MIN_TESTS=56
+ENGINE_K6_MIN_TESTS=62
 if [ "$((PASS + FAIL))" -lt "$ENGINE_K6_MIN_TESTS" ]; then
   echo "FAIL  실행된 검사가 $((PASS + FAIL))건뿐입니다 (최소 ${ENGINE_K6_MIN_TESTS}건)."
   exit 1
