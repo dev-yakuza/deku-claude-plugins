@@ -47,6 +47,15 @@ class Ask(BaseException):
         self.question, self.line = question, line
 
 
+class NeedGrounds(BaseException):
+    """K6 (item 39 iv): a person gave the same answer twice and its option still has no grounds — the run stops with
+    a pause that asks for the grounds (the answer is consumed; the next entry judges again)."""
+
+    def __init__(self, line):
+        BaseException.__init__(self, line)
+        self.line = line
+
+
 class Hold(BaseException):
     """The person answered `stop` to a conservative question — the run holds (nothing more is decided)."""
 
@@ -168,7 +177,7 @@ def answered_unapplied(p, group, stage, step, point=None):
 def begin(p):
     """A stage run starts (the FSM): forget the per-run counters/tape of a previous run on the same ports."""
     for k in ("_cons_seen", "_cons_live", "_cons_replay", "_cons_used", "_cons_used_replay", "_cons_defer",
-              "_cons_diverged"):
+              "_cons_diverged", "_cons_guidance"):
         p.__dict__.pop(k, None)
 
 
@@ -404,6 +413,25 @@ def _asked_brief(p, key):
     return None
 
 
+def grounds_line(group, ans, final, rule):
+    """K6 (item 39 i): the engine's line for a person's option a rule could not run — which fields it lacked and how
+    to give them. Engine text only (after the answer)."""
+    from workflows.dev import judging as JG
+    need = list((JG.OPTION_FIELDS.get(group) or {}).get(ans, ()))
+    what = ", ".join("`%s`" % k for k in need) or "그 선택지의 근거"
+    return ("사람 `%s` — %s 없음 → `%s`(%s). 근거는 `dev note`(attended) 또는 Issue 코멘트로 남기고 "
+            "`guild:needs-human` 을 지우면 다시 판단합니다" % (ans, what, final, rule))
+
+
+def _previous_epoch(key):
+    import re
+    m = re.match(r"^(.*):a([0-9]+)$", str(key or ""))
+    if not m:
+        return None
+    k = int(m.group(2))
+    return m.group(1) if k == 1 else "%s:a%d" % (m.group(1), k - 1)
+
+
 def _matched(p, spec=None, key=None):
     """K6 (item 40): did this stage run reach the gate the SAME way as the run that asked? — every taped role call
     replayed (or, remote, matched) in order, none left over, and the judge's brief the same. None = nothing to
@@ -531,6 +559,16 @@ def gate(p, spec, raw):
         if rule and final != ans:
             # K5r10-m2: a rule replaced the person's choice — the log keeps both (the person's answer, the result)
             out.human_choice, out.coerced_to = ans, "%s by rule %s" % (final, rule)
+            # K6 (item 39 i): after the answer (the recommendation is revealed by now) the person is told WHY their
+            # option could not run and how to give its grounds — on the judgment block and the next pause's prose
+            out.grounds = grounds_line(g, ans, final, rule)
+            if not applied:
+                p.__dict__["_cons_guidance"] = out.grounds
+                # K6 (item 39 iv): the same option answered at the previous entry of this point, also without its
+                # grounds — the question would only come back: stop for the grounds instead (the answer is consumed)
+                prev = _previous_epoch(key)
+                if prev is not None and _answer(p, prev)[0] == ans:
+                    raise NeedGrounds("%s — 같은 답이 두 번 근거 없이 들어왔습니다: 근거를 남긴 뒤 다시 실행하십시오" % out.grounds)
         # K5r9: the same stage run replayed after a later question reuses this answer (its effect already written):
         # the decision is the one already logged — `record_judgment` does not log it a second time
         out.replayed = bool(applied)
@@ -591,6 +629,13 @@ def guarded(p, stage, thunk):
     except Hold as h:
         flush(p)
         return hold(p, stage, h)
+    except NeedGrounds as ng:
+        flush(p)
+        p.__dict__.pop("_cons_guidance", None)
+        from workflows.dev.stages import base as B
+        if not getattr(p, "unattended", False):
+            return B.StageResult(B.StageResult.HOLD, line=ng.line)
+        return B.pause(p, stage, "ambiguity", ng.line, "ambiguity: %s" % ng.line)
     from workflows.dev.stages import base as B
     if r is None or r.kind != B.StageResult.FAIL:
         flush(p)

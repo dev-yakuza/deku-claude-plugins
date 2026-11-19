@@ -349,6 +349,8 @@ def record_judgment(p, stage, point, refs, dec, choice=None, reason=None, extra=
         # K5r10-m2: `choice` is what ran; the person chose `human_choice`, a rule turned it into `coerced_to`
         f["human_choice"] = dec.human_choice
         f["coerced_to"] = dec.coerced_to
+        if getattr(dec, "grounds", None):
+            f["grounds"] = dec.grounds                      # K6 (item 39 i): why it could not run, how to give grounds
     if reason:
         f["reason"] = reason
     f.update(extra or {})
@@ -392,6 +394,7 @@ def pause(p, stage, cause_kind, line, token_cause, prose="", env_key=None, quest
     `extra_labels`/`remove_labels` ride in the SAME label write (test's pending regeneration
     moves guild:test → guild:execute together with guild:needs-human)."""
     token = None
+    guide = getattr(p, "__dict__", {}).pop("_cons_guidance", None)
     if question is not None:
         # K6 predict-first (§2.6, R5J-M4): forced on → the pending block carries `recommended_sha` only, the nonce
         # journaled first; the pause comment never names the recommendation. K5r3-M1: the one enforcement point
@@ -405,6 +408,10 @@ def pause(p, stage, cause_kind, line, token_cause, prose="", env_key=None, quest
             token_cause = "%s: %s" % (cause_kind, question.text)
             prose, directive_line = PF.enumeration(question), None
         token = ASK.journal_nonce(p.journal, question)
+    if guide and (question is None or not question.neutralized):
+        # K6 (item 39 i): the pause a person's coerced answer led to says why their option could not run (after the
+        # answer — never on a question that is still blind)
+        prose = ("%s\n\n%s" % (prose, guide)).strip() if prose else guide
     pz = PAUSE.Pause(cause_kind, line, prose, env_key, directive_line)
     if extra_labels or remove_labels:
         did = None
