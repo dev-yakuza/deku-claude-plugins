@@ -331,7 +331,8 @@ def _judge(p, cfg, qres, dres, test_out, issue, diff, prev_qa=()):
                                                                for r, s in prev_qa) or "none"))]
     d = p.judge(JG.spec(p, "QA", brief, STAGE, "Q2.5"))
     extra = {}
-    if qb_text is None and d.fields.get("verdict") == "block" and not any(
+    # K5r7-m1: never over a PERSON's decision (a conservative-path `block` answer stays `block`)
+    if qb_text is None and d.by != "human" and d.fields.get("verdict") == "block" and not any(
             x.get("blocking") for x in d.fields.get("defects") or []):
         d.fields["verdict"], d.choice = "pass", "pass"                  # K2-m9: no bar file = bar met
         d.coerced, d.coerced_by = True, "rule"
