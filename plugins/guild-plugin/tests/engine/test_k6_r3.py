@@ -68,6 +68,17 @@ def _kick(chosen, summ=SUMM, own=None, areas=None, ui=None):
     return k
 
 
+def _took(person, summ=SUMM, own=None, areas=None, ui=None):
+    """K6 r5 M1: a judge that TAKES the person's reading — under the fixed engine id (`analysis.PERSON_READING_ID`) the
+    brief hands it, `chosen` = that id (its summary as `summ` words it — verbatim or re-worded)."""
+    k = _kick(person, summ=summ, own=own, areas=areas, ui=ui)
+    for i in k.fields["interpretations"]:
+        if i["id"] == person:
+            i["id"] = AN.PERSON_READING_ID
+    k.fields["chosen"] = AN.PERSON_READING_ID
+    return k
+
+
 def _token(summ, orig):
     interp = [{"id": i, "summary": summ[i]} for i in ("A", "B")]
     order = sorted(range(2), key=lambda n: AN.canon_key(interp[n]))
@@ -109,7 +120,7 @@ class M1ReadingCarried(unittest.TestCase):
                 for summ2 in (SUMM, REWORD):
                     with self.subTest(judge=judge_pick, person=person, reworded=summ2 is REWORD):
                         # the new judge takes the person's reading (the brief names its id) — in re-worded summaries
-                        h, r2, kick = self._answer_and_rerun(judge_pick, person, _kick(person, summ=summ2))
+                        h, r2, kick = self._answer_and_rerun(judge_pick, person, _took(person, summ=summ2))
                         self.assertEqual(r2.kind, StageResult.ADVANCE)
                         tok = _token(SUMM, person)
                         self.assertIn("- (선택) %s: %s" % (tok, SUMM[person]), h.body_with("analyze:output"))
@@ -136,13 +147,14 @@ class M1ReadingCarried(unittest.TestCase):
         h, r = _run1(self, "A", own=own)
         pend = _pending(h)[-1]
         ASK.answer(h.decisions, h.writer, 7, pend.id, _token(SUMM, "B"), journal=h.p.journal)
-        h.judges["KICKOFF"] = _kick("B", summ=REWORD, areas=("lib/app",))   # its top-level areas differ: ignored
+        # K6 r5 m6: the taking judge's top-level footprint is FOR that reading — joined to the capture (union)
+        h.judges["KICKOFF"] = _took("B", summ=REWORD, areas=("lib/app",))
         A.run(h.p)
         kick = DS.kickoff_block(h.gh.comments(7))
-        self.assertEqual((kick.get("areas"), kick.get("ui_surface")), ("lib/theme", "true"))
+        self.assertEqual((kick.get("areas"), kick.get("ui_surface")), ("lib/app,lib/theme", "true"))
 
     def test_another_clone_reads_the_capture_from_the_question(self):
-        h, r2, kick = self._answer_and_rerun("A", "B", _kick("B", summ=REWORD), journal2="fresh", answer_journal=False)
+        h, r2, kick = self._answer_and_rerun("A", "B", _took("B", summ=REWORD), journal2="fresh", answer_journal=False)
         self.assertEqual(r2.kind, StageResult.ADVANCE)
         self.assertIn("- (선택) %s: %s" % (_token(SUMM, "B"), SUMM["B"]), h.body_with("analyze:output"))
 
@@ -151,7 +163,7 @@ class M1ReadingCarried(unittest.TestCase):
         pend = _pending(h)[-1]
         self.assertTrue(h.decisions.amend(pend.id, "reading_i3", "{not json"))   # a damaged capture field
         ASK.answer(h.decisions, h.writer, 7, pend.id, _token(SUMM, "B"), journal=h.p.journal)
-        h.judges["KICKOFF"] = _kick("B", summ=REWORD)
+        h.judges["KICKOFF"] = _took("B", summ=REWORD)
         r2 = A.run(h.p)
         self.assertEqual(r2.kind, StageResult.ASK)
         self.assertIn("읽을 수 없음", _pending(h)[-1].get("question"))
@@ -161,7 +173,7 @@ class M1ReadingCarried(unittest.TestCase):
 
         def judge(spec):
             seen.append(dict(spec.brief_parts).get("human_answers"))
-            return _kick("A") if len(seen) == 1 else _kick("B", summ=REWORD)
+            return _kick("A") if len(seen) == 1 else _took("B", summ=REWORD)
         # K6 r4 m2: the person's reading B has no own footprint → the superset convenes the product-owner too
         h = K4(self, unattended=False, roles=[evidence(self, areas=WIDE)] * 2 + [out_role(self, "DONE", "ok", ac_patch=[])],
                judges={"KICKOFF": judge}, extra_files=EXTRA)
@@ -171,7 +183,9 @@ class M1ReadingCarried(unittest.TestCase):
         ASK.answer(h.decisions, h.writer, 7, _pending(h)[-1].id, _token(SUMM, "B"), journal=h.p.journal)
         A.run(h.p)
         self.assertIn("«%s»" % SUMM["B"], seen[-1])
-        self.assertIn("id B", seen[-1])
+        # K6 r5 M1: handed under the fixed engine id, never the judge's earlier letter
+        self.assertIn("`%s`" % AN.PERSON_READING_ID, seen[-1])
+        self.assertNotIn("id B", seen[-1])
 
 
 SCOPE_PAIRS = (                      # review-k6-r3 repro_aside_classes.ScopeCut + more ko / en / ja

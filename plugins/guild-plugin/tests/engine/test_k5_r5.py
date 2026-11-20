@@ -22,7 +22,7 @@ import _util  # noqa: F401
 from _k1 import tmpdir
 from _k2 import comment
 from _k3 import XHarness, auditor, dev, finding
-from _k4 import K4, decision, evidence, kickoff, out_role, stakes
+from _k4 import K4, decision, evidence, kickoff, out_role, stakes, took
 from test_k3_execute_stage import GREEN, TL_DONE, exarb
 from test_k4_fsm import driver
 from test_k5_cli import Env
@@ -448,8 +448,8 @@ class Minors(unittest.TestCase):
         self.assertEqual(r.kind, StageResult.PAUSE)
         _answer(h, "guild-answer: %s i1" % r.qid)
         h.roles += [evidence(self), out_role(self, "DONE", ac_patch=[])]
-        h.judges["KICKOFF"] = kickoff(goal="unclear")
-        h.judges["KICKOFF"].fields["chosen"] = "B"         # K6 r3 M1: the judge takes the person's reading (B = i1)
+        # K6 r3 M1 / r5 M1: the judge takes the person's reading (B = i1) under the fixed engine id
+        h.judges["KICKOFF"] = took(kickoff(goal="unclear"), "B")
         driver(h, DESIGN_STUB).run(7)
         self.assertIn("guild:design", h.labels())
         self.assertIn("- (선택) i1: hide the count", h.body_with("analyze:output"))

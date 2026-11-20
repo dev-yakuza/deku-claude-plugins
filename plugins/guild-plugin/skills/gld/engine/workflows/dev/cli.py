@@ -10,6 +10,7 @@
     dev cost [--by role|who|model|tier|local|arm|kind|stage|endpoint] [--issue N]
     dev health [--first-sprint] [--sprint T] [--set-centre <replay.json> [--legacy <rates.json>]]
     dev grade --sprint T [--import CSV] [--out DIR] [--grader [--pass 2]]
+    dev grade --drop-candidate <issue/D-id> --reason <why>
 
 `run` (every mode) before any stage: the kill switch (`HALT` → exit 6 `halted: kill-switch`), the ACTIVE
 plugin version (§10.3: mismatch → exit 6 `halted: plugin version mismatch`; none listed → exit 6
@@ -968,6 +969,9 @@ def parser():
     g.add_argument("--out")
     g.add_argument("--grader", action="store_true")              # §9.5 the 2-call grader (K5r4)
     g.add_argument("--pass", dest="pass_no", type=int, choices=(1, 2), default=1)
+    # K6 r5 m7: the person drops an open candidate whose Issue log is gone for good (reason recorded)
+    g.add_argument("--drop-candidate", dest="drop_candidate")
+    g.add_argument("--reason")
     return ap
 
 

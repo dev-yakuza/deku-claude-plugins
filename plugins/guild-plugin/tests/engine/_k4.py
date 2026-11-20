@@ -67,6 +67,17 @@ def kickoff(goal="clear", constraint="clear", success="clear", ac=("the count sh
     return decision("not_ready" if bad else "ready", f, by="judge:opus")
 
 
+def took(k, orig):
+    """K6 r5 M1: the KICKOFF judge `k` TAKES the person's reading (its interpretation `orig`) the way the brief asks —
+    under the fixed engine id `analysis.PERSON_READING_ID`, `chosen` = that id. Returns `k`."""
+    from workflows.dev import analysis as AN
+    for i in k.fields["interpretations"]:
+        if i["id"] == orig:
+            i["id"] = AN.PERSON_READING_ID
+    k.fields["chosen"] = AN.PERSON_READING_ID
+    return k
+
+
 def stakes(level="low", reason="local to one widget, a revert undoes it"):
     return decision(level, {"level": level, "local_reversible_reason": reason, "cites": []}, by="judge:opus")
 

@@ -5,7 +5,7 @@ import os
 import unittest
 
 import _util  # noqa: F401
-from _k4 import (ANCHOR_BAD, ANCHOR_OK, CFG, K4, comment, decision, evidence, kickoff, out_role, stakes)
+from _k4 import (ANCHOR_BAD, ANCHOR_OK, CFG, K4, comment, decision, evidence, kickoff, out_role, stakes, took)
 
 from workflows.dev import analysis as AN
 from workflows.dev.stages import analyze as A
@@ -257,8 +257,7 @@ class Attended(unittest.TestCase):
         from guildcore import ask as ASK
         # K6 r3 M1: the run after the answer carries the person's reading (B = "hide the count") — its judge takes it
         # (`chosen` B); a judge that keeps its own pick pauses instead (test_k6_r3.M1ReadingCarried)
-        k2 = kickoff(goal="unclear")
-        k2.fields["chosen"] = "B"
+        k2 = took(kickoff(goal="unclear"), "B")             # K6 r5 M1: under the fixed engine id
         h = K4(self, unattended=False, roles=[evidence(self)], judges={"KICKOFF": [kickoff(goal="unclear"), k2]})
         h.p.journal = h.journal
         r = A.run(h.p)

@@ -6,7 +6,7 @@ import json
 import unittest
 
 import _util  # noqa: F401
-from _k4 import (ANALYZE_OUT, CFG, K4, comment, decision, evidence, kickoff, out_role, techlead_ok, tester_ok)
+from _k4 import (ANALYZE_OUT, CFG, K4, comment, decision, evidence, kickoff, out_role, techlead_ok, tester_ok, took)
 
 from guildcore import ask as ASK
 from guildcore.adapters.gh import GhWriteError
@@ -221,8 +221,7 @@ class Resume(unittest.TestCase):
         h.roles += [evidence(self), out_role(self, "DONE", ac_patch=[])]
         # K6 r4: the person's reading (i1 = "hide the count", the judge's B) rides on the question as content — the
         # next judge takes it; one that keeps "show" pauses (user decision 2026-11-20)
-        k2 = kickoff(goal="unclear")
-        k2.fields["chosen"] = "B"
+        k2 = took(kickoff(goal="unclear"), "B")             # K6 r5 M1: under the fixed engine id
         h.judges["KICKOFF"] = k2
         out = driver(h, {"design": lambda p, **k: StageResult(StageResult.PAUSE, cause="design stub")}).run(7)
         self.assertIn("guild:design", h.labels())

@@ -34,6 +34,9 @@
 * K6 r3 m3 — an open candidate whose decision is GONE from the Issue's log (read, not found: an import `verify_rows`
   rejects, or `dev grade` reconciling its scope) is dropped and recorded (`dropped`) — an unreadable log keeps it;
   `report` lists the open keys (`issue/D-id`) so `dev health` names what holds a release.
+* K6 r5 m7 — an open candidate whose Issue log shows NO engine block (r4 m6: never reconciled away) is counted
+  `unread` (consecutive times; a read log resets it) and `report` shows it with the way out: the person's
+  `dev grade --drop-candidate <issue/D-id> --reason <why>` (`drop_by_human` — `dropped` with `by: human` and the reason).
 * State: `grade-state.json` → `unverified: {group: {"n", "wrong", "open", "points", "dropped", "released_at"}}` (local,
   like `watch`).
 * The live Ports read the pending set once per run (`ports.fsm_factory` → `p.unverified`); test harnesses that
@@ -165,11 +168,51 @@ def drop_gone(st, gone, now):
     return out
 
 
+def note_unread(st, keys):
+    """K6 r5 m7: open candidates whose Issue log showed NO engine block this time (`dev grade` of its scope, an import
+    `verify_rows` rejected so) — never reconciled away silently (r4 m6), but counted (`unread`: key → consecutive
+    times) so `dev health` names them and a person can decide (`dev grade --drop-candidate`). Returns the keys noted."""
+    keys = set(keys or ())
+    out = []
+    for _g, u in sorted((st.get("unverified") or {}).items()):
+        for k in u.get("open") or ():
+            if k in keys:
+                un = u.setdefault("unread", {})
+                un[k] = int(un.get(k) or 0) + 1
+                out.append(k)
+    return out
+
+
+def open_keys_of(st, issue):
+    return sorted(set(k for u in (st.get("unverified") or {}).values() for k in u.get("open") or ()
+                      if k.partition("/")[0] == str(issue)))
+
+
+def drop_by_human(st, key, reason, now):
+    """K6 r5 m7: the person's way out for an open candidate nothing can judge any more (its Issue's decision log is
+    gone — deleted comments, a changed association): `dev grade --drop-candidate <issue/D-id> --reason <why>`. Removed
+    from every group's `open` and recorded in `dropped` with `by: human` and the reason. Returns [{group, key}] (empty
+    when the key is open nowhere). A reason is required (the caller refuses an empty one)."""
+    out = []
+    for g, u in sorted((st.get("unverified") or {}).items()):
+        if key not in (u.get("open") or ()):
+            continue
+        u["open"] = [k for k in u["open"] if k != key]
+        (u.get("unread") or {}).pop(key, None)
+        u.setdefault("dropped", []).append({"key": key, "why": str(reason)[:300], "by": "human", "at": now})
+        out.append({"group": g, "key": key})
+    return out
+
+
 def reconcile(st, issue, log_ids, now):
     """K6 r3 m3: `dev grade` — the open candidates of `issue` (its log READ: `log_ids`) whose D-id the log no longer
-    has are dropped as `drop_gone` does."""
+    has are dropped as `drop_gone` does. K6 r5 m7: a read log resets their `unread` count."""
     if not log_ids:
         return []                    # K6 r4 m6: a log with no engine block was not read as trusted — never "gone"
+    for _g, u in sorted((st.get("unverified") or {}).items()):
+        for k in list((u.get("unread") or {}).keys()):
+            if k.partition("/")[0] == str(issue):
+                u["unread"].pop(k)
     gone = []
     for _g, u in sorted((st.get("unverified") or {}).items()):
         for k in u.get("open") or ():
@@ -261,6 +304,15 @@ def report(common, path=FILE):
                     # K6 r3 m3: WHICH Issue / D-id holds the release (and what was reconciled away)
                     "open": sorted(u.get("open") or ()),
                     "dropped": [d.get("key") for d in (u.get("dropped") or ())],
+                    # K6 r5 m7: the person's drops (with the reason) and the candidates whose log shows no engine
+                    # block (n times in a row) — the way out is the person's
+                    "dropped_by_human": [{"key": d.get("key"), "reason": d.get("why"), "at": d.get("at")}
+                                         for d in (u.get("dropped") or ()) if d.get("by") == "human"],
+                    "unread": dict((k, n) for k, n in sorted((u.get("unread") or {}).items())
+                                   if k in (u.get("open") or ())),
+                    "way_out": ("an open candidate whose Issue log shows no engine block holds the release — if that "
+                                "log is gone for good: dev grade --drop-candidate <issue/D-id> --reason <why>")
+                    if any(k in (u.get("open") or ()) for k in (u.get("unread") or {})) else None,
                     "wrong_after_release": int(u.get("wrong_after_release") or 0),
                     "release_by": "sheet verdicts" if g in SHEET_RELEASED else "blind answers"})
     return out

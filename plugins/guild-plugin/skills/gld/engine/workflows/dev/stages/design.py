@@ -25,6 +25,7 @@ from guildcore import ask as ASK
 from guildcore.checks import visual as V
 from guildcore.adapters.gh import GhWriteError
 from guildcore.decisions import DecisionLog
+from guildcore.records import decisions as DREC
 from guildcore.records import markers
 from guildcore.records import outputs as OUT
 from workflows.dev import analysis as AN
@@ -65,8 +66,11 @@ def visual_decision(cfg, kick, ac):
     if kick.get("ui_surface") != "true":
         return False, "no UI surface"
     pk = (cfg.get("visual") or {}).get("packages") or []
-    if pk:
-        areas = [x for x in (kick.get("areas") or "").split(",") if x]
+    raw = kick.get("areas") or ""
+    if pk and not raw.endswith(DREC.TRUNCATED):
+        # K6 r5 m3: a value the decision log cut (`…(truncated)` — a very long area list) is a head only: never read
+        # as "outside visual.packages" (the conservative side: the visual cases stay)
+        areas = [x for x in raw.split(",") if x]
         if not any(a == q or a.startswith(q.rstrip("/") + "/") or q.startswith(a.rstrip("/") + "/")
                    for a in areas for q in pk):
             return False, "UI surface outside visual.packages"

@@ -8,7 +8,7 @@ import json
 import unittest
 
 import _util  # noqa: F401
-from _k4 import K4, comment, decision, evidence, kickoff, out_role
+from _k4 import K4, comment, decision, evidence, kickoff, out_role, took
 from test_k4_fsm import driver
 from test_k5_r4 import _env
 
@@ -61,8 +61,7 @@ class M4QualifiedAnswer(unittest.TestCase):
         h.roles += [evidence(self), out_role(self, "DONE", ac_patch=[])]
         # K6 r4: the reading rides on the question as content (no journal needed) — the next judge takes the person's
         # i1 ("hide the count", its id B); one that keeps "show" pauses (user decision 2026-11-20)
-        k2 = kickoff(goal="unclear")
-        k2.fields["chosen"] = "B"
+        k2 = took(kickoff(goal="unclear"), "B")             # K6 r5 M1: under the fixed engine id
         h.judges["KICKOFF"] = k2
         driver(h, {"design": lambda p, **k: StageResult(StageResult.PAUSE, cause="design stub")}).run(7)
         self.assertIn("guild:design", h.labels())

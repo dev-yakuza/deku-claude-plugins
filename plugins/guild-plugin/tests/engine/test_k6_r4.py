@@ -7,8 +7,8 @@ Scope  KICKOFF and STAKES leave predict-first blind counting (`predict.OPEN_GROU
        is gone: the KICKOFF block carries `chosen` and its footprint, the STAKES block its reason and `irreversible`,
        openly — r4 M2 (STAKES irreversible via the gate field / level) and m3 (the close line before a blind reading
        question) have nothing left to leak into;
-M1     `judge_took` decides by CONTENT: a judge that re-letters its readings and keeps its own pick under the person's
-       old id pauses; one that takes the person's reading (verbatim, or re-worded under the named id) goes on;
+M1     `judge_took` (K6 r5: by STRUCTURE — the fixed id `person-reading`) — a judge that re-letters its readings and
+       keeps its own pick under the person's old id pauses; one that takes the person's reading goes on;
 M4     two unapplied reading answers: the answer to the LATEST question is carried, the older one retired with it — no
        permanent pause; the "reading not taken" pause offers `reask` (ask the reading again) besides `stop`;
 m1     after `apply_reading` a later capture in the same run pairs each reading with ITS captured footprint;
@@ -50,7 +50,7 @@ from workflows.dev.stages.base import StageResult
 
 SUMM, REWORD, WIDE, EXTRA = R3.SUMM, R3.REWORD, R3.WIDE, R3.EXTRA
 EXTRA_PO = dict(EXTRA, **{".claude/agents/product-owner.md": "# PO\n"})
-_blocks, _pending, _kick, _token, _run1 = R3._blocks, R3._pending, R3._kick, R3._token, R3._run1
+_blocks, _pending, _kick, _token, _run1, _took = R3._blocks, R3._pending, R3._kick, R3._token, R3._run1, R3._took
 
 
 def _applied(h):
@@ -187,17 +187,18 @@ class M1JudgeTookByContent(unittest.TestCase):
     CAP = [{"token": "i1", "orig": "B", "summary": SUMM["B"]}, {"token": "i2", "orig": "A", "summary": SUMM["A"]}]
 
     def test_table(self):
-        """re-lettering × the pick it keeps × verbatim / re-worded summaries."""
+        """re-lettering × the pick it keeps × verbatim / re-worded summaries. K6 r5 M1: taking is STRUCTURAL — only
+        `chosen` = the fixed engine id counts; the person's summary verbatim under any letter is no evidence."""
         ent = self.CAP[0]                                   # the person's reading: B = 앱 전체
-        for letters in ("same", "swapped"):
+        for letters in ("same", "swapped", "fixed"):
             for words in (SUMM, REWORD):
                 for takes in (True, False):
-                    ids = {"A": "A", "B": "B"} if letters == "same" else {"A": "B", "B": "A"}
+                    ids = {"A": "A", "B": "B"} if letters == "same" else {"A": "B", "B": "A"} \
+                        if letters == "swapped" else {"A": "A", "B": AN.PERSON_READING_ID}
                     interps = [{"id": ids[r], "summary": words[r]} for r in ("A", "B")]
                     chosen = ids["B"] if takes else ids["A"]
                     got = AN.judge_took({"chosen": chosen, "interpretations": interps}, ent, self.CAP)
-                    # a re-worded reading under ANOTHER id than the named one cannot be told apart: the safe side
-                    want = takes and (letters == "same" or words is SUMM)
+                    want = takes and letters == "fixed"
                     with self.subTest(letters=letters, reworded=words is REWORD, takes=takes):
                         self.assertEqual(got, want)
 
@@ -233,7 +234,7 @@ class M4TwoAnswers(unittest.TestCase):
         self.assertEqual(A.run(h.p).kind, StageResult.ASK)
         first = _pending(h)[-1]
         ASK.answer(h.decisions, h.writer, 7, first.id, _token(SUMM, "A"), journal=h.p.journal)
-        k2 = _kick("A", summ=REWORD)
+        k2 = _took("A", summ=REWORD)
         k2.fields["po"] = {"convene": True, "reason": "r"}
         h.judges["KICKOFF"] = k2
         self.assertEqual(A.run(h.p).kind, StageResult.ASK)                       # AN-PO re-asks readiness
@@ -248,7 +249,8 @@ class M4TwoAnswers(unittest.TestCase):
         for pick, want in (("B", StageResult.ADVANCE), ("A", StageResult.ASK)):
             with self.subTest(judge=pick):
                 h, first, second = self._two()
-                h.judges["KICKOFF"] = _kick(pick, summ=REWORD)
+                # B: the judge takes the LATEST reading (handed under the fixed id); A: it keeps the older one
+                h.judges["KICKOFF"] = _took("B", summ=REWORD) if pick == "B" else _kick("A", summ=REWORD)
                 r = A.run(h.p)
                 self.assertEqual(r.kind, want)
                 if want == StageResult.ADVANCE:
@@ -278,6 +280,7 @@ class M4TwoAnswers(unittest.TestCase):
         spent = [b.id for b in _blocks(h) if b.get("by") == "human" and b.get("resolves")]
         self.assertTrue(set(spent) <= _applied(h), (spent, _applied(h)))
         ASK.answer(h.decisions, h.writer, 7, again.id, again.get("recommended"), journal=h.p.journal)
+        h.judges["KICKOFF"] = _took("A", summ=REWORD)                # takes the reading the person chose now
         self.assertEqual(A.run(h.p).kind, StageResult.ADVANCE)
 
     def test_reask_when_unattended(self):
@@ -314,7 +317,7 @@ class m1CaptureRekeyed(unittest.TestCase):
         A.run(h.p)
         ASK.answer(h.decisions, h.writer, 7, _pending(h)[-1].id, _token(SUMM, "A"), journal=h.p.journal)
         own = {"A": {"areas": ["lib/settings"], "ui_surface": False, "cast": {"participation": [], "gates": []}}}
-        k2 = _kick("A", summ=REWORD, own=own)                      # re-worded: the canonical order flips
+        k2 = _took("A", summ=REWORD, own=own)                      # re-worded: the canonical order flips
         k2.fields["po"] = {"convene": True, "reason": "r"}
         h.judges["KICKOFF"] = k2
         self.assertEqual(A.run(h.p).kind, StageResult.ASK)

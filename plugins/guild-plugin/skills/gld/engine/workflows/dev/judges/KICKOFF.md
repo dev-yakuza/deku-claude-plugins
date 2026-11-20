@@ -13,9 +13,10 @@ citations, candidate areas). You decide; the explorer only gathered.
   and then that reading's footprint is the one used (a reading without one gets the widest: every area, a UI
   surface, every gate role).
 - `human_answers` (when present): a person already chose a reading. List THAT reading among `interpretations` with
-  the id and summary the line gives (word for word), set `chosen` to it, and write `areas`, `ui_surface`, `cast`,
-  `work_type` and the AC for it — not for the reading you would have chosen. The engine checks that the summary
-  under your `chosen` IS that reading; otherwise the run stops for the person.
+  the id `person-reading` (exactly this id, for that reading only) and the summary the line gives, set `chosen` to
+  `person-reading`, and write `areas`, `ui_surface`, `cast`, `work_type` and the AC for it — not for the reading you
+  would have chosen. The engine runs the person's stored reading under that id; any other `chosen` stops the run
+  for the person.
 - `readiness.<goal|constraint|success>.rating`: `clear` | `partial` | `unclear` | `unsure` (RD rules):
   `partial` ONLY when something in reach points at one reading — give it as `anchor`:
   `{cite: "path:line", quote}` (a repo file line the engine re-reads; quote must be on those lines ±3)

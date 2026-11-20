@@ -555,33 +555,65 @@ def reading_capture(k, root, roster, extra_areas=(), net=False, globs=None):
     return out
 
 
-def capture_fields(capture):
-    """The pending-block fields carrying `capture` as content — one compact JSON value per reading. A value over the
-    cap drops trailing areas (ordered: irreversible / harness first — `order_areas`) and says so (`more: true`)."""
+READING_MORE = "reading-areas-"    # K6 r5 m3: continuation values `reading-areas-<token>-<n>` (the rest of the areas)
+MORE_PLACEHOLDER = 999
+
+
+def _dump(e):
     import json
+    return json.dumps(e, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
+
+
+def capture_fields(capture):
+    """The pending-block fields carrying `capture` as content — one compact JSON value per reading. K6 r5 m3: nothing
+    is lost to the value cap — a reading whose JSON is over it keeps the head of its areas (ordered: irreversible /
+    harness first — `order_areas`) and carries the rest in continuation values `reading-areas-<token>-<n>` (each a
+    JSON list under the cap), `more: <n>` naming how many; `captured` puts them back together."""
     out = {}
     for e in capture or ():
         e = dict(e)
-        txt = json.dumps(e, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
-        while len(txt) > READING_CAP and e.get("areas"):
-            e["areas"], e["more"] = e["areas"][:-1], True
-            txt = json.dumps(e, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
+        txt = _dump(e)
+        rest = []
+        if len(txt) > READING_CAP and e.get("areas"):
+            areas = list(e["areas"])
+            e["areas"] = list(areas)              # never the caller's list (the capture stays whole)
+            e["more"] = MORE_PLACEHOLDER
+            while len(_dump(e)) > READING_CAP and e["areas"]:
+                rest.insert(0, e["areas"].pop())
+            chunks, cur = [], []
+            for x in rest:
+                if cur and len(_dump(cur + [x])) > READING_CAP:
+                    chunks.append(cur)
+                    cur = []
+                cur.append(x)
+            if cur:
+                chunks.append(cur)
+            e["more"] = len(chunks)
+            assert sum(len(c) for c in chunks) + len(e["areas"]) == len(areas)
+            if not chunks:
+                e.pop("more")
+            for n, c in enumerate(chunks, 1):
+                out["%s%s-%d" % (READING_MORE, e["token"], n)] = _dump(c)
+            txt = _dump(e)
         if len(txt) > READING_CAP:
             e["skipped"], e["summary"] = [], e["summary"][:120]
-            txt = json.dumps(e, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
+            txt = _dump(e)
         out[READING_FIELD + e["token"]] = txt
     return out
 
 
 def captured(block):
     """(capture | None, why) of a pending KICKOFF question block: `why` = "legacy" (no capture — a question asked before
-    r3), "unreadable" (a field that does not parse), or None."""
+    r3), "unreadable" (a field that does not parse), or None. K6 r5 m3: the continuation values are joined back; an
+    entry whose rest cannot be read (missing / broken, or an r4 capture's bare `more: true`) keeps `more: true` — its
+    areas are a HEAD only, and `apply_reading` then widens to the conservative superset."""
     import json
     fields = getattr(block, "fields", None)
     items = list(fields) if isinstance(fields, list) else list((block or {}).items()) if isinstance(block, dict) else []
     vals = [(k, v) for k, v in items if str(k).startswith(READING_FIELD)]
     if not vals:
         return None, "legacy"
+    cont = dict((str(k), v) for k, v in items if str(k).startswith(READING_MORE))
     out = []
     for k, v in vals:
         try:
@@ -590,6 +622,25 @@ def captured(block):
             return None, "unreadable"
         if not isinstance(e, dict) or e.get("token") != k[len(READING_FIELD):]:
             return None, "unreadable"
+        m = e.get("more")
+        if isinstance(m, int) and not isinstance(m, bool) and m > 0:
+            extra = []
+            for n in range(1, m + 1):
+                try:
+                    c = json.loads(markers.unescape(cont.get("%s%s-%d" % (READING_MORE, e["token"], n))))
+                except (TypeError, ValueError):
+                    c = None
+                if not isinstance(c, list) or not all(isinstance(x, str) for x in c):
+                    extra = None
+                    break
+                extra += c
+            if extra is None:
+                e["more"] = True               # the rest is lost — a head only
+            else:
+                e["areas"] = list(e.get("areas") or []) + extra
+                e.pop("more")
+        elif m:
+            e["more"] = True
         out.append(e)
     return sorted(out, key=lambda e: e["token"]), None
 
@@ -603,22 +654,34 @@ def _raw_of(e):
             "work_type": e.get("work_type")}
 
 
-def apply_reading(k, capture, token, root):
+def apply_reading(k, capture, token, root, widen=()):
     """The person's reading (`token` of the question-time `capture`) as THIS run's KICKOFF result: the readings,
     tokens and aliases of that question, `chosen` = the person's, and its footprint (areas re-checked to exist).
     K6 r4 m1: every reading's own footprint is the captured one from now on (`own_footprints` re-keyed to the captured
     tokens — a later capture in this run never pairs a token with another reading's footprint).
+    K6 r5 m3: an entry whose areas are a head only (`more: true` — its rest was lost) is never taken as the whole
+    footprint: its areas widen to the conservative superset (every captured reading's areas, this run's judge areas
+    and `widen` — the explorer's directories).
     Returns the captured entry, or None (the token is not one of the captured readings)."""
     ent = next((e for e in capture or () if e.get("token") == token), None)
     if ent is None:
         return None
+    judge_areas = list(k.areas or ())
     k.interpretations = [{"id": e["token"], "summary": e.get("summary") or "", "orig": e.get("orig") or ""}
                          for e in capture]
     k.token_map = [{"token": i["id"], "orig": i["orig"]} for i in k.interpretations]
     k.aliases = dict((i["id"], [i["orig"], i["summary"]]) for i in k.interpretations)
     k.own_footprints = dict((e["token"], _raw_of(e)) for e in capture)
     k.chosen = token
-    k.areas = real_dirs(root, ent.get("areas") or [])
+    areas = list(ent.get("areas") or [])
+    if ent.get("more"):
+        sup = set(areas) | set(judge_areas) | set(widen or ())
+        for e in capture:
+            sup |= set(e.get("areas") or ())
+        areas = sorted(sup)
+        k.coerced.append("reading %s: its captured areas were cut — the conservative superset (%d areas)"
+                         % (token, len(areas)))
+    k.areas = real_dirs(root, areas)
     k.ui_surface = bool(ent.get("ui_surface"))
     k.safety_net_visual = bool(ent.get("safety_net_visual")) and k.safety_net_visual_possible
     k.cast = {"participation": list(ent.get("participation") or []), "gates": list(ent.get("gates") or []),
@@ -629,44 +692,50 @@ def apply_reading(k, capture, token, root):
     return ent
 
 
-def _bigrams(s):
-    t = "".join(s.split())
-    return set(t[i:i + 2] for i in range(len(t) - 1)) or ({t} if t else set())
+def footprint_of(k):
+    """K6 r5 m6: this run's judge's top-level footprint (before `apply_reading` replaces it)."""
+    return {"areas": list(k.areas or ()), "ui_surface": bool(k.ui_surface),
+            "safety_net_visual": bool(k.safety_net_visual),
+            "participation": list(k.cast.get("participation") or ()), "gates": list(k.cast.get("gates") or ()),
+            "po_convene": bool(k.po.get("convene"))}
 
 
-def _sim(a, b):
-    x, y = _bigrams(a), _bigrams(b)
-    return (2.0 * len(x & y) / (len(x) + len(y))) if (x or y) else 0.0
+def widen_reading(k, fp):
+    """K6 r5 m6: a judge that TOOK the person's reading wrote its top-level footprint for that reading — the result is
+    the UNION of it and the question-time capture (areas · roles), `ui_surface` / `safety_net_visual` / PO OR-ed:
+    the conservative side (a capture is often a rough estimate of a reading the judge did not choose then)."""
+    k.areas = sorted(set(k.areas or ()) | set(fp.get("areas") or ()))
+    k.ui_surface = bool(k.ui_surface or fp.get("ui_surface"))
+    k.safety_net_visual = bool((k.safety_net_visual or fp.get("safety_net_visual")) and k.safety_net_visual_possible)
+    gates = set(k.cast.get("gates") or ()) | set(fp.get("gates") or ())
+    part = (set(k.cast.get("participation") or ()) | set(fp.get("participation") or ())) - gates
+    k.cast = {"participation": sorted(part), "gates": sorted(gates),
+              "skipped": [x for x in k.cast.get("skipped") or () if not any(
+                  str(x).startswith(r) for r in part | gates)]}
+    k.po = dict(k.po, convene=bool(k.po.get("convene") or fp.get("po_convene")))
 
 
-def judge_took(fields, ent, capture=()):
-    """Did this run's KICKOFF judge take the person's reading `ent` as its `chosen`? K6 r4 M1: by CONTENT, never by an
-    id alone (a judge re-letters its readings freely): the summary the judge gives its chosen id is the person's
-    reading's summary (whitespace / case folded), or — under the id the brief named (the reading's id when asked) — a
-    re-wording strictly closer (character bigrams) to the person's reading than any other reading the judge lists and
-    than every other captured reading."""
+# K6 r5 M1 / m1: the person's reading is handed to the judge under this FIXED engine id (never the judge's earlier id —
+# a judge re-letters freely and may list its own reading under that letter) with the reading's exact text. Taking it
+# is STRUCTURAL: `chosen` is this id. The engine then runs the STORED reading (the capture's summary and footprint —
+# `apply_reading`), whatever words the judge gives it, so a re-wording costs nothing (m1) and the judge's own text can
+# never put another scope under the person's name (M1: "로그인 화면만" ← "로그인 화면 제외" — text closeness cannot see
+# a negation, so no text is evidence of taking).
+PERSON_READING_ID = "person-reading"
+
+
+def judge_took(fields, ent=None, capture=()):
+    """Did this run's KICKOFF judge take the person's reading? K6 r5 M1: by STRUCTURE only — its `chosen` is the
+    fixed engine id `PERSON_READING_ID` and exactly one of its `interpretations` carries that id. Any other id (the
+    judge's earlier letter included), the id absent or listed twice → not taken (user decision 2026-11-20: pause).
+    `ent` / `capture` are no longer read (the stored reading is what runs — `apply_reading`); kept for callers."""
     f = fields or {}
     norm = lambda x: " ".join(str(x or "").split()).casefold()              # noqa: E731
-    ch = norm(f.get("chosen"))
-    mine = [i for i in (f.get("interpretations") or []) if isinstance(i, dict) and norm(i.get("id")) == ch]
-    if not ch or not mine:
+    pid = PERSON_READING_ID.casefold()
+    if norm(f.get("chosen")) != pid:
         return False
-    s, e = norm(mine[0].get("summary")), norm(ent.get("summary"))
-    if not s or not e:
-        return False
-    if s == e:
-        return True
-    if ch != norm(ent.get("orig")):
-        return False
-    # the judge's OTHER readings: none of them may be the person's reading (re-lettered) or closer to it
-    rest = [norm(i.get("summary")) for i in (f.get("interpretations") or []) if isinstance(i, dict) and i is not mine[0]]
-    if any(r == e or _sim(r, e) >= _sim(s, e) for r in rest if r):
-        return False
-    # and the re-wording is closer to the person's reading than to every other reading the question offered
-    others = [norm(x.get("summary")) for x in capture or () if x.get("token") != ent.get("token")]
-    if any(s == o for o in others):
-        return False
-    return all(_sim(s, e) > _sim(s, o) for o in others if o)
+    mine = [i for i in (f.get("interpretations") or []) if isinstance(i, dict) and norm(i.get("id")) == pid]
+    return len(mine) == 1
 
 
 def canon_key(interp):

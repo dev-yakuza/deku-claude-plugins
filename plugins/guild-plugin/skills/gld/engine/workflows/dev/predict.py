@@ -389,6 +389,20 @@ _SOURCE_REF = re.compile(r"(?:제목|본문|요청|이슈|설명|보고)\s*(?:�
                          r"(?:제목|요청|이슈|설명)\s*에\s*(?:있는|없는|나온|적힌|들어간)\s*(?:것|부분|범위|화면|내용|기능)|"
                          r"\b(?:requested|described|reported|titled)\b|"
                          r"\bper\s+(?:the\s+)?(?:title|issue|ticket|request|body|description)\b", re.I)
+# K6 r5 m4 (structural — word lists of source nouns kept missing synonyms: 타이틀 · 티켓 · named …): a scope set BY the
+# source is a scope whose object is qualified by an act of SAYING / NAMING / LISTING — whoever said it and whatever
+# the source noun ("언급된 화면만", "명시 안 된 화면 포함", "named screen only", "unnamed screens too", "the screens
+# listed", "記載された画面のみ", "挙げられた画面以外"). Those verbs of reference (as a modifier: participle / relative
+# form, either polarity) are the class; the source nouns are an open set and need not be listed. Plus the source
+# nouns' plain synonyms (타이틀 as the Issue's 제목, 티켓, 件名, チケット, OP).
+_REF_ACT = re.compile(r"(?:언급|명시|기재|거론|지목|열거|나열|명기|적시)\s*(?:된|한|되지|하지|안\s*된|\s*안\s*한|되어|돼|됨)|"
+                      r"(?:말한|말하지\s*않은|적힌|적혀\s*있는|짚은)(?=\s|$)|"
+                      r"(?:言及|明記|明示|記載|列挙|名指し|指名)\s*(?:された|されて|され|の(?:ある|ない)|済み|なし|あり)|"
+                      r"(?:挙げ|書か|書い|示さ|触れ)(?:られた|れた|た|ていない|ない|れていない)|"
+                      r"\b(?:un)?(?:named|mentioned|listed|stated|specified|cited|referenced|enumerated|quoted)\b|"
+                      r"\bcalled[- ]out\b|\bspelled[- ]out\b|\bnot\s+(?:named|mentioned|listed|stated|specified|cited)\b", re.I)
+# (원문 / 原文 are not on it: a quiz's or a translation's "original text" is a product noun — measured, k6-notes r5)
+_SOURCE_SYN = re.compile(r"타이틀|티켓|件名|チケット|\btickets?\b|\bOP\b|\boriginal\s+post\b", re.I)
 _NEGATION = re.compile(r"않|없이|아니|n't|not|no|never|しない|せず", re.I)   # a scope match that only negates
 _CLAUSES = re.compile(r"\s*[,、，;；]\s*")
 _CLOSE = {"(": ")", "（": "）", "[": "]", "【": "】"}
@@ -434,6 +448,21 @@ def _literal(t):
     return ident
 
 
+_CODE_LITERALS = ("null", "nil", "none", "true", "false", "undefined", "nan", "void")
+
+
+def _ident_shaped(x):
+    """K6 r5 m5: may a code span stand as a literal? — anything but ONE plain word: an identifier / path / call / flag /
+    version / constant (`_runAutoSync`, `snake_case`, `camelCase`, `lib/app`, `Get.back()`, `--force`, `v2`, `CSV`,
+    `:3180-3218`), a code literal (`null`, `true`), a symbol without letters (`,`), or several words (a quoted name or
+    phrase — `Single PR`, `수렴 뒤 …`). A single plain word (`safe`, `high`, `ok`, `ng`) is read as that word."""
+    x = str(x or "").strip()
+    if not x or re.search(r"\s", x) or not re.search(r"[^\W\d_]", x):
+        return True
+    return bool(re.search(r"[_./()\[\]{}:#$<>=*\\@0-9-]", x) or re.search(r"[a-z][A-Z]", x)
+                or re.fullmatch(r"[A-Z]{2,}s?", x) or x.casefold() in _CODE_LITERALS)
+
+
 def clause_kind(text):
     """K6 r2 M3: "remark" | "scope" | "scope-rating" | "other" for one clause of an aside / a dropped tail.
     K6 r3: the order is (1) a numeric / symbolic rating (`num_rating`) → refused ("scope-rating" with a scope word,
@@ -454,16 +483,25 @@ def clause_kind(text):
         inner = [x.strip("`").strip() for x in spans]
         if any(NUM_RATING.search(x) or _PROB.search(x) or re.fullmatch(r"[+-]?\d+(?:[.,]\d+)?", x) for x in inner):
             return "other"
+        # K6 r5 m5: a span that is no identifier (plain words: `safe`, `risky`, `high`, `ok`, `ng`, `Single PR`) is
+        # no literal — read as the words it holds, exactly as without the backticks (a rating word then refuses)
+        if not all(_ident_shaped(x) for x in inner):
+            return clause_kind(_CODE_SPAN.sub(lambda m: " " + m.group(0).strip("`") + " "
+                                              if not _ident_shaped(m.group(0).strip("`").strip()) else m.group(0), t))
     if num_rating(t):
         return "scope-rating" if sc else "other"
     if FIT.search(bare) and all(_NEGATION.fullmatch(m.group(0).strip()) for m in _SCOPE.finditer(bare)):
         return "remark"          # "(제목과 어울리지 않음)", "(the title does not mention login)": a fit remark, negated
+    if _REF_ACT.search(bare):
+        # K6 r5 m4: a clause about what the source named / listed ("unnamed screens too", "언급 안 된 것도") states a
+        # scope relative to the source even without a scope word — never cut silently, never shown: refused
+        return "other"
     if rates(bare):
         return "scope-rating" if sc else "remark"
     if _literal(t):
         return "scope"
     ref = bool(_REMARK_REF.search(bare))
-    src = bool(_SOURCE_REF.search(bare))
+    src = bool(_SOURCE_REF.search(bare) or _REF_ACT.search(bare) or _SOURCE_SYN.search(bare))
     if sc:
         # K6 r4 M3: a scope set BY the source ("(제목 범위만)", "(per the title only)", "(only what the title names)",
         # "(requested screen only)") is a faithfulness remark AND a scope — neither shown nor dropped: refused

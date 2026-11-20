@@ -332,11 +332,15 @@ def run(p, only=None, config_present=True):
         cap = (readings.get(kind) or (None, None))[0]
         ent = next((x for x in cap or () if x.get("token") == res.get("choice")), None)
         if ent is not None:
+            # K6 r5 M1: under the FIXED engine id (`analysis.PERSON_READING_ID`), never the judge's earlier letter —
+            # taking it is choosing that id; the engine runs the stored reading, whatever the judge's words
+            pid = AN.PERSON_READING_ID
             applied_lines.append(
-                "human answer %s to %s question %s: the person chose the reading «%s» (your id for it then: %s). "
-                "Take it: list it among `interpretations` with id %s and this summary and set `chosen` to %s; "
-                "`areas`, `ui_surface`, `cast`, `work_type` and the AC are this reading's." % (
-                    res.id, kind, q.id, ent.get("summary"), ent.get("orig"), ent.get("orig"), ent.get("orig")))
+                "human answer %s to %s question %s: the person chose the reading «%s». Take it: list it among "
+                "`interpretations` with the id `%s` (exactly this id — no other reading may use it) and this summary, "
+                "and set `chosen` to `%s`; `areas`, `ui_surface`, `cast`, `work_type` and the AC are this reading's. "
+                "Any other `chosen` stops the run for the person." % (
+                    res.id, kind, q.id, ent.get("summary"), pid, pid))
         else:
             applied_lines.append("human answer %s to %s question %s: %s" % (res.id, kind, q.id, res.get("choice")))
     brief = [("issue", issue_text), ("comments", comments_text or "(none)"),
@@ -357,6 +361,7 @@ def run(p, only=None, config_present=True):
     ev_areas = [a.get("path") for a in (ev.get("areas") or []) if isinstance(a, dict) and isinstance(a.get("path"), str)]
     # K6 r3 M1: the person's reading — from the question-time capture (readings, tokens, `chosen`, footprint)
     reading_stop = None
+    judge_fp = AN.footprint_of(k)            # K6 r5 m6: the judge's own footprint, before the capture replaces it
     for kind in READING_KINDS:
         if kind not in answers:
             continue
@@ -364,15 +369,19 @@ def run(p, only=None, config_present=True):
         ch_ = res_.get("choice")
         cap, why = readings.get(kind) or (None, "legacy")
         if cap is not None:
-            ent = AN.apply_reading(k, cap, ch_, p.root)
+            ent = AN.apply_reading(k, cap, ch_, p.root, widen=AN.real_dirs(p.root, ev_areas))
             if ent is None:
                 reading_stop = "답 %s(%s)이 질문 %s 의 해석 중 하나가 아님" % (res_.id, ch_, q_.id)
             else:
                 k.coerced.append("reading = the person's %s (answer %s, captured at %s)" % (ch_, res_.id, q_.id))
                 if not AN.judge_took(d.fields, ent, cap):
-                    # user decision 2026-11-20: its AC / readiness are another reading's — never written as the person's
-                    reading_stop = ("KICKOFF 판단이 사람이 고른 해석 «%s»(답 %s)을 따르지 않음 — 판단의 AC 는 다른 해석의 것"
-                                    % (B.one_line(ent.get("summary") or "", 80), res_.id))
+                    # user decision 2026-11-20: its AC / readiness are another reading's — never written as the person's.
+                    # K6 r5 M1: taking = choosing the fixed id `person-reading` (no text closeness is evidence)
+                    reading_stop = ("KICKOFF 판단이 사람이 고른 해석 «%s»(답 %s)을 따르지 않음(`chosen` 이 `%s` 아님) — "
+                                    "판단의 AC 는 다른 해석의 것" % (B.one_line(ent.get("summary") or "", 80), res_.id,
+                                                                AN.PERSON_READING_ID))
+                else:
+                    AN.widen_reading(k, judge_fp)      # K6 r5 m6: capture ∪ the taking judge's footprint
         elif why == "unreadable":
             # the capture on the question does not parse: the token alone would name whatever reading THIS run's
             # order puts there — stop (with the way out: ask the reading again) instead of guessing
@@ -480,9 +489,9 @@ def run(p, only=None, config_present=True):
                     q = ASK.Question("interpretation-surface", what, opts,
                                      recommended=k.chosen if k.chosen in [o["token"] for o in opts] else None,
                                      recommended_by=d.by, aliases=k.aliases,
-                                     raised_by="judge-surface" if judge_asked else ("reask" if reask and not
-                                                                                     FS.confirm_interpretation(p)
-                                                                                     else "confirm"))
+                                     # K6 r5 m2: a question raised by a person's `reask` is `reask` in every
+                                     # state (first sprint / KICKOFF unverified too) — never another sheet row
+                                     raised_by="judge-surface" if judge_asked else ("reask" if reask else "confirm"))
                     a6 = ("ask", with_readings(q), what)
         else:
             chosen_txt = next((i["summary"] for i in k.interpretations if i["id"] == k.chosen), "")
@@ -517,8 +526,11 @@ def run(p, only=None, config_present=True):
                                  recommended_by=d.by, stakes="high", aliases=k.aliases,
                                  # K5r6-m4: `unclear` = the judge could not decide; `partial` + STAKES high = the
                                  # judge could, the engine asks (confirm); K6 r4: a person's `reask` → `reask`
+                                 # K6 r5 m2: and a question raised in a `reask` run is `reask` whatever else holds
+                                 # (conservative / unverified KICKOFF, a high dimension) — the Issue's reading point
+                                 # already has its sheet row; a re-ask cycle never adds another
                                  raised_by="judge-unclear" if dim and k.readiness[dim] == "unclear" else
-                                 ("confirm" if dim or cons_k else "reask"))
+                                 ("reask" if reask else "confirm"))
                 # K5r3-m3: the enumeration in the canonical order (never the judge's ranking)
                 a6 = ("pause", with_readings(q), line, "선택지: " + " | ".join("%s = %s" % (o["token"], o["label"])
                                                                for o in PF.canonical(opts) if o["token"] != "stop"))

@@ -463,7 +463,8 @@ def verify_rows(rows, blocks_of):
             # trusted, Issue moved) — nothing is left to judge, so its open candidate is reconciled away (reported);
             # an unreadable log keeps it (transient)
             rejected.append({"decision_id": r.get("decision_id"), "issue": r.get("issue"), "why": why,
-                             "gone": why.startswith("no such")})
+                             "gone": why.startswith("no such"), "unread": why.startswith("the Issue's decision log "
+                                                                                          "shows no engine block")})
             continue
         g, irr = engine_view(b)
         if not g:
@@ -510,7 +511,8 @@ def import_sheet(common, text, repo, irreversible=irreversible_row, blocks_of=No
     else:                                                    # K5r8-m4: a sheet's own `decided_at` is not trusted
         rows = [dict(r, decided_at="") for r in rows]
     res = apply_judgments(common, rows, repo, "human", irreversible,
-                          gone=[x for x in rejected if x.get("gone")])
+                          gone=[x for x in rejected if x.get("gone")],
+                          unread=["%s/%s" % (x.get("issue"), x.get("decision_id")) for x in rejected if x.get("unread")])
     if rejected:
         res["rejected"] = rejected
     gv_rows = latest_grader_rows(common, repo)
@@ -549,7 +551,7 @@ def on_release(common):
 
 
 def apply_judgments(common, rows, repo, version, irreversible=lambda row: False, candidates=None, gone=(),
-                    logs=None):
+                    logs=None, unread=()):
     """Human judgments (sheet rows or predict-first answers) → grades.jsonl (key (repo, issue, D-id, version),
     present keys skipped) → the count rules. K5r6-M3: `conservative` lists only groups whose valve is IN FORCE after
     this import (the count rule set it now, or it already was); a set the valves refused is `blocked_by_release`."""
@@ -562,8 +564,13 @@ def apply_judgments(common, rows, repo, version, irreversible=lambda row: False,
     if candidates is not None:
         UV.note_candidates(st, candidates)            # K6 r1 m1: no release while a candidate of the group is open
     dropped = UV.drop_gone(st, gone, _now()) if gone else []      # K6 r3 m3
+    unread_keys = list(unread or ())
     for n_, ids in sorted((logs or {}).items()):                   # K6 r3 m3: `dev grade` reconciles its scope
-        dropped += UV.reconcile(st, n_, ids, _now())
+        if ids:
+            dropped += UV.reconcile(st, n_, ids, _now())
+        else:
+            unread_keys += UV.open_keys_of(st, n_)                 # K6 r5 m7: no engine block — counted, not dropped
+    noted = UV.note_unread(st, unread_keys) if unread_keys else []
     released_at = VALVES.load(common)["human"].get("released_at") or {}
     blocked, forgiven, released = [], [], []
     n, cons, watch = 0, [], []
@@ -619,6 +626,8 @@ def apply_judgments(common, rows, repo, version, irreversible=lambda row: False,
         out["forgiven_by_release"] = forgiven
     if dropped:
         out["candidates_dropped"] = dropped
+    if noted:
+        out["candidates_unread"] = sorted(set(noted))      # K6 r5 m7: `dev health` shows them with the way out
     if released:
         out["unverified_released"] = sorted(set(released))
     return out
@@ -804,9 +813,34 @@ def trust_of(item):
     return "member" if a in markers.TRUSTED else "outsider"
 
 
+def drop_candidate(common, key, reason):
+    """K6 r5 m7: `dev grade --drop-candidate <issue/D-id> --reason <why>` — the person drops an open candidate nothing
+    can judge any more (logged in the group's `dropped` with `by: human` and the reason); then the release check (it
+    may have been the last hold). A reason is required."""
+    import re as _re
+    if not _re.fullmatch(r"[0-9]+/D[0-9]+(?::a[0-9]+)*", str(key or "")):
+        return {"error": "--drop-candidate takes <issue>/<D-id> (as `dev health` lists it), e.g. 4/D9"}
+    if not str(reason or "").strip():
+        return {"error": "--drop-candidate needs --reason <why> (recorded with the drop)"}
+    st = load_state(common)
+    dropped = UV.drop_by_human(st, key, reason.strip(), _now())
+    if not dropped:
+        return {"error": "%s is not an open candidate of any unverified group (dev health lists them)" % key}
+    released = UV.release_check(st, _now())
+    J.atomic_write(state_path(common), json.dumps(st, sort_keys=True, indent=1))
+    out = {"candidates_dropped": dropped, "by": "human", "reason": reason.strip()}
+    if released:
+        out["unverified_released"] = sorted(set(released))
+    return out
+
+
 def main(d, a):
     from guildcore import emit
     common = d.common()
+    if getattr(a, "drop_candidate", None):
+        res = drop_candidate(common, a.drop_candidate, getattr(a, "reason", None))
+        emit.engine(res, out=d.out)
+        return 64 if "error" in res else 0
     if a.import_csv:
         with open(a.import_csv, encoding="utf-8") as fh:
             text = fh.read()
@@ -852,8 +886,9 @@ def main(d, a):
     pf_cands = [r for r in pf_cands if (str(r["issue"]), r["decision_id"]) not in confirmed]
     # `ok`s only (K5r5-M2); K6 r1 m1: the candidates still open hold back their group's §10.2-6 release
     # K6 r4 m6: only a log that shows engine blocks reconciles (an empty one is unread, not "every decision gone")
+    # K6 r5 m7: an empty one is passed too — its open candidates are counted `unread` (shown, the person's way out)
     pf = apply_judgments(common, pf_rows, repo, "predict-first", candidates=pf_cands,
-                         logs=dict((n, set(b.id for b in bs)) for n, bs in logs.items() if bs))
+                         logs=dict((n, set(b.id for b in bs)) for n, bs in logs.items()))
     watch = sorted((load_state(common).get("watch") or {}).keys())
     valves = VALVES.effective(common, d.env)
     cfg = d.config(d.toplevel())
