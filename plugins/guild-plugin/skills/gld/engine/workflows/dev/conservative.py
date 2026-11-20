@@ -34,7 +34,8 @@ decides the same way even when the role inputs match (the brief carries what no 
 
 EX-ARB is not gated here: its conservative side is the first-sprint coercion (`firstsprint.no_dismiss` →
 `coerced_by: conservative`, BLOCKER/MAJOR dismiss → accept). KICKOFF: the interpretation is confirmed with a person
-(`analyze` — attended `firstsprint.confirm_interpretation`, unattended a blind pause). The §10.2-6 unverified groups
+(`analyze` — attended `firstsprint.confirm_interpretation`, unattended a pause; asked openly since K6 r4 — STAKES' gate
+question too: `predict.OPEN_GROUPS`). The §10.2-6 unverified groups
 (K6 replay output) join through `active`.
 """
 
@@ -45,7 +46,7 @@ STALE = "stale"                 # K6 (item 40): the point of the block that reti
 # here unless it has its own conservative side, named with the reason (a new §9.5 group is gated by default, and the
 # K5 r9/r10/r11 tables then fail until it has a scenario, its shapes and its expectations)
 NOT_GATED = {
-    "KICKOFF": "analyze confirms the interpretation blind (firstsprint.confirm_interpretation)",
+    "KICKOFF": "analyze confirms the interpretation with a person, openly (firstsprint.confirm_interpretation)",
     "EX-ARB-dismiss": "BLOCKER/MAJOR dismiss is coerced to accept (firstsprint.no_dismiss)",
     "EX-ARB-accept": "accept is the conservative side of EX-ARB itself",
     "ESCALATE": "no G-ESCALATE judge is wired: every unknown state pauses for a person (k6-notes item 14)",

@@ -59,7 +59,11 @@ class M4QualifiedAnswer(unittest.TestCase):
         h, r = self._paused()
         self._answer(h, "guild-answer: #7/%s i1" % r.qid)
         h.roles += [evidence(self), out_role(self, "DONE", ac_patch=[])]
-        h.judges["KICKOFF"] = kickoff(goal="unclear")
+        # K6 r4: the reading rides on the question as content (no journal needed) — the next judge takes the person's
+        # i1 ("hide the count", its id B); one that keeps "show" pauses (user decision 2026-11-20)
+        k2 = kickoff(goal="unclear")
+        k2.fields["chosen"] = "B"
+        h.judges["KICKOFF"] = k2
         driver(h, {"design": lambda p, **k: StageResult(StageResult.PAUSE, cause="design stub")}).run(7)
         self.assertIn("guild:design", h.labels())
         self.assertIn("- (선택) i1: hide the count", h.body_with("analyze:output"))

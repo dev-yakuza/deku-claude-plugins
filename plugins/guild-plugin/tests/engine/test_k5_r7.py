@@ -273,7 +273,8 @@ class M2Labels(unittest.TestCase):
 
     def test_identical_labels_after_the_cut_refuse(self):
         e, p = _env(self)
-        q = ASK.Question("readiness", "goal unclear — choose", [{"token": "i1", "label": "다크 모드 (가능성 낮음)"},
+        # K6 r4: a blind group's question (KICKOFF is asked openly now)
+        q = ASK.Question("escalation", "goal unclear — choose", [{"token": "i1", "label": "다크 모드 (가능성 낮음)"},
                                                                  {"token": "i2", "label": "다크 모드 (가능성 높음)"},
                                                                  {"token": "stop", "label": "stop"}],
                          recommended="i2", recommended_by="judge:opus")

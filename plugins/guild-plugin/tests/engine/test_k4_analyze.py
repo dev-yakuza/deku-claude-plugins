@@ -240,17 +240,17 @@ class Attended(unittest.TestCase):
         # the count", listed first by the judge, is i2)
         self.assertEqual([(o["token"], o["label"]) for o in ask["options"]],
                          [("i1", "hide the count"), ("i2", "show the count"), ("stop", "stop")])
-        # K6 predict-first (§2.6, R5J-M4): KICKOFF is a high-risk group — the person answers before seeing
-        # the recommendation; the pending block commits to it (`recommended_sha`), the KICKOFF block seals `chosen`
-        self.assertTrue(ask["predict_first"])
-        self.assertNotIn("recommended", ask)
+        # K6 r4 (user decision 2026-11-20): KICKOFF is asked openly — the recommendation is shown, the answer never
+        # counted (a grading-sheet row when the engine raised it); the KICKOFF block carries `chosen` openly
+        self.assertFalse(ask["predict_first"])
+        self.assertEqual(ask["recommended"], "i2")
         pend = [b for b in h.decisions_of("ask:readiness") if b.get("status") == "pending-human"][0]
-        self.assertIsNone(pend.get("recommended"))
-        self.assertTrue(pend.get("recommended_sha"))
-        self.assertEqual(pend.get("predict_first"), "high-risk")
+        self.assertEqual(pend.get("recommended"), "i2")
+        self.assertIsNone(pend.get("recommended_sha"))
+        self.assertIsNone(pend.get("predict_first"))
         kick = h.decisions_of("KICKOFF")[0]
-        self.assertIsNone(kick.get("chosen"))
-        self.assertTrue(kick.get("chosen_sha"))
+        self.assertEqual(kick.get("chosen"), "i2")
+        self.assertIsNone(kick.get("chosen_sha"))
         self.assertNotIn("STAKES", [s.group for s in h.calls["judges"]])
 
     def test_answer_overriding_recommendation_is_applied_and_captured(self):
@@ -260,14 +260,11 @@ class Attended(unittest.TestCase):
         k2 = kickoff(goal="unclear")
         k2.fields["chosen"] = "B"
         h = K4(self, unattended=False, roles=[evidence(self)], judges={"KICKOFF": [kickoff(goal="unclear"), k2]})
-        h.p.journal = h.journal                    # K6: the nonce of the hidden recommendation lives in the journal
+        h.p.journal = h.journal
         r = A.run(h.p)
-        res_id = ASK.answer(h.decisions, h.writer, h.n, r.qid, "i1", journal=h.journal)
-        rev = [b for b in h.decisions_of("ask:readiness") if b.id == res_id][0]
-        self.assertEqual(rev.get("recommended"), "i2")                       # revealed only after the answer
-        import hashlib
+        ASK.answer(h.decisions, h.writer, h.n, r.qid, "i1", journal=h.journal)
         pend = [b for b in h.decisions_of("ask:readiness") if b.id == r.qid][0]
-        self.assertEqual(hashlib.sha256(("i2" + rev.get("nonce")).encode()).hexdigest(), pend.get("recommended_sha"))
+        self.assertEqual(pend.get("recommended"), "i2")                      # K6 r4: shown with the question
         h.roles += [evidence(self), out_role(self, "DONE", ac_patch=[])]
         r2 = A.run(h.p)
         self.assertEqual(r2.kind, StageResult.ADVANCE)

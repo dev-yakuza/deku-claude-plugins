@@ -45,6 +45,12 @@ class M1EveryGatedGroupBlind(unittest.TestCase):
         for group, y in gated_cases():
             with self.subTest(group=group, judge=y):
                 h, q = first_question(self, group, y)
+                if group in PF.OPEN_GROUPS:
+                    # K6 r4 (user decision 2026-11-20): STAKES is asked openly — the recommendation shown, never counted
+                    self.assertFalse(q.get("predict_first"))
+                    self.assertEqual(q.get("recommended"), y)
+                    self.assertTrue(str(q.get("predict_first_counted")).startswith("false — open"))
+                    continue
                 self.assertIsNone(q.get("predict_first_refused"), (group, y, q.get("question")))
                 self.assertTrue(q.get("recommended_sha"))
                 self.assertIsNone(q.get("recommended"))
@@ -146,6 +152,9 @@ class M2ConfirmTheJudge(unittest.TestCase):
                 if group != "TEST":                          # TEST logs its effect (`effective:…;uncovered:…`)
                     self.assertEqual(b.get("choice"), y)
                 q = [x for x in o["all"] if x.get("kind") == CONS.KIND and x.get("status") == "pending-human"]
+                if group in PF.OPEN_GROUPS:                  # K6 r4: asked openly
+                    self.assertTrue(q and all(x.get("recommended") == y and not x.get("predict_first") for x in q))
+                    continue
                 self.assertTrue(q and all(x.get("recommended_sha") and not x.get("predict_first_refused") for x in q))
 
 

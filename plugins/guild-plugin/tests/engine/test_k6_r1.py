@@ -151,7 +151,7 @@ class M2AfterReveal(unittest.TestCase):
         return G.predict_first_judgments(_blocks(h), 7)
 
     def test_every_group_reasked_point_is_uncounted(self):
-        for g in CONS.GATED:
+        for g in [x for x in CONS.GATED if x not in UV.OPEN_ASKED]:     # K6 r4: STAKES is asked openly (test_k6_r4)
             y = _nonsafe(g)[0]
             with self.subTest(group=g):
                 h = _h(self)
@@ -333,28 +333,26 @@ class M4Labels(unittest.TestCase):
 
     def test_same_head_different_asides_refuse_blind(self):
         h = qa_harness(self, roles=[role("DONE", plan="qa-report.md", human_items=[], followups=[])])
-        h.p._first_sprint = False
-        q = ASK.Question("interpretation-surface", "어느 해석?", [{"token": "i1", "label": "알림 (푸시)"},
+        h.p._first_sprint = False          # K6 r4: a blind group's question (KICKOFF is open)
+        q = ASK.Question("leaf-split", "어느 쪽?", [{"token": "i1", "label": "알림 (푸시)"},
                                                              {"token": "i2", "label": "알림 (이메일)"},
                                                              {"token": "stop", "label": "stop"}],
-                         recommended="i1", recommended_by="judge:opus", raised_by="confirm",
-                         neutral=PF.neutral_text("interpretation", 7))
-        PF.apply(h.p, q, "analyze")
+                         recommended="i1", recommended_by="judge:opus", raised_by="confirm")
+        PF.apply(h.p, q, "design")
         self.assertFalse(q.neutralized)                                   # refused: never a counted blind answer
         self.assertTrue(q.blind_refused)
 
     def test_kickoff_pairs_go_out_without_the_remark(self):
         h = qa_harness(self, roles=[role("DONE", plan="qa-report.md", human_items=[], followups=[])])
-        h.p._first_sprint = False
+        h.p._first_sprint = False          # K6 r4: a blind group's question (KICKOFF is open)
         for a, b in (("로그인만 (자연스러운 해석)", "앱 전체 (과한 해석)"),
                      ("ログインのみ（本文の趣旨どおり）", "アプリ全体（拡大解釈）"),
                      ("Login only (within the requested scope)", "Whole app (overreaches the request)"),
                      ("login screen only, as it is the minimal viable interpretation", "the whole app, being far more than asked for")):
-            q = ASK.Question("interpretation-surface", "어느 해석?", [{"token": "i1", "label": a}, {"token": "i2", "label": b},
+            q = ASK.Question("leaf-split", "어느 쪽?", [{"token": "i1", "label": a}, {"token": "i2", "label": b},
                                                                  {"token": "stop", "label": "stop"}],
-                             recommended="i1", recommended_by="judge:opus", raised_by="confirm",
-                             neutral=PF.neutral_text("interpretation", 7))
-            PF.apply(h.p, q, "analyze")
+                             recommended="i1", recommended_by="judge:opus", raised_by="confirm")
+            PF.apply(h.p, q, "design")
             shown = dict((o["token"], o["label"]) for o in q.options)
             with self.subTest(pair=(a, b)):
                 self.assertTrue(q.neutralized)
@@ -411,8 +409,9 @@ class M6ReleasePaths(unittest.TestCase):
         for g in VALVES.GROUPS:
             with self.subTest(group=g):
                 # K6 r2 M1: an inherent gate group (one non-conservative option) is released by sheet verdicts
-                paths = [g in CONS.GATED and g not in CONS.INHERENT, g == "KICKOFF", g in UV.SHEET_RELEASED,
-                         g in UV.EXEMPT]
+                # K6 r4: KICKOFF / STAKES (asked openly) are released by sheet verdicts too
+                paths = [g in CONS.GATED and g not in CONS.INHERENT and g not in UV.OPEN_ASKED,
+                         g in UV.SHEET_RELEASED, g in UV.EXEMPT]
                 self.assertEqual(sum(paths), 1, paths)
         for g, why in list(UV.EXEMPT.items()) + list(UV.SHEET_RELEASED.items()):
             self.assertTrue(len(why) > 20, g)
@@ -445,7 +444,7 @@ class M6ReleasePaths(unittest.TestCase):
         self.assertNotIn("group.", PF.conservative_label(P(), "KICKOFF"))
         P.valves = {"group.QA.conservative": True}
         self.assertEqual(PF.conservative_label(P(), "QA"), "group.QA.conservative")
-        self.assertNotIn("group.KICKOFF.conservative", PF.neutral_text("kickoff-conservative", 7))
+        self.assertIn("grading-sheet", PF.conservative_label(P(), "KICKOFF"))     # K6 r4: released by the sheet
 
     def test_gate_line_names_the_unverified_source(self):
         h = _h(self)

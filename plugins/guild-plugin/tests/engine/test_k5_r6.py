@@ -144,13 +144,15 @@ class M2Count(unittest.TestCase):
         self.assertEqual((pend.options(), pend.get("raised_by")), (["i1", "stop"], "confirm"))
         self.assertTrue(pend.get("predict_first_counted").startswith("false"))
         ASK.answer(h.decisions, h.writer, 7, pend.id, "i1", journal=h.journal)
-        self.assertEqual(G.predict_first_judgments(DecisionLog.load(h.gh.comments(7)).blocks, 7), ([], []))
+        # K6 r4: asked openly — never an `ok`; the engine's reading is one grading-sheet row (graded on the evidence)
+        ok, rows = G.predict_first_judgments(DecisionLog.load(h.gh.comments(7)).blocks, 7)
+        self.assertEqual((ok, [(r["group"], r["mode"]) for r in rows]), ([], [("KICKOFF", G.INHERENT_MODE)]))
 
     def test_stop_on_a_blind_confirm_question_is_a_candidate(self):
         from test_k5_r4_grade import pf_log
         ok, cands = G.predict_first_judgments(pf_log(choice="stop"), 7)
         self.assertEqual(ok, [])
-        self.assertEqual([(r["group"], r["given_info"], r["decision_id"]) for r in cands], [("KICKOFF", "", "D1")])
+        self.assertEqual([(r["group"], r["given_info"], r["decision_id"]) for r in cands], [("SPLIT", "", "D1")])
         self.assertIn("stop", cands[0]["reason"])
         # judge-raised: still out either way
         self.assertEqual(G.predict_first_judgments(pf_log(choice="stop", raised_by="judge-unclear"), 7), ([], []))
@@ -254,7 +256,8 @@ class Minors(unittest.TestCase):
         pend = [b for b in h.decisions_of("ask:readiness") if b.get("status") == "pending-human"][0]
         self.assertEqual(pend.get("raised_by"), "confirm")
 
-    def test_m7_stakes_reason_is_withheld_before_a_blind_question(self):
+    def test_m7_stakes_reason_is_written_openly_before_the_kickoff_question(self):
+        # K6 r4 (user decision 2026-11-20): the KICKOFF question that follows is asked openly — nothing is withheld
         h = _cons(K4(self, roles=[evidence(self)], judges={"KICKOFF": kickoff(goal="partial", anchors={"goal": ANCHOR_OK}),
                                                            "STAKES": stakes("low", reason="only the login widget moves")}),
                   "KICKOFF")
@@ -262,13 +265,8 @@ class Minors(unittest.TestCase):
         r = A.run(h.p)
         self.assertEqual(r.kind, StageResult.PAUSE)
         st = h.decisions_of("STAKES")[-1]
-        self.assertNotIn("login widget", st.get("reason"))
-        self.assertTrue(st.get("reason_sha"))
-        pend = [b for b in DecisionLog.load(h.gh.comments(7)).blocks
-                if b.get("status") == "pending-human" and b.get("raised_by") == "confirm"][0]
-        did = ASK.answer(h.decisions, h.writer, 7, pend.id, "i1", journal=h.journal)
-        res = [b for b in DecisionLog.load(h.gh.comments(7)).blocks if b.id == did][0]
-        self.assertIn("only the login widget moves", res.get("revealed_question") or "")
+        self.assertEqual(st.get("reason"), "only the login widget moves")
+        self.assertIsNone(st.get("reason_sha"))
 
     def test_m7_no_blind_question_keeps_the_reason(self):
         h = K4(self, roles=[evidence(self)], judges={"KICKOFF": kickoff(goal="partial", anchors={"goal": ANCHOR_OK}),

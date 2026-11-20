@@ -4,8 +4,8 @@ M1  a gated group with ONE non-conservative option (derived from the option tabl
     VIS-ENV, EX-DWC) asks only when the judge chose that option — the question's existence is the recommendation:
     its answer is never an `ok` nor a wrong candidate; every such question is a grading-sheet row and the group is
     released by the person's sheet verdicts on those decisions (table: every GATED group × every option);
-M2  the KICKOFF block written before a blind interpretation question does not depend on the judge's pick (two runs
-    differing only in it — attended and unattended); the run after the answer writes the footprint openly;
+M2  (K6 r4: the sealed footprint is gone with the scope reduction — KICKOFF is asked openly; what remains: a run
+    with no question writes its footprint openly, never a seal);
 M3  a blind label keeps the scope clauses of its asides / tails, cuts the remarks, refuses what it cannot classify;
     m4: the ㅂ-irregular `자연스러운` rates;
 M4  a clone without the tape applies the answer only when the judge it calls picks the person's or the asked option;
@@ -16,7 +16,6 @@ m3  `engine-env-*` is not folded (0.101.3's wildcard row), its note still reache
 
 import json
 import os
-import tempfile
 import unittest
 
 import _util  # noqa: F401
@@ -29,7 +28,6 @@ from _k4 import K4, evidence, kickoff
 from test_k2_qa_stage import qa_harness
 
 from guildcore import ask as ASK
-from guildcore import journal as J
 from guildcore import valves as VALVES
 from guildcore.decisions import DecisionLog
 from guildcore.judges.runner import Decision
@@ -99,7 +97,8 @@ class M1Inherent(unittest.TestCase):
                                      [(blk.id, G.INHERENT_MODE, opt, g)])
 
     def test_other_gated_groups_still_count(self):
-        for g in sorted(set(CONS.GATED) - set(CONS.INHERENT)):
+        # K6 r4: STAKES is asked openly (`UV.OPEN_ASKED`) — test_k6_r4 covers it
+        for g in sorted(set(CONS.GATED) - set(CONS.INHERENT) - set(UV.OPEN_ASKED)):
             y = R1._nonsafe(g)[0]
             with self.subTest(group=g):
                 h = _h(self)
@@ -111,7 +110,7 @@ class M1Inherent(unittest.TestCase):
                 self.assertEqual(len(ok), 1)
 
     def test_release_paths_partition_the_groups(self):
-        blind = set(CONS.GATED) - set(CONS.INHERENT) | {"KICKOFF"}
+        blind = set(CONS.GATED) - set(CONS.INHERENT) - set(UV.OPEN_ASKED)      # K6 r4: KICKOFF / STAKES are sheet
         for g in VALVES.GROUPS:
             with self.subTest(group=g):
                 self.assertEqual(sum([g in blind, g in UV.SHEET_RELEASED, g in UV.EXEMPT]), 1)
@@ -152,68 +151,16 @@ class M1Inherent(unittest.TestCase):
     def test_the_source_line_names_the_sheet(self):
         class P(object):
             valves = {}
-            unverified = frozenset(["QA", "STAKES"])
+            unverified = frozenset(["QA", "STAKES", "SPLIT"])
         self.assertIn("grading-sheet", PF.conservative_label(P(), "QA"))
-        self.assertNotIn("grading-sheet", PF.conservative_label(P(), "STAKES"))
+        self.assertIn("grading-sheet", PF.conservative_label(P(), "STAKES"))        # K6 r4: asked openly
+        self.assertNotIn("grading-sheet", PF.conservative_label(P(), "SPLIT"))
 
 
 EXTRA = {"lib/settings/settings.dart": "int s = 1;\n", "lib/theme/theme.dart": "int t = 1;\n"}
-SEALED = ("chosen_sha", "footprint_sha", "id", "inputs", "at")
-
-
-def _kick_run(case, chosen, unattended=False, journal=False):
-    k = kickoff(ui=(chosen == "B"), areas=(("lib/settings",) if chosen == "A" else
-                                           ("lib/settings", "lib/theme", "lib/app")))
-    k.fields["interpretations"] = [{"id": "A", "summary": "설정 화면만 다크 모드"},
-                                   {"id": "B", "summary": "앱 전체 다크 모드"}]
-    k.fields["chosen"] = chosen
-    h = K4(case, unattended=unattended, roles=[evidence(case, areas=("lib/settings", "lib/theme", "lib/app"))] * 2,
-           judges={"KICKOFF": k}, extra_files=EXTRA)
-    h.p._first_sprint = True
-    if journal:
-        h.p.journal = J.Journal(tempfile.mkdtemp(prefix="k6r2-"), 7, h.clock)
-    if unattended:
-        h.p.valves = {"group.KICKOFF.conservative": True}
-    r = A.run(h.p)
-    blocks = DecisionLog.load(h.gh.comments(7)).blocks
-    kb = [b for b in blocks if b.get("point") == "KICKOFF"][-1]
-    return h, r, dict((k_, v) for k_, v in dict(kb.fields).items() if k_ not in SEALED)
 
 
 class M2KickoffFootprint(unittest.TestCase):
-    def test_visible_block_does_not_depend_on_the_hidden_pick(self):
-        for unattended in (False, True):
-            with self.subTest(unattended=unattended):
-                ha, ra, va = _kick_run(self, "A", unattended)
-                hb, rb, vb = _kick_run(self, "B", unattended)
-                self.assertEqual((ra.kind, rb.kind), (StageResult.PAUSE, StageResult.PAUSE) if unattended
-                                 else (StageResult.ASK, StageResult.ASK))
-                pend = [b for b in DecisionLog.load(ha.gh.comments(7)).blocks if b.get("status") == "pending-human"]
-                self.assertTrue(pend[-1].get("predict_first"))
-                self.assertEqual(va, vb)
-                for f in PF.KICKOFF_FOOTPRINT:
-                    self.assertNotIn(f, va)
-                self.assertEqual(va.get("footprint"), PF.FOOTPRINT_WITHHELD)
-
-    def test_footprint_is_journaled_and_written_openly_after_the_answer(self):
-        h, r, _v = _kick_run(self, "A", journal=True)
-        seals = [e for e in h.p.journal.entries if e.get("what") == "predict-first-seal"
-                 and e.get("field") == "KICKOFF.footprint"]
-        self.assertEqual(json.loads(seals[-1]["value"])["areas"], ["lib/settings"])
-        pend = [b for b in DecisionLog.load(h.gh.comments(7)).blocks if b.get("status") == "pending-human"][-1]
-        from workflows.dev import analysis as AN
-        interp = [{"id": "A", "summary": "설정 화면만 다크 모드"}, {"id": "B", "summary": "앱 전체 다크 모드"}]
-        order = sorted(range(2), key=lambda n: AN.canon_key(interp[n]))
-        tok = "i%d" % (order.index(0) + 1)                               # the engine token of reading A
-        ASK.answer(h.decisions, h.writer, 7, pend.id, tok, journal=h.p.journal)
-        res = [b for b in DecisionLog.load(h.gh.comments(7)).blocks if b.get("resolves") == pend.id][-1]
-        self.assertIn("KICKOFF footprint", str(res.get("revealed_question") or res.fields))
-        A.run(h.p)
-        kick = DS.kickoff_block(h.gh.comments(7))
-        self.assertEqual(kick.get("areas"), "lib/settings")
-        self.assertEqual(kick.get("ui_surface"), "false")
-        self.assertIsNone(kick.get("footprint_sha"))
-
     def test_no_question_no_seal(self):
         k = kickoff(ui=False, areas=("lib/settings",))
         h = K4(self, unattended=False, roles=[evidence(self, areas=("lib/settings",))], judges={"KICKOFF": k},
@@ -222,7 +169,7 @@ class M2KickoffFootprint(unittest.TestCase):
         A.run(h.p)
         kick = DS.kickoff_block(h.gh.comments(7))
         self.assertEqual(kick.get("areas"), "lib/settings")
-        self.assertIsNone(kick.get("footprint_sha"))
+        self.assertIsNone(kick.get("footprint"))
 
 
 SCOPE_PAIRS = (
@@ -262,11 +209,11 @@ class M3ScopeAsides(unittest.TestCase):
         h = qa_harness(self, roles=[role("DONE", plan="qa-report.md", human_items=[], followups=[])])
         h.p._first_sprint = False
         a, b, qual = SCOPE_PAIRS[0]
-        q = ASK.Question("interpretation-surface", "어느 해석?", [{"token": "i1", "label": a}, {"token": "i2", "label": b},
-                                                             {"token": "stop", "label": "stop"}],
-                         recommended="i1", recommended_by="judge:opus", raised_by="confirm",
-                         neutral=PF.neutral_text("interpretation", 7))
-        PF.apply(h.p, q, "analyze")
+        # K6 r4: a blind group's question (KICKOFF is asked openly now) — SPLIT's leaf question
+        q = ASK.Question("leaf-split", "어느 쪽?", [{"token": "i1", "label": a}, {"token": "i2", "label": b},
+                                                {"token": "stop", "label": "stop"}],
+                         recommended="i1", recommended_by="judge:opus", raised_by="confirm")
+        PF.apply(h.p, q, "design")
         self.assertTrue(q.neutralized)
         self.assertIn(qual, dict((o["token"], o["label"]) for o in q.options)["i1"])
 

@@ -10,6 +10,8 @@ m1  `i<n>` numbers follow a canonical content order (normalized summary, then a 
 m2  a decision log that cannot be read refuses the blind answer.
 (m3 / m4 — test_k5_r4_answer.py)
 m6  a text naming every option equally (no preference word) is neutral.
+K6 r4: KICKOFF questions are asked openly (`PF.OPEN_GROUPS`) — the leak machinery is exercised here on a blind
+(ESCALATE) question carrying a coerced KICKOFF's options and aliases.
 """
 
 import json
@@ -48,7 +50,7 @@ def _ask_readiness(e, p, k):
     opts = [{"token": i["id"], "label": B.one_line(i["summary"], 80)} for i in k.interpretations] + \
         [{"token": "stop", "label": "stop"}]
     what = "goal unclear — %s" % k.choice_needed["goal"]
-    q = ASK.Question("readiness", what, opts, recommended=k.chosen, recommended_by="judge:opus", stakes="high",
+    q = ASK.Question("escalation", what, opts, recommended=k.chosen, recommended_by="judge:opus", stakes="high",
                      aliases=k.aliases)
     r = B.ask(p, "analyze", q, what)
     ev = [kw for w, kw in e.h.events if w == "ask"][-1]
@@ -125,7 +127,7 @@ class M1Aliases(unittest.TestCase):
     def test_token_match_is_case_insensitive(self):
         opts = [{"token": "i1", "label": "narrow reading"}, {"token": "i2", "label": "broad reading"},
                 {"token": "stop", "label": "stop"}]
-        q = ASK.Question("readiness", "x", opts, recommended="i2")
+        q = ASK.Question("escalation", "x", opts, recommended="i2")
         self.assertTrue(PF._Names(q).names_rec("goal unclear — I2 looks right", markers=False))
         e, p = _env(self)
         B.record_code(p, "analyze", "STAKES", "medium", reason="goal unclear — I2 looks right")
@@ -196,7 +198,7 @@ class M2FailClosed(unittest.TestCase):
             def _log(self):
                 raise RuntimeError("502 Bad Gateway")
         p.decisions = Broken()
-        q = ASK.Question("readiness", "goal unclear — choose", [{"token": "i1", "label": "narrow reading"},
+        q = ASK.Question("escalation", "goal unclear — choose", [{"token": "i1", "label": "narrow reading"},
                                                                  {"token": "i2", "label": "broad reading"},
                                                                  {"token": "stop", "label": "stop"}],
                          recommended="i2", recommended_by="judge:opus")

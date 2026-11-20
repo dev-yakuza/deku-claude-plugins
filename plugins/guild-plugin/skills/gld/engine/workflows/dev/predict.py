@@ -3,8 +3,8 @@
 A question is predict-first — the person answers BEFORE seeing the engine's recommendation — when any of these holds
 (`forced(p, q)` returns the first reason, or None):
 
-    high-risk      the question comes from a §9.5 high-risk group (KICKOFF · STAKES · EX-ARB:dismiss · ESCALATE ·
-                   SPLIT · INTEGRATE) — always
+    high-risk      the question comes from a §9.5 high-risk group (EX-ARB:dismiss · ESCALATE · SPLIT · INTEGRATE) —
+                   always
     conservative   `group.<g>.conservative` is in force (a valve — the §9.5 count rule or a person)
     watch          the group is on the §9.5 watch list (`grade-state.json`)
     option         `config.learning.predict_first: true` and the kind is readiness · disputed-blocker · loopback
@@ -15,6 +15,10 @@ Only these answers count as a human judgment in §9.5 (G1, graduation, release).
               answer's resolution block reveals `recommended` + `nonce` (`dev answer` prints the reveal)
   unattended  the pause comment shows evidence, question, options and the reasons — never the token; the pending
               block carries `recommended_sha`; the nonce is journaled BEFORE the commitment is written (crash-safe)
+  open        (user decision 2026-11-20, K6 r4 — scope reduction) KICKOFF and STAKES (`OPEN_GROUPS`) are never
+              predict-first: their questions are asked with the recommendation shown, marked
+              `predict_first_counted: false — open: …`, and the groups are released by the person's grading-sheet
+              verdicts on those decisions (`unverified.SHEET_RELEASED`, `grade.inherent_row`) like the INHERENT gates
   wording     (K5r3-M1) the question is rendered from its neutral wording (`Question.neutral`), options in the
               canonical order (label, token; `stop` last); `apply` — the one enforcement point — REFUSES a blind
               answer (`predict_first_refused`, recommendation shown openly, never a §9.5 human judgment) when the
@@ -24,8 +28,6 @@ Only these answers count as a human judgment in §9.5 (G1, graduation, release).
               `I2` / `B` / `broad`, which `analysis.to_tokens` also rewrites to the token in the judge's text) and
               its full summary; whole words, case-insensitive. A text naming every option equally often, with no
               preference word, is neutral; an unreadable decision log refuses (K5r4-m2 — fail closed)
-  KICKOFF     its decision block carries `chosen_sha` instead of `chosen` (the chosen interpretation IS the readiness
-              question's recommendation); analyze:output names it once the stage goes on
   withheld    (K5r5-M1, structural) a blind question does not evaluate options at all: everything a person sees
               BEFORE the answer is engine-generated — the neutral template (`Question.neutral`, else
               `default_neutral`) and each option's own summary; the judge's free text (the question it wrote,
@@ -49,7 +51,15 @@ import json
 import os
 import re
 
-HIGH_RISK = ("KICKOFF", "STAKES", "EX-ARB:dismiss", "ESCALATE", "SPLIT", "INTEGRATE")
+HIGH_RISK = ("EX-ARB:dismiss", "ESCALATE", "SPLIT", "INTEGRATE")
+# user decision 2026-11-20 (K6 r4 — scope reduction): these groups leave predict-first blind counting — asked openly,
+# never a counted blind answer, released by the person's grading-sheet verdicts on their decisions
+OPEN_GROUPS = {
+    "KICKOFF": "the interpretation question is asked openly (user decision 2026-11-20) — released by grading-sheet "
+               "verdicts on the engine's readings",
+    "STAKES": "the stakes question is asked openly (user decision 2026-11-20) — released by grading-sheet verdicts on "
+              "the engine's levels",
+}
 OPTION_KINDS = ("readiness", "disputed-blocker", "loopback")
 # the §9.5 group a question's recommendation comes from, by its §2.6 kind (a Question may name `group` itself)
 KIND_GROUP = {"readiness": "KICKOFF", "premise": "KICKOFF", "close-decided": "KICKOFF",
@@ -188,8 +198,10 @@ def first_sprint(p):
 
 
 def forced(p, q, stage=None):
-    """The reason this question must be predict-first, or None."""
+    """The reason this question must be predict-first, or None (never for an OPEN_GROUPS question)."""
     g = group_of(q, stage)
+    if g in OPEN_GROUPS:
+        return None
     if g in HIGH_RISK:
         return "high-risk"
     if g and conservative(p, g):
@@ -304,6 +316,9 @@ NUM_RATING = re.compile(r"\d+(?:[.,]\d+)?\s*[%％]|(?<![\w./])\d+(?:\.\d+)?\s*/\
                         r"(?:^|\s)#\d{1,2}(?:\s|$)|\b(?:rank|top|tier)\s*-?\s*\d+\b|\bP[0-4]\b", re.I)
 
 
+_PROB = re.compile(r"\b(?:p|prob(?:ability)?|score|conf(?:idence)?|likelihood|rank|rating)\s*[=:]\s*\d", re.I)
+
+
 def num_rating(text):
     """K6 r3 m1: does `text` (outside its code spans) carry a numeric / symbolic rating (`NUM_RATING`)?"""
     return bool(NUM_RATING.search(_CODE_SPAN.sub(" ", str(text or ""))))
@@ -365,7 +380,13 @@ _SOURCE_REF = re.compile(r"(?:제목|본문|요청|이슈|설명|보고)\s*(?:�
                          r"(?:タイトル|本文|依頼|要望|説明|イシュー)\s*と\s*(?:ずれ|違|異な|一致|合)|"
                          r"(?:タイトル|本文|依頼|要望|要求|説明|イシュー|報告)\s*(?:の|に|が|で)?\s*"
                          r"(?:範囲|通り|どおり|沿|記載|書|言)|"
-                         r"\bthe\s+(?:title|issue|ticket|request|body|description|report|reporter|author)\b|"
+                         # K6 r4 M3: "the issue" before a product noun ("the issue body", "the request body") is that
+                         # noun, not a reference to the Issue's text
+                         r"\bthe\s+(?:title|issue|ticket|request|body|description|report|reporter|author)\b"
+                         r"(?!\s+(?:body|title|field|list|number|tracker|page|screen|editor|comment|label|header)s?\b)|"
+                         # K6 r4 M3: a scope set BY the source — "title scope", "제목에 있는 것", "제목에 없는 화면"
+                         r"\b(?:title|issue|ticket|request|description)['’]?s?\s+(?:scope|wording|text)\b|"
+                         r"(?:제목|요청|이슈|설명)\s*에\s*(?:있는|없는|나온|적힌|들어간)\s*(?:것|부분|범위|화면|내용|기능)|"
                          r"\b(?:requested|described|reported|titled)\b|"
                          r"\bper\s+(?:the\s+)?(?:title|issue|ticket|request|body|description)\b", re.I)
 _NEGATION = re.compile(r"않|없이|아니|n't|not|no|never|しない|せず", re.I)   # a scope match that only negates
@@ -425,6 +446,14 @@ def clause_kind(text):
         return "remark"
     bare = _CODE_SPAN.sub(" ", t)
     sc = bool(_SCOPE.search(bare))
+    spans = _CODE_SPAN.findall(t)
+    if spans and not bare.strip(" ()（）[]【】"):
+        # K6 r4 m4: a clause made of code spans only — a number inside one still rates (`(`90%`)`, `(`p=0.9`)`), and a
+        # bare number (`(`0.9`)`, `(`2`)`) is no identifier: refused, never shown as a literal (a line reference
+        # `(`:3180-3218`)` stays a literal)
+        inner = [x.strip("`").strip() for x in spans]
+        if any(NUM_RATING.search(x) or _PROB.search(x) or re.fullmatch(r"[+-]?\d+(?:[.,]\d+)?", x) for x in inner):
+            return "other"
     if num_rating(t):
         return "scope-rating" if sc else "other"
     if FIT.search(bare) and all(_NEGATION.fullmatch(m.group(0).strip()) for m in _SCOPE.finditer(bare)):
@@ -434,9 +463,12 @@ def clause_kind(text):
     if _literal(t):
         return "scope"
     ref = bool(_REMARK_REF.search(bare))
+    src = bool(_SOURCE_REF.search(bare))
     if sc:
-        return "other" if ref else "scope"
-    return "remark" if ref or _SOURCE_REF.search(bare) else "other"
+        # K6 r4 M3: a scope set BY the source ("(제목 범위만)", "(per the title only)", "(only what the title names)",
+        # "(requested screen only)") is a faithfulness remark AND a scope — neither shown nor dropped: refused
+        return "other" if ref or src else "scope"
+    return "remark" if ref or src else "other"
 
 
 def _kept_clauses(inner):
@@ -641,33 +673,6 @@ def leak(p, q, stage=None, texts=()):
                 if f == "question" and b.get("status") == "pending-human" and b.get("recommended_sha"):
                     continue                                     # an earlier blind question passed this same check
                 return "decision-log %s" % b.id
-    if q.kind in READING_KINDS:
-        why = earlier_reading(p, log)
-        if why:
-            return why
-    return None
-
-
-READING_KINDS = ("readiness", "interpretation-surface")
-
-
-def earlier_reading(p, log):
-    """K6 r3 M2 (Issue-wide, not run-wide): a blind KICKOFF reading question is refused when this Issue already shows,
-    in plain text, what an EARLIER run read — a KICKOFF block with an open footprint (`areas` · `ui_surface` · `cast` ·
-    `work_type` · `safety_net_visual`: a run with no question, a run after an answer — the loop-back re-analysis case)
-    or an `analyze:output` (it names the chosen reading). Either can state this question's recommendation; the run
-    that stops before its gate (A4 / A5) seals its footprint instead (`kickoff_footprint_sealed(reveal=False)`), so the
-    first-time path stays blind. Returns why, or None."""
-    for b in log.blocks:
-        if b.get("point") == "KICKOFF" and any(b.get(f) not in (None, "") for f in KICKOFF_FOOTPRINT):
-            return "decision-log %s (an earlier KICKOFF footprint)" % b.id
-    try:
-        from guildcore.records import outputs as OUT
-        from workflows.dev.stages import base as B
-        if OUT.find(B.records(p), "analyze:output") is not None:
-            return "analyze:output (an earlier run named its reading)"
-    except Exception:                                            # noqa: BLE001 — unreadable: fail closed (K5r4-m2)
-        return "analyze:output unreadable"
     return None
 
 
@@ -684,36 +689,23 @@ def _strip_template(text, tmpl):
 
 # K6 (r12 m1, item 44): THE registry of blind-question wordings. A caller never formats its own `neutral=` — it calls
 # `neutral_text(form, *values)`, which checks every value against its slot's closed pattern (an issue number, a step
-# id, a dimension name, a rating, an ask kind) and refuses anything else; `is_template` accepts only text that one of
+# id, an ask kind) and refuses anything else; `is_template` accepts only text that one of
 # these forms produces. A static test (test_k6_neutral) fails on any `neutral=` that does not come from here.
 _ISSUE = r"[0-9]{1,7}"
 _STEP = r"(?:-|[A-Za-z0-9][A-Za-z0-9._:→-]{0,39})"   # E2.1 · HO · Q2.5 · X→T · TEST:repair · `-` — no spaces, no prose
-_DIMS = None
-_RATING = r"(?:clear|partial|unclear)"
+# K6 r4: the KICKOFF wordings (readiness-unclear · interpretation · readiness-high · kickoff-conservative) are gone with
+# the scope reduction — a KICKOFF question is never blind (`OPEN_GROUPS`)
 NEUTRAL_FORMS = {
     "conservative": ("#%d: 보수 경로 확인(%s) — 어느 쪽으로 정할까요?", ("issue", "step")),
-    "readiness-unclear": ("%s unclear — #%d: 어느 해석으로 진행할까요?", ("dims", "issue")),
-    "interpretation": ("#%d: 어느 해석으로 진행할까요?", ("issue",)),
-    "readiness-high": ("%s %s — #%d: 어느 해석으로 진행할까요?", ("dim", "rating", "issue")),
-    # K6 r1 M6: never a valve name (an unverified KICKOFF has no `group.KICKOFF.conservative` to clear)
-    "kickoff-conservative": ("#%d: 해석 확인(보수 경로) — 어느 해석으로 진행할까요?", ("issue",)),
     "default": ("#%d: %s — 어느 선택지로 진행할까요?", ("issue", "kind")),
 }
 
 
 def _slot(name):
-    global _DIMS
     if name == "issue":
         return _ISSUE
     if name == "step":
         return _STEP
-    if name == "rating":
-        return _RATING
-    if name in ("dim", "dims"):
-        if _DIMS is None:
-            from workflows.dev.analysis import DIM_KEY
-            _DIMS = "(?:%s)" % "|".join(re.escape(v) for v in sorted(DIM_KEY.values()))
-        return _DIMS if name == "dim" else r"%s(?:, %s)*" % (_DIMS, _DIMS)
     if name == "kind":
         from guildcore.records.decisions import ASK_KINDS
         return "(?:%s)" % "|".join(re.escape(k) for k in sorted(ASK_KINDS, key=len, reverse=True))
@@ -782,6 +774,12 @@ def apply(p, q, stage=None, texts=()):
     `recommended` openly plus `predict_first_refused` — when the question, its options or any text going out
     with it (`texts`) still shows the recommendation, or when its kind states it by being asked (INHERENT). A
     refused question is never counted as a blind human judgment (§9.5). Returns q."""
+    g = group_of(q, stage)
+    if g in OPEN_GROUPS:
+        # user decision 2026-11-20 (K6 r4): asked openly — the recommendation is shown, the answer never counted
+        q.predict_first, q.pf_why = False, None
+        q.open_group = "%s: %s" % (g, OPEN_GROUPS[g])
+        return q
     if not q.predict_first and q.recommended is not None:     # nothing to withhold → the answer is blind anyway
         why = forced(p, q, stage)
         if why:
@@ -791,8 +789,7 @@ def apply(p, q, stage=None, texts=()):
         return q
     # K5r5-M1 (structural): the person sees only engine-generated text before answering — the neutral template and
     # the options' own summaries; the judge's text is withheld (journaled, revealed after the answer)
-    extra = list(getattr(p, "__dict__", {}).pop("_withheld_next", None) or [])     # K5r6-m7: STAKES reasons
-    q.withheld = {"question": q.text, "context": list(q.context_lines), "texts": [t for t in texts if t] + extra}
+    q.withheld = {"question": q.text, "context": list(q.context_lines), "texts": [t for t in texts if t]}
     q.original, q.text, q.neutralized = q.text, (q.neutral or default_neutral(p, q)), True
     q.context_lines = []
     # K5r6-M2: the labels are the judge's summaries — blind, the engine shows them without their evaluative clauses
@@ -841,71 +838,3 @@ def apply(p, q, stage=None, texts=()):
         q.withheld = None
         q.uncounted = None
     return q
-
-
-def sealed(p, value, what):
-    """(sha, None) — `value` withheld from a decision block: sha256(value + nonce), the nonce and the value journaled
-    first (`predict-first-seal`) so the record can be checked later and never forged after the fact."""
-    import hashlib
-    if value is None:
-        return None
-    nonce = os.urandom(8).hex()
-    if getattr(p, "journal", None) is not None:
-        p.journal.append("event", what="predict-first-seal", field=what, value=value, nonce=nonce)
-    return hashlib.sha256((str(value) + nonce).encode("utf-8")).hexdigest()
-
-
-def kickoff_chosen_fields(p, chosen):
-    """KICKOFF is a high-risk group, so any readiness / interpretation question after it is predict-first — and
-    its chosen interpretation IS that question's recommendation: the block carries `chosen_sha` (sealed), never
-    `chosen`; analyze:output names it once the stage goes on."""
-    return {"chosen_sha": sealed(p, chosen, "KICKOFF.chosen")} if chosen is not None else {}
-
-
-# K6 r2 M2: the KICKOFF fields that describe the CHOSEN reading (KICKOFF.md: "`areas`: repo directories the change
-# touches") — next to a blind interpretation question they are its recommendation as surely as `chosen` is
-KICKOFF_FOOTPRINT = ("work_type", "cast", "ui_surface", "safety_net_visual", "areas")
-FOOTPRINT_WITHHELD = "(withheld until the person's blind answer — predict-first)"
-
-
-def kickoff_footprint_sealed(p, values, reveal=True):
-    """The KICKOFF block's footprint while a blind interpretation question follows in the same run: one seal
-    (`footprint_sha` — the values and the nonce journaled first) and a fixed placeholder, so the visible block is the
-    same whichever reading the judge chose; the values ride with the question's withheld texts (revealed with the
-    answer) and the run after the answer writes them openly. K6 r3 M2: also when the run stops BEFORE its readiness
-    gate (A4 harness / A5 close question — `reveal=False`: that question's answer must not reveal it either; the
-    run that goes on writes the footprint of ITS reading — openly after a person's reading answer)."""
-    txt = json.dumps(values, sort_keys=True, ensure_ascii=False, default=str)
-    if reveal:
-        p.__dict__.setdefault("_withheld_next", []).append("KICKOFF footprint: %s" % txt)
-    return {"footprint_sha": sealed(p, txt, "KICKOFF.footprint"), "footprint": FOOTPRINT_WITHHELD}
-
-
-def kickoff_readings_sealed(p, capture):
-    """K6 r3 M1: the readings a KICKOFF question chooses between (`analysis.reading_capture`), sealed for its pending
-    block (`readings_sha`) — revealed with the answer (`ask._reveal_fields`)."""
-    from guildcore import ask as ASK
-    if not capture or getattr(p, "journal", None) is None:
-        return None                 # no journal (a bare test harness — live Ports always journal): nothing could open it
-    return sealed(p, json.dumps(capture, sort_keys=True, ensure_ascii=False), ASK.READINGS_FIELD)
-
-
-def kickoff_readings(p, q, res):
-    """K6 r3 M1: the readings the pending KICKOFF question `q` chose between, as captured when it was asked — from this
-    clone's journal, else from the answer's resolution (`readings` + `readings_nonce`, checked against the seal).
-    Returns (capture | None, why): `why` = "legacy" (a question asked before r3 — no seal), "unavailable" (sealed but
-    neither source can open it), or None."""
-    from guildcore import ask as ASK
-    sha = q.get("readings_sha")
-    if not sha:
-        return None, "legacy"
-    v, _n = ASK.seal_value(getattr(p, "journal", None), sha, ASK.READINGS_FIELD)
-    if v is None and res is not None and ASK.seal_check(sha, res.get("readings"), res.get("readings_nonce")):
-        v = res.get("readings")
-    if v is None:
-        return None, "unavailable"
-    try:
-        cap = json.loads(v)
-    except ValueError:
-        return None, "unavailable"
-    return (cap if isinstance(cap, list) else None), (None if isinstance(cap, list) else "unavailable")

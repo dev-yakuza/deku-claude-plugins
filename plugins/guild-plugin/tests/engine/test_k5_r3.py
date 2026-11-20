@@ -4,7 +4,8 @@ M1  a predict-first ask is rendered from its neutral wording with its options in
     judge's ranking); the one enforcement point (`predict.apply`, called by `B.ask` / `B.pause` only) refuses a blind
     answer — `predict_first_refused`, the recommendation shown openly, never counted by §9.5 — when the question, its
     options, the text going out with it or this stage's decision-log free text (STAKES / KICKOFF `reason`) names
-    the recommendation; close-decided states it by being asked (inherent → never blind).
+    the recommendation; close-decided states it by being asked (inherent → never blind). K6 r4: KICKOFF / STAKES
+    questions are asked openly (`PF.OPEN_GROUPS`) — the blind machinery is shown on ESCALATE questions here.
 M2  ask / terminal events carry `issue`; the ask `qid` is issue-qualified (`#8/D2`); `dev answer` routes a
     qualified id to its Issue, refuses a bare id that the driver last saw as a child's question (hint names the
     child) and never lands on the parent's question with the same number; the re-run drives the child on; the
@@ -30,8 +31,6 @@ from workflows.dev.stages import analyze as A
 from workflows.dev.stages import base as B
 from workflows.dev.stages.base import StageResult
 
-TOK = re.compile(r"(?<![A-Za-z0-9_])i1(?![A-Za-z0-9_])")
-TOK2 = re.compile(r"(?<![A-Za-z0-9_])i2(?![A-Za-z0-9_])")
 
 
 def _msg(e):
@@ -47,27 +46,21 @@ class M1NeutralText(unittest.TestCase):
         h.p.journal = h.journal
         return h, A.run(h.p)
 
-    def test_surface_fallback_is_neutral_canonical_and_blind(self):
+    def test_surface_fallback_is_open_and_canonical(self):
         h, r = self._surface()                                         # no judge question → the old fallback
         self.assertEqual(r.kind, StageResult.ASK)
         ask = [kw for w, kw in h.events if w == "ask"][-1]
         self.assertEqual(ask["kind"], "interpretation-surface")
-        self.assertTrue(ask["predict_first"])
-        self.assertNotIn("recommended", ask)
-        # the chosen one is "show the count" (the judge's first) — K5r4-m1: tokens are numbered in the canonical
-        # content order, so it is i2 ("hide …" < "show …"); nothing that goes out names it
-        rendered = json.dumps(dict(ask, options=[o["label"] for o in ask["options"]]), ensure_ascii=False)
-        self.assertIsNone(TOK2.search(rendered), rendered)
-        self.assertNotIn("show the count", ask["question"])
-        # canonical order: by label, stop last — not the judge's ranking (recommended-first)
+        # K6 r4 (user decision 2026-11-20): KICKOFF is asked openly — the recommendation shown, never counted
+        self.assertFalse(ask["predict_first"])
+        self.assertEqual(ask["recommended"], "i2")
+        # the options in the canonical content order (K5r4-m1) — not the judge's ranking (recommended-first)
         self.assertEqual([(o["token"], o["label"]) for o in ask["options"]],
                          [("i1", "hide the count"), ("i2", "show the count"), ("stop", "stop")])
         pend = [b for b in h.decisions_of("ask:interpretation-surface") if b.get("status") == "pending-human"][0]
-        self.assertEqual(pend.get("predict_first"), "high-risk")
-        self.assertIsNone(pend.get("predict_first_refused"))
-        for f in ("question", "cause", "reason"):
-            self.assertIsNone(TOK2.search(str(pend.get(f) or "")), f)
-        self.assertIsNone(TOK2.search(r.line or ""))
+        self.assertIsNone(pend.get("predict_first"))
+        self.assertEqual(pend.get("recommended"), "i2")
+        self.assertTrue(str(pend.get("predict_first_counted")).startswith("false — open: KICKOFF"))
 
     def test_leaky_question_is_withheld_not_shown(self):
         # the r3 repro: a question that names the hidden token — K5r5-M1: the judge's text is WITHHELD (the person
@@ -78,7 +71,8 @@ class M1NeutralText(unittest.TestCase):
         p.git_dir, p.valves, p.journal = e.common, {}, e.h.journal
         opts = [{"token": "i1", "label": "A reading"}, {"token": "i2", "label": "B reading"},
                 {"token": "stop", "label": "stop"}]
-        q = ASK.Question("interpretation-surface", "해석 확인: i2", opts, recommended="i2", recommended_by="judge:opus")
+        # K6 r4: an ESCALATE question (KICKOFF's are asked openly now)
+        q = ASK.Question("escalation", "해석 확인: i2", opts, recommended="i2", recommended_by="judge:opus")
         r = B.ask(p, "analyze", q, "해석 확인: i2")
         ev = [kw for w, kw in e.h.events if w == "ask"][-1]
         self.assertTrue(ev["predict_first"])
@@ -131,20 +125,22 @@ class M1NeutralText(unittest.TestCase):
         B.record_code(p, "analyze", "STAKES", "medium", reason="local: taking i1 only touches one widget")
         opts = [{"token": "i1", "label": "show the count"}, {"token": "i2", "label": "hide the count"},
                 {"token": "stop", "label": "stop"}]
-        q = ASK.Question("readiness", "goal partial — choose", opts, recommended="i1", recommended_by="judge:opus")
+        # K6 r4: a blind group's question in the stage (KICKOFF's own are asked openly now)
+        q = ASK.Question("escalation", "goal partial — choose", opts, recommended="i1", recommended_by="judge:opus")
         r = B.pause(p, "analyze", "ambiguity", "goal partial", "ambiguity: goal partial", question=q)
         blk = [b for b in DecisionLog.load(e.h.gh.comments(7)).blocks if b.id == r.qid][0]
         self.assertIsNone(blk.get("predict_first"))
         self.assertTrue(blk.get("predict_first_refused").startswith("decision-log"))
 
-    def test_unattended_readiness_pause_enumerates_in_canonical_order_and_stays_blind(self):
+    def test_unattended_readiness_pause_enumerates_in_canonical_order_openly(self):
         from _k4 import stakes
         h = K4(self, roles=[evidence(self)], judges={"KICKOFF": kickoff(goal="partial"), "STAKES": stakes("high")})
         h.p.journal = h.journal
         r = A.run(h.p)
         self.assertEqual(r.kind, StageResult.PAUSE)
         pend = [b for b in h.decisions_of("ask:readiness") if b.get("status") == "pending-human"][0]
-        self.assertEqual(pend.get("predict_first"), "high-risk")
+        self.assertIsNone(pend.get("predict_first"))                    # K6 r4: asked openly
+        self.assertTrue(str(pend.get("predict_first_counted")).startswith("false — open"))
         body = [c["body"] for c in h.gh.comments(7) if "guild:needs-human" in c["body"]][-1]
         self.assertLess(body.index("i1 = hide the count"), body.index("i2 = show the count"))
 
@@ -155,7 +151,8 @@ class M1NeutralText(unittest.TestCase):
         self.assertFalse(ask["predict_first"])
         pend = [b for b in h.decisions_of("ask:close-decided") if b.get("status") == "pending-human"][0]
         self.assertIsNone(pend.get("predict_first"))
-        self.assertTrue(pend.get("predict_first_refused").startswith("inherent"))
+        # K6 r4: a KICKOFF question — asked openly, never counted (before: refused as inherent)
+        self.assertTrue(str(pend.get("predict_first_counted")).startswith("false — open: KICKOFF"))
 
 
 class M2ChildAsk(unittest.TestCase):

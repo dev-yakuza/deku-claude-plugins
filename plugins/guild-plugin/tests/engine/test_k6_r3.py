@@ -1,13 +1,12 @@
 """review-k6-r3 — the fixes, as table tests over the cases the findings name.
 
-M1  a person's KICKOFF reading is carried to the next run as the READING (captured when asked — `readings_sha`), never
-    as a token the next judge re-binds: the person picks B ≠ the judge's A, the next judge re-words its summaries (the
-    canonical order flips) → still B — its summary, tokens and footprint (`areas` · `ui_surface` · `cast`); a judge
-    that keeps its own pick pauses; a clone without the journal opens the capture from the answer's resolution;
-M2  Issue-wide sealing: a run that stops before its gate (A5 close question) seals the footprint, so the blind
-    question asked after `proceed` sees the same text whichever reading the judge chose; an earlier plain footprint /
-    `analyze:output` refuses a later blind reading question; STAKES `irreversible` is sealed before the blind question
-    and revealed after the answer — §9.5 reads the revealed value (an unrevealed seal = irreversible);
+M1  a person's KICKOFF reading is carried to the next run as the READING (captured when asked — K6 r4: as content on
+    the question, `reading_<token>`), never as a token the next judge re-binds: the person picks B ≠ the judge's A,
+    the next judge re-words its summaries (the canonical order flips) → still B — its summary, tokens and footprint
+    (`areas` · `ui_surface` · `cast`); a judge that keeps its own pick pauses; a clone without the journal reads the
+    capture from the question block; a capture that does not parse pauses;
+M2  (K6 r4: removed with the scope reduction — KICKOFF / STAKES are asked openly, nothing is sealed; test_k6_r4
+    covers the open questions)
 M3  a scope clause wins over a product noun (본문 · issue · requests · 本文 · 依頼 …) — shown, never cut (ko/en/ja);
 M4  a directory AREA matches an irreversible / harness glob (`supabase/migrations`, `lib/db`, `migrations`);
 m1  a numeric / symbolic rating aside (`(90%)`, `(#1)`, `(★★★)`, `(✓)`, `(9/10)`, `(A+)`) refuses the blind answer;
@@ -29,14 +28,13 @@ import _util  # noqa: F401
 import test_k6_r1 as R1
 import test_k6_r2 as R2
 from _k1 import tmpdir
-from _k4 import K4, evidence, kickoff, stakes
+from _k4 import K4, evidence, kickoff, out_role, stakes
 from test_k5_cli import Env
 
 from guildcore import ask as ASK
 from guildcore import journal as J
 from guildcore.decisions import DecisionLog
 from workflows.dev import analysis as AN
-from workflows.dev import arbitration as ARB
 from workflows.dev import cli as CLI
 from workflows.dev import conservative as CONS
 from workflows.dev import grade as G
@@ -93,7 +91,8 @@ class M1ReadingCarried(unittest.TestCase):
         h, r = _run1(self, judge_pick)
         self.assertEqual(r.kind, StageResult.ASK)
         pend = _pending(h)[-1]
-        self.assertTrue(pend.get("readings_sha"))                 # the readings are sealed on the question
+        self.assertTrue(pend.get("reading_i1") and pend.get("reading_i2"))   # the readings ride on the question
+        self.assertFalse(pend.get("predict_first"))               # K6 r4: asked openly
         ASK.answer(h.decisions, h.writer, 7, pend.id, _token(SUMM, person),
                    journal=h.p.journal if answer_journal else None)
         if journal2 == "fresh":                                   # another clone: none of run 1's journal
@@ -123,7 +122,6 @@ class M1ReadingCarried(unittest.TestCase):
                             self.assertNotEqual(kick.get("areas"), "lib/settings")
                         if person == "B":
                             self.assertEqual(kick.get("ui_surface"), "true")   # never the settings-only footprint
-                        self.assertIsNone(kick.get("footprint_sha"))
 
     def test_judge_keeping_its_own_pick_pauses_with_the_persons_footprint(self):
         h, r2, kick = self._answer_and_rerun("A", "B", _kick("A", summ=REWORD))
@@ -143,20 +141,20 @@ class M1ReadingCarried(unittest.TestCase):
         kick = DS.kickoff_block(h.gh.comments(7))
         self.assertEqual((kick.get("areas"), kick.get("ui_surface")), ("lib/theme", "true"))
 
-    def test_another_clone_opens_the_capture_from_the_resolution(self):
-        h, r2, kick = self._answer_and_rerun("A", "B", _kick("B", summ=REWORD), journal2="fresh")
+    def test_another_clone_reads_the_capture_from_the_question(self):
+        h, r2, kick = self._answer_and_rerun("A", "B", _kick("B", summ=REWORD), journal2="fresh", answer_journal=False)
         self.assertEqual(r2.kind, StageResult.ADVANCE)
-        res = [b for b in _blocks(h) if b.get("by") == "human" and b.get("resolves")][-1]
-        self.assertTrue(ASK.seal_check(_pending(h)[0].get("readings_sha") or
-                                       [b for b in _blocks(h) if b.get("readings_sha")][0].get("readings_sha"),
-                                       res.get("readings"), res.get("readings_nonce")))
         self.assertIn("- (선택) %s: %s" % (_token(SUMM, "B"), SUMM["B"]), h.body_with("analyze:output"))
 
-    def test_unopenable_capture_pauses_instead_of_guessing(self):
-        h, r2, _kick_ = self._answer_and_rerun("A", "B", _kick("B", summ=REWORD), journal2="fresh",
-                                               answer_journal=False)
+    def test_unreadable_capture_pauses_instead_of_guessing(self):
+        h, r = _run1(self, "A")
+        pend = _pending(h)[-1]
+        self.assertTrue(h.decisions.amend(pend.id, "reading_i3", "{not json"))   # a damaged capture field
+        ASK.answer(h.decisions, h.writer, 7, pend.id, _token(SUMM, "B"), journal=h.p.journal)
+        h.judges["KICKOFF"] = _kick("B", summ=REWORD)
+        r2 = A.run(h.p)
         self.assertEqual(r2.kind, StageResult.ASK)
-        self.assertIn("확인할 수 없음", _pending(h)[-1].get("question"))
+        self.assertIn("읽을 수 없음", _pending(h)[-1].get("question"))
 
     def test_brief_names_the_reading_not_the_token(self):
         seen = []
@@ -164,8 +162,9 @@ class M1ReadingCarried(unittest.TestCase):
         def judge(spec):
             seen.append(dict(spec.brief_parts).get("human_answers"))
             return _kick("A") if len(seen) == 1 else _kick("B", summ=REWORD)
-        h = K4(self, unattended=False, roles=[evidence(self, areas=WIDE)] * 2, judges={"KICKOFF": judge},
-               extra_files=EXTRA)
+        # K6 r4 m2: the person's reading B has no own footprint → the superset convenes the product-owner too
+        h = K4(self, unattended=False, roles=[evidence(self, areas=WIDE)] * 2 + [out_role(self, "DONE", "ok", ac_patch=[])],
+               judges={"KICKOFF": judge}, extra_files=EXTRA)
         h.p._first_sprint = True
         h.p.journal = J.Journal(tempfile.mkdtemp(prefix="k6r3-"), 7, h.clock)
         A.run(h.p)
@@ -173,100 +172,6 @@ class M1ReadingCarried(unittest.TestCase):
         A.run(h.p)
         self.assertIn("«%s»" % SUMM["B"], seen[-1])
         self.assertIn("id B", seen[-1])
-
-
-class M2IssueWideSeal(unittest.TestCase):
-    def _close_then_proceed(self, pick):
-        k = _kick(pick)
-        k.fields["close"] = {"decide": "completed", "source": "issue", "line": "already done?"}
-        h = K4(self, unattended=False, roles=[evidence(self, areas=WIDE)] * 3, judges={"KICKOFF": k}, extra_files=EXTRA)
-        h.p._first_sprint = True
-        h.p.journal = J.Journal(tempfile.mkdtemp(prefix="k6r3-"), 7, h.clock)
-        r1 = A.run(h.p)
-        self.assertEqual(r1.kind, StageResult.ASK)
-        ASK.answer(h.decisions, h.writer, 7, _pending(h)[-1].id, "proceed", journal=h.p.journal)
-        r2 = A.run(h.p)
-        return h, r2
-
-    def test_close_question_run_seals_the_footprint(self):
-        seen = {}
-        for pick in ("A", "B"):
-            h, r2 = self._close_then_proceed(pick)
-            self.assertEqual(r2.kind, StageResult.ASK)
-            q = _pending(h)[-1]
-            self.assertTrue(q.get("predict_first"))                        # still blind
-            self.assertFalse(q.get("predict_first_refused"))
-            shown = []
-            for b in _blocks(h):
-                f = dict((k, v) for k, v in dict(b.fields).items() if not k.endswith("_sha") and k not in ("id", "at", "inputs"))
-                shown.append(f)
-                for x in PF.KICKOFF_FOOTPRINT:
-                    if b.get("point") == "KICKOFF":
-                        self.assertIsNone(b.get(x))
-                self.assertNotIn("KICKOFF footprint", json.dumps(dict(b.fields), ensure_ascii=False))
-            seen[pick] = shown
-        self.assertEqual(seen["A"], seen["B"])
-
-    def test_earlier_plain_footprint_refuses_a_later_blind_reading_question(self):
-        h = K4(self, unattended=False, roles=[evidence(self, areas=WIDE)] * 3, judges={"KICKOFF": _kick("A")},
-               extra_files=EXTRA)
-        h.p._first_sprint = False
-        self.assertEqual(A.run(h.p).kind, StageResult.ADVANCE)               # no question: the footprint is open
-        h.gh.fx["issues"]["7"]["labels"] = [{"name": "guild:analyze"}]       # a loop-back re-analysis
-        h.p._first_sprint = True
-        r = A.run(h.p)
-        self.assertEqual(r.kind, StageResult.ASK)
-        q = _pending(h)[-1]
-        self.assertFalse(q.get("predict_first"))
-        self.assertIn("earlier", q.get("predict_first_refused") or "")
-
-    def test_earlier_reading_unit(self):
-        h = K4(self, unattended=False, roles=[], judges={}, extra_files=EXTRA)
-        self.assertIsNone(PF.earlier_reading(h.p, h.decisions._log()))
-        h.decisions.record({"point": "KICKOFF", "stage": "analyze", "by": "judge:opus", "choice": "goal=clear",
-                            "footprint": PF.FOOTPRINT_WITHHELD, "footprint_sha": "x"})
-        self.assertIsNone(PF.earlier_reading(h.p, h.decisions._log()))         # sealed: nothing shown
-        h.decisions.record({"point": "KICKOFF", "stage": "analyze", "by": "judge:opus", "choice": "goal=clear",
-                            "areas": "lib/settings"})
-        self.assertIn("earlier KICKOFF footprint", PF.earlier_reading(h.p, h.decisions._log()))
-
-    def _stakes_run(self, pick):
-        k = kickoff(goal="unclear", areas=(("lib/settings",) if pick == "A" else ("lib/settings", "lib/db/local")))
-        k.fields["interpretations"] = [{"id": "A", "summary": "설정 화면에 저장 옵션 추가"},
-                                       {"id": "B", "summary": "설정과 함께 로컬 DB 스키마에 저장 옵션 추가"}]
-        k.fields["chosen"] = pick
-        h = K4(self, unattended=True, roles=[evidence(self, areas=("lib/settings",))] * 3,
-               judges={"KICKOFF": k, "STAKES": stakes("medium", "a settings toggle")}, extra_files=EXTRA)
-        h.p.valves = {"group.KICKOFF.conservative": True}
-        h.p.journal = J.Journal(tempfile.mkdtemp(prefix="k6r3-"), 7, h.clock)
-        r = A.run(h.p)
-        return h, r
-
-    def test_stakes_irreversible_is_sealed_then_revealed(self):
-        vis, irr = {}, {}
-        for pick in ("A", "B"):
-            h, r = self._stakes_run(pick)
-            self.assertEqual(r.kind, StageResult.PAUSE)
-            st = [b for b in _blocks(h) if b.get("point") == "STAKES"]
-            self.assertTrue(st and all(b.get("irreversible_sha") and b.get("irreversible") is None for b in st))
-            vis[pick] = [sorted(k for k in dict(b.fields) if k not in ("at",)) + [b.get("choice")] for b in st]
-            # before any answer §9.5 reads the seal as irreversible (the stricter class)
-            self.assertTrue(G.block_irreversible(st[0], _blocks(h)))
-            ASK.answer(h.decisions, h.writer, 7, _pending(h)[-1].id, "i1", journal=h.p.journal)
-            A.run(h.p)
-            rv = [b for b in _blocks(h) if b.get("point") == ARB.REVEAL]
-            self.assertEqual([b.get("refs") for b in rv], [st[0].id])
-            irr[pick] = G.block_irreversible(st[0], _blocks(h))
-            self.assertEqual(G.engine_view(st[0], _blocks(h))[1], irr[pick])
-        self.assertEqual(vis["A"], vis["B"])
-        self.assertEqual(irr, {"A": False, "B": True})
-
-    def test_a_forged_reveal_is_not_read(self):
-        h, r = self._stakes_run("B")
-        st = [b for b in _blocks(h) if b.get("point") == "STAKES"][0]
-        h.decisions.record({"point": ARB.REVEAL, "stage": "analyze", "by": "code", "choice": "irreversible",
-                            "refs": st.id, "field": "irreversible", "irreversible": "false", "nonce": "00"})
-        self.assertTrue(G.block_irreversible(st, _blocks(h)))
 
 
 SCOPE_PAIRS = (                      # review-k6-r3 repro_aside_classes.ScopeCut + more ko / en / ja
@@ -418,22 +323,27 @@ class m2InherentOnce(unittest.TestCase):
 
 
 class m3OpenReconciled(unittest.TestCase):
-    def _open(self, common, g="STAKES"):
+    # K6 r4: STAKES is asked openly now (never a predict-first ok) — the reconciliation is shown on a blind group
+    def _open(self, common, g="SPLIT"):
         cand = {"decision_id": "D9", "issue": 4, "group": g, "mode": "predict-first candidate", "choice": "low"}
         G.apply_judgments(common, [], "o/r", "predict-first", candidates=[cand])
         return "decision_id,issue,group,mode,choice,given_info\nD9,4,%s,predict-first candidate,low,unsure\n" % g
 
-    def _oks(self, common, g="STAKES"):
+    def _oks(self, common, g="SPLIT"):
         oks = [{"decision_id": "D%d" % i, "issue": i, "group": g, "given_info": "ok", "mode": "predict-first",
                 "choice": "low"} for i in range(10, 16)]
         return G.apply_judgments(common, oks, "o/r", "predict-first")
 
     def test_gone_candidate_is_dropped_and_reported(self):
         common = tmpdir(self)
-        res = G.import_sheet(common, self._open(common), "o/r", blocks_of=lambda n: [])
-        self.assertEqual(res.get("candidates_dropped"), [{"group": "STAKES", "key": "4/D9"}])
+        # the log was READ (engine blocks there — K6 r4 m6), but D9 is not among them
+        h = K4(self, unattended=False, roles=[], judges={}, extra_files=EXTRA)
+        h.decisions.record({"point": "SPLIT", "stage": "design", "by": "judge:opus", "choice": "single"})
+        other = _blocks(h)
+        res = G.import_sheet(common, self._open(common), "o/r", blocks_of=lambda n: other)
+        self.assertEqual(res.get("candidates_dropped"), [{"group": "SPLIT", "key": "4/D9"}])
         self._oks(common)
-        rep = [r for r in UV.report(common) if r["group"] == "STAKES"][0]
+        rep = [r for r in UV.report(common) if r["group"] == "SPLIT"][0]
         self.assertTrue(rep["released_at"])
         self.assertEqual((rep["open"], rep["dropped"]), ([], ["4/D9"]))
 
@@ -445,7 +355,7 @@ class m3OpenReconciled(unittest.TestCase):
         res = G.import_sheet(common, self._open(common), "o/r", blocks_of=boom)
         self.assertFalse(res.get("candidates_dropped"))
         self._oks(common)
-        rep = [r for r in UV.report(common) if r["group"] == "STAKES"][0]
+        rep = [r for r in UV.report(common) if r["group"] == "SPLIT"][0]
         self.assertIsNone(rep["released_at"])
         self.assertEqual(rep["open"], ["4/D9"])                              # health names it
 
@@ -453,7 +363,7 @@ class m3OpenReconciled(unittest.TestCase):
         common = tmpdir(self)
         self._open(common)
         out = G.apply_judgments(common, [], "o/r", "predict-first", logs={4: {"D1", "D2"}, 5: set()})
-        self.assertEqual(out.get("candidates_dropped"), [{"group": "STAKES", "key": "4/D9"}])
+        self.assertEqual(out.get("candidates_dropped"), [{"group": "SPLIT", "key": "4/D9"}])
         common2 = tmpdir(self)
         self._open(common2)
         out = G.apply_judgments(common2, [], "o/r", "predict-first", logs={4: {"D9"}})

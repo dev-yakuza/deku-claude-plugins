@@ -16,6 +16,7 @@ import test_k5_r10 as R10
 
 from guildcore import valves as VALVES
 from workflows.dev import conservative as CONS
+from workflows.dev import predict as PF
 
 
 class Derived(unittest.TestCase):
@@ -38,6 +39,8 @@ class EveryQuestionBlind(unittest.TestCase):
     def test_x_over_y_questions_are_blind(self):
         n = 0
         for group, x, y in R10.cases():
+            if group in PF.OPEN_GROUPS:
+                continue                     # K6 r4: STAKES is asked openly — test_k6_r4.OpenGroups covers it
             with self.subTest(group=group, option=x, judge=y):
                 o = R10.run_case(self, group, x, y)
                 qs = [b for b in o["all"] if b.get("kind") == CONS.KIND and b.get("status") == "pending-human"]
@@ -47,7 +50,7 @@ class EveryQuestionBlind(unittest.TestCase):
                     self.assertTrue(q.get("recommended_sha"), (group, x, y, q.id))
                     self.assertIsNone(q.get("recommended"), (group, x, y, q.id))
                     self.assertIsNone(q.get("predict_first_refused"), (group, x, y, q.id, q.get("question")))
-        self.assertGreaterEqual(n, 35)
+        self.assertGreaterEqual(n, 31)          # K6 r4: 35 − the 4 STAKES cases (asked openly)
 
 
 if __name__ == "__main__":

@@ -18,9 +18,12 @@ L0-KICKOFF, SJ-STAKES, §3.3 AN-PO).
         path are dropped ON RECORD (decision log + analyze:output assumption), never silently
     A5  close as decided (T3 ①–⑤): unattended only from a member's plan line; the leader's own "no
         work needed" → attended `ask close-decided`, unattended `ambiguity:` pause
-    K6 r3 M1: a reading answer (readiness / interpretation-surface) is carried as the READING captured when the
-        question was asked (`readings_sha` → `analysis.apply_reading`: readings, tokens, `chosen`, footprint) — the
-        judge is told which; a judge that does not take it, or a capture this clone cannot open, pauses.
+    K6 r3 M1 / K6 r4: a reading answer (readiness / interpretation-surface) is carried as the READING captured when
+        the question was asked (content on its pending block — `reading_<token>` → `analysis.apply_reading`: readings,
+        tokens, `chosen`, footprint) — the judge is told which; a judge that does not take it (by content —
+        `analysis.judge_took`), or a capture that does not parse, pauses with `reask` (ask the reading again) / `stop`.
+        Of two unapplied reading answers the one to the LATEST question is carried; the older is retired with it.
+        KICKOFF / STAKES questions are asked openly (user decision 2026-11-20 — `predict.OPEN_GROUPS`).
     A6  readiness gate: attended — unclear → `ask readiness` (options = interpretations), surface →
         `ask interpretation-surface`; unattended — SJ-STAKES per partial/unclear dimension (fixed high
         for premise/reinterpretation), high → `ambiguity:` pause, low/medium → recorded assumption
@@ -49,6 +52,8 @@ from workflows.dev import predict as PF
 from workflows.dev.stages import base as B
 
 STAGE = "analyze"
+READING_KINDS = ("readiness", "interpretation-surface")
+READING_STOP_POINT = "ask:reading-not-taken"      # K6 r4: the "reading not taken" pause — `reask` | `stop`
 MEMBERS = ("OWNER", "MEMBER", "COLLABORATOR")
 NEEDS_MORE_MAX = 5
 NEEDS_MORE_BYTES = 20000
@@ -235,8 +240,20 @@ def run(p, only=None, config_present=True):
             if res.get("choice") == "stop":
                 return B.StageResult(B.StageResult.PAUSE, cause="stopped by the human answer %s" % res.id)
             answers[kind] = (q, res)
-    if "readiness" in answers or "interpretation-surface" in answers:
-        ARB.reveal_sealed_stakes(p, STAGE, comments)      # K6 r3 M2: the answer is in — the sealed STAKES fields open
+    # K6 r4 M4: of the unapplied reading answers only the one to the LATEST question is carried (that question was
+    # asked knowing the earlier answer); the older ones are retired with it (`applied` when it is) — two answers never
+    # pull the run two ways. K6 r4 (non-stop way out): a `reask` answer to the "reading not taken" pause retires every
+    # reading answer older than it and asks the reading again.
+    retired = []
+    reading = [(answers[kd][0].n, answers[kd][1].n, kd) for kd in READING_KINDS if kd in answers]
+    for _qn, _rn, kd in sorted(reading)[:-1]:
+        retired.append(answers.pop(kd)[1])
+    esc = answers.get("escalation")
+    reask = esc is not None and esc[0].get("point") == READING_STOP_POINT and esc[1].get("choice") == "reask"
+    if reask:
+        for kd in READING_KINDS:
+            if kd in answers and answers[kd][0].n < esc[0].n:
+                retired.append(answers.pop(kd)[1])
 
     # A1 — premises (code; before any model call)
     unmet = []
@@ -300,15 +317,18 @@ def run(p, only=None, config_present=True):
             out.append("## %s\n%s" % (rel, (p.read_file(rel) or "")[:NEEDS_MORE_BYTES]))
         return "Requested files (added once):\n\n" + "\n\n".join(out)
 
-    # K6 r3 M1: a reading answer is carried as the READING the person chose (captured when the question was asked —
-    # `analysis.reading_capture`, sealed `readings_sha`), never as the bare token: the token is an index into THAT
-    # run's canonical order, and this run's judge writes new summaries (the order can flip) and its own footprint
+    # K6 r3 M1 / K6 r4: a reading answer is carried as the READING the person chose (captured when the question was
+    # asked — `analysis.reading_capture`, content `reading_<token>` on its pending block), never as the bare token: the
+    # token is an index into THAT run's canonical order, and this run's judge writes new summaries (the order can
+    # flip) and its own footprint
     readings = {}                       # kind → (capture | None, why)
-    for kind in ("readiness", "interpretation-surface"):
+    for kind in READING_KINDS:
         if kind in answers:
-            readings[kind] = PF.kickoff_readings(p, answers[kind][0], answers[kind][1])
+            readings[kind] = AN.captured(answers[kind][0])
     applied_lines = []
     for kind, (q, res) in sorted(answers.items()):
+        if kind == "escalation" and reask:
+            continue
         cap = (readings.get(kind) or (None, None))[0]
         ent = next((x for x in cap or () if x.get("token") == res.get("choice")), None)
         if ent is not None:
@@ -337,7 +357,7 @@ def run(p, only=None, config_present=True):
     ev_areas = [a.get("path") for a in (ev.get("areas") or []) if isinstance(a, dict) and isinstance(a.get("path"), str)]
     # K6 r3 M1: the person's reading — from the question-time capture (readings, tokens, `chosen`, footprint)
     reading_stop = None
-    for kind in ("readiness", "interpretation-surface"):
+    for kind in READING_KINDS:
         if kind not in answers:
             continue
         q_, res_ = answers[kind]
@@ -349,15 +369,14 @@ def run(p, only=None, config_present=True):
                 reading_stop = "답 %s(%s)이 질문 %s 의 해석 중 하나가 아님" % (res_.id, ch_, q_.id)
             else:
                 k.coerced.append("reading = the person's %s (answer %s, captured at %s)" % (ch_, res_.id, q_.id))
-                if not AN.judge_took(d.fields, ent):
-                    # its AC / readiness are another reading's — never written as the person's
+                if not AN.judge_took(d.fields, ent, cap):
+                    # user decision 2026-11-20: its AC / readiness are another reading's — never written as the person's
                     reading_stop = ("KICKOFF 판단이 사람이 고른 해석 «%s»(답 %s)을 따르지 않음 — 판단의 AC 는 다른 해석의 것"
                                     % (B.one_line(ent.get("summary") or "", 80), res_.id))
-        elif why == "unavailable" and ch_ in [i["id"] for i in k.interpretations]:
-            # sealed, but this clone can open neither the journal nor the resolution's reveal: the token alone would
-            # name whatever reading THIS run's order puts there — stop instead of guessing
-            reading_stop = "답 %s 의 해석(질문 %s 시점)을 이 클론에서 확인할 수 없음 — 토큰만으로 해석을 정하지 않음" % (
-                res_.id, q_.id)
+        elif why == "unreadable":
+            # the capture on the question does not parse: the token alone would name whatever reading THIS run's
+            # order puts there — stop (with the way out: ask the reading again) instead of guessing
+            reading_stop = "답 %s 의 해석(질문 %s 시점)을 읽을 수 없음 — 토큰만으로 해석을 정하지 않음" % (res_.id, q_.id)
     if k.token_map and getattr(p, "journal", None) is not None:      # K5r4-m1: which judge id became which token
         p.journal.append("event", what="kickoff-tokens", map=k.token_map, order="canonical")
     _untagged = [x for x in (d.fields.get("untagged_premises") or []) if isinstance(x, int)
@@ -380,7 +399,7 @@ def run(p, only=None, config_present=True):
     # human answers fold in (attended readiness / interpretation; unattended answer lines)
     rec = None
     human_decided = None
-    for kind in ("readiness", "interpretation-surface"):
+    for kind in READING_KINDS:
         if kind in answers:
             human_decided = answers[kind][1].id
             q, res = answers[kind]
@@ -398,14 +417,9 @@ def run(p, only=None, config_present=True):
                           "#%d" % p.issue, True)
     if "premise" in answers:
         k.high = set(x for x in k.high if not any(pl.dim == x for pl in plan))
-    # K6 r2 M2: whether a blind interpretation question follows in THIS run is decided BEFORE the KICKOFF block is
-    # written — A4 (harness) and A5 (close) first, then A6's question (attended: unclear / surface; unattended: the
-    # STAKES judgments — their blocks still deferred — and the conservative KICKOFF). When one follows, the block's
-    # interpretation-dependent fields (the chosen reading's footprint: `areas` · `ui_surface` · `cast` · `work_type` ·
-    # `safety_net_visual`, and the code coercions about it) are sealed with `chosen` (`footprint_sha`, journaled,
-    # revealed with the answer) — `areas: lib/settings · ui_surface: false` next to a blind "설정만 / 앱 전체"
-    # question IS its recommendation. The run after the answer (`human_decided`) writes them openly; design reads
-    # that block (the last KICKOFF block of analyze). Judge-call order and block order are unchanged.
+    # A4 (harness), A5 (close) and A6 (the reading question) are decided BEFORE the KICKOFF block is written (r2 order,
+    # kept: judge-call order and block order unchanged). K6 r4: every field of the block is written openly — KICKOFF is
+    # asked openly (user decision 2026-11-20), nothing is sealed.
     # A4 — harness guard (decided here, its record after the KICKOFF block as before)
     hits = AN.harness_hit(k.areas + ev_areas) + AN.harness_text_hit([a["text"] for a in k.ac])
     harness_note = None
@@ -434,12 +448,13 @@ def run(p, only=None, config_present=True):
     open_dims = [x for x in AN.DIMS if k.readiness[x] in ("partial", "unclear")]
     stakes = {}
     a6 = None                      # ("ask", q, line) | ("pause", q, line, prose) — the question A6 raises
-    capture = AN.reading_capture(k, p.root, ros, AN.real_dirs(p.root, ev_areas))
+    k.explorer_areas = AN.real_dirs(p.root, ev_areas)
+    capture = AN.reading_capture(k, p.root, ros, k.explorer_areas, net=bool(net), globs=p.engine_cfg("irreversible_globs"))
 
     def with_readings(q):
-        """K6 r3 M1: the readings this question chooses between, sealed on its pending block (`readings_sha`)."""
+        """K6 r3 M1 / K6 r4: the readings this question chooses between, as content on its pending block."""
         if capture and not human_decided:
-            q.extra = dict(q.extra or {}, readings_sha=PF.kickoff_readings_sealed(p, capture))
+            q.extra = dict(q.extra or {}, **AN.capture_fields(capture))
         return q
     recorders, high, cons = [], [], False
     if not a4 and not a5:
@@ -449,22 +464,25 @@ def run(p, only=None, config_present=True):
             opts.append({"token": "stop", "label": "stop"})
             if unclear:
                 what = "; ".join("%s unclear — %s" % (AN.DIM_KEY[x], k.choice_needed.get(x) or "-") for x in unclear)
-                # K5r5-M1: the blind wording is the engine's (dimension names only); K5r5-M2: the judge said undecidable
+                # K5r5-M2: the judge said undecidable (K6 r4: asked openly — the judge's wording goes out)
                 q = ASK.Question("readiness", what, opts, recommended=k.chosen if k.chosen in [o["token"] for o in opts] else None,
                                  recommended_by=d.by, stakes="high" if k.high & set(unclear) else None, aliases=k.aliases,
-                                 neutral=PF.neutral_text("readiness-unclear", ", ".join(AN.DIM_KEY[x] for x in unclear),
-                                                         p.issue), raised_by="judge-unclear")
+                                 raised_by="judge-unclear")
                 a6 = ("ask", with_readings(q), what)
             else:
                 judge_asked = bool(k.surface.get("ask"))
-                surf = judge_asked or FS.confirm_interpretation(p)    # §10.4: on in the first sprint (and KICKOFF conservative)
+                surf = judge_asked or FS.confirm_interpretation(p) or reask   # §10.4: on in the first sprint (and KICKOFF conservative)
                 if surf and "interpretation-surface" not in answers and "readiness" not in answers:
                     what = k.surface.get("question") or "해석 확인: %s" % k.chosen
-                    # K5r3-M1: KICKOFF is high-risk → this ask is predict-first; its neutral wording never names the chosen one
+                    if reask and not judge_asked:
+                        what = "해석 다시 묻기(답 %s) — %s" % (esc[1].id, what)
+                    # K6 r4: KICKOFF is asked openly (user decision 2026-11-20) — the recommendation is shown
                     q = ASK.Question("interpretation-surface", what, opts,
                                      recommended=k.chosen if k.chosen in [o["token"] for o in opts] else None,
-                                     recommended_by=d.by, neutral=PF.neutral_text("interpretation", p.issue),
-                                     aliases=k.aliases, raised_by="judge-surface" if judge_asked else "confirm")
+                                     recommended_by=d.by, aliases=k.aliases,
+                                     raised_by="judge-surface" if judge_asked else ("reask" if reask and not
+                                                                                     FS.confirm_interpretation(p)
+                                                                                     else "confirm"))
                     a6 = ("ask", with_readings(q), what)
         else:
             chosen_txt = next((i["summary"] for i in k.interpretations if i["id"] == k.chosen), "")
@@ -477,60 +495,50 @@ def run(p, only=None, config_present=True):
                     stakes[dim], rec_ = ARB.stakes(p, STAGE, "J-AN-07", "%s %s — %s" % (AN.DIM_KEY[dim], k.readiness[dim],
                                              k.choice_needed.get(dim) or "-"),
                                              [i["summary"] for i in k.interpretations], chosen_txt, judge_body,
-                                             k.areas, irr, "A1.3",
-                                             # K5r5-M1: the block on GitHub carries the engine's words only — the
-                                             # judge's choice_needed would show before a blind readiness answer
-                                             record_question="%s %s" % (AN.DIM_KEY[dim], k.readiness[dim]), defer=True)
+                                             k.areas, irr, "A1.3", defer=True)
                     recorders.append(rec_)
             high = [x for x in open_dims if stakes.get(x) == "high"]
-            # K5r5-M3: KICKOFF conservative (§9.5 count rule) — its decision goes to a person: the interpretation is
-            # confirmed blind even when every dimension is clear
-            cons = not human_decided and not high and PF.conservative(p, "KICKOFF") and bool(k.interpretations)
+            # K5r5-M3: KICKOFF conservative (§9.5 count rule / unverified) — its decision goes to a person: the
+            # interpretation is confirmed (openly — K6 r4) even when every dimension is clear; K6 r4: or a `reask`
+            cons_k = PF.conservative(p, "KICKOFF")
+            cons = not human_decided and not high and (cons_k or reask) and bool(k.interpretations)
             if high or cons:
                 dim = high[0] if high else None
                 if dim:
                     line = "%s %s — %s" % (AN.DIM_KEY[dim], k.readiness[dim], B.one_line(k.choice_needed.get(dim) or "-", 160))
-                    neutral = PF.neutral_text("readiness-high", AN.DIM_KEY[dim], k.readiness[dim], p.issue)
-                else:
+                elif cons_k:
                     line = "%s — 해석 확인" % PF.conservative_label(p, "KICKOFF")
-                    neutral = PF.neutral_text("kickoff-conservative", p.issue)
+                else:
+                    line = "해석 다시 묻기(답 %s)" % esc[1].id
                 opts = [{"token": i["id"], "label": B.one_line(i["summary"], 80)} for i in k.interpretations]
                 opts.append({"token": "stop", "label": "stop"})
                 q = ASK.Question("readiness" if dim else "interpretation-surface", line, opts,
                                  recommended=k.chosen if k.chosen in [o["token"] for o in opts] else None,
-                                 recommended_by=d.by, stakes="high", aliases=k.aliases, neutral=neutral,
+                                 recommended_by=d.by, stakes="high", aliases=k.aliases,
                                  # K5r6-m4: `unclear` = the judge could not decide; `partial` + STAKES high = the
-                                 # judge could, the engine asks (confirm)
-                                 raised_by="judge-unclear" if dim and k.readiness[dim] == "unclear" else "confirm")
+                                 # judge could, the engine asks (confirm); K6 r4: a person's `reask` → `reask`
+                                 raised_by="judge-unclear" if dim and k.readiness[dim] == "unclear" else
+                                 ("confirm" if dim or cons_k else "reask"))
                 # K5r3-m3: the enumeration in the canonical order (never the judge's ranking)
                 a6 = ("pause", with_readings(q), line, "선택지: " + " | ".join("%s = %s" % (o["token"], o["label"])
                                                                for o in PF.canonical(opts) if o["token"] != "stop"))
-    blind_next = a6 is not None and a6[1].recommended is not None
-    # K6 r3 M2: the footprint is sealed not only before a blind question in THIS run but whenever the run stops before
-    # its readiness gate without a person's reading (A4 harness / A5 close question): the run after that answer may
-    # ask the blind reading question under this block. (A run that goes on openly writes it openly — a LATER blind
-    # reading question on this Issue is then refused by `predict.earlier_reading`.)
-    seal_early = not blind_next and not human_decided and (a4 or a5)
-    foot = {"work_type": k.work_type, "cast": k.cast["participation"] + k.cast["gates"],
-            "ui_surface": k.ui_surface, "safety_net_visual": k.safety_net_visual, "areas": k.areas[:10]}
+    # K6 r4 m2: every area (irreversible / harness ones first — `order_areas`), never a truncated list: design's §3.2
+    # check reads this block's `areas`
+    kextra = {"chosen": k.chosen, "work_type": k.work_type, "cast": k.cast["participation"] + k.cast["gates"],
+              "ui_surface": k.ui_surface, "safety_net_visual": k.safety_net_visual,
+              "areas": AN.order_areas(k.areas, p.engine_cfg("irreversible_globs")),
+              "explorer": explorer_state, "code_coercions": len(k.coerced) or None}
     kreason = "; ".join(k.coerced)[:300] or None
-    kextra = dict(PF.kickoff_chosen_fields(p, k.chosen))
-    if blind_next or seal_early:
-        kextra.update(PF.kickoff_footprint_sealed(p, dict(foot, reason=kreason, code_coercions=len(k.coerced) or None),
-                                                  reveal=blind_next))
-        kextra["explorer"] = explorer_state
-        kreason = None
-    else:
-        kextra.update(foot)
-        kextra.update(explorer=explorer_state, code_coercions=len(k.coerced) or None)
     did = B.record_judgment(p, STAGE, "KICKOFF", "J-DEV-01,J-AN-05,J-AN-06,J-AN-10,J-AN-13", d,
                             choice=",".join("%s=%s" % (x, k.readiness[x]) for x in AN.DIMS),
                             reason=kreason, extra=kextra)
     trace.append("KICKOFF %s (%s)%s" % (did, d.by, (" · coerced: %d" % len(k.coerced)) if k.coerced else ""))
     if reading_stop:
-        # K6 r3 M1: the person's reading could not be carried as itself (the judge took another, or it is not readable
-        # here) — a person, never a guess; the answer stays unapplied (the next run carries it again)
-        q = ASK.Question("escalation", reading_stop, [{"token": "stop", "label": "stop"}])
+        # K6 r3 M1: the person's reading could not be carried as itself (the judge took another, or it is not readable)
+        # — a person, never a guess; the answer stays unapplied (the next run carries it again). K6 r4 M4: with a way
+        # forward — `reask` retires the reading answers and asks the reading again (openly)
+        q = ASK.Question("escalation", reading_stop, [{"token": "reask", "label": "해석을 다시 묻기"},
+                                                      {"token": "stop", "label": "stop"}], point=READING_STOP_POINT)
         return B.ask(p, STAGE, q, reading_stop, {"cause_kind": "ambiguity", "line": reading_stop,
                                                  "token_cause": "ambiguity: %s" % reading_stop})
 
@@ -560,6 +568,10 @@ def run(p, only=None, config_present=True):
             "cause_kind": "ambiguity", "line": line, "token_cause": "ambiguity: %s" % line})
 
     # A6 — readiness gate
+    if a6 is not None and (reask or retired):
+        # K6 r4: the reading is asked again — the reask answer and the retired reading answers are spent now
+        for res_ in retired + ([esc[1]] if reask else []):
+            B.mark_applied(p, STAGE, res_)
     if not p.unattended:
         if a6 is not None:
             return B.ask(p, STAGE, a6[1], a6[2])
@@ -567,8 +579,8 @@ def run(p, only=None, config_present=True):
             p.events.emit("progress", p.now(), line="analyze #%d: %s · %s · cast %s" % (
                 p.issue, k.chosen, AN.readiness_line(k.readiness), ", ".join(k.cast["participation"] + k.cast["gates"]) or "none"))
     else:
-        for rec_ in recorders:          # K5r6-m7: a blind question follows → the STAKES reasons are withheld until then
-            rec_(withhold=bool(high or cons))
+        for rec_ in recorders:          # K6 r4: STAKES is written openly (its reason and `irreversible` as they are)
+            rec_()
         if a6 is not None:
             _k, q, line, prose = a6
             return B.pause(p, STAGE, "ambiguity", line, "ambiguity: %s" % line, question=q, prose=prose)
@@ -610,6 +622,8 @@ def run(p, only=None, config_present=True):
     out = AN.render_output(p.issue, k, chosen_summary, note, trace, assumptions, po_line)
     p.writer.upsert_comment(p.issue, "analyze:output", out)
     for kind, (q, res) in answers.items():
+        B.mark_applied(p, STAGE, res)
+    for res in retired:                    # K6 r4 M4: an older reading answer is spent with the one carried
         B.mark_applied(p, STAGE, res)
     bad = analyze_to_design(B.records(p), net, p.unattended)
     if bad:
@@ -711,9 +725,10 @@ def product_owner(p, k, issue_text, charter, forced, body, irr):
                 opts = [{"token": i["id"], "label": B.one_line(i["summary"], 80)} for i in k.interpretations] + \
                     [{"token": "stop", "label": "stop"}]
                 q = ASK.Question("readiness", what, opts, stakes="high" if p.unattended else None)
-                if k.interpretations:         # K6 r3 M1: the answer is carried as the reading, not the token
-                    q.extra = {"readings_sha": PF.kickoff_readings_sealed(
-                        p, AN.reading_capture(k, p.root, roster(p)))}
+                if k.interpretations:         # K6 r3 M1 / r4: the answer is carried as the reading, not the token
+                    q.extra = AN.capture_fields(AN.reading_capture(
+                        k, p.root, roster(p), getattr(k, "explorer_areas", ()), net=k.safety_net_visual_possible,
+                        globs=p.engine_cfg("irreversible_globs")))
                 return B.ask(p, STAGE, q, what, {"cause_kind": "ambiguity", "line": what, "token_cause": "ambiguity: %s" % what})
     return line
 

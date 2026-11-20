@@ -23,7 +23,7 @@ from workflows.dev import predict as PF
 from workflows.dev import unverified as UV
 
 
-def _row(i, group="STAKES", gi="ok", mode="predict-first"):
+def _row(i, group="SPLIT", gi="ok", mode="predict-first"):          # K6 r4: STAKES is asked openly
     return {"decision_id": "D%d" % i, "issue": 10 + i, "stage": "analyze", "group": group, "mode": mode,
             "choice": "low", "given_info": gi}
 
@@ -58,24 +58,24 @@ class Release(unittest.TestCase):
         for i in range(4):
             res = G.apply_judgments(self.common, [_row(i)], "o/r", "predict-first")
             self.assertNotIn("unverified_released", res)
-            self.assertIn("STAKES", UV.pending(self.common))
+            self.assertIn("SPLIT", UV.pending(self.common))
         res = G.apply_judgments(self.common, [_row(4)], "o/r", "predict-first")
-        self.assertEqual(res.get("unverified_released"), ["STAKES"])
-        self.assertNotIn("STAKES", UV.pending(self.common))
+        self.assertEqual(res.get("unverified_released"), ["SPLIT"])
+        self.assertNotIn("SPLIT", UV.pending(self.common))
         self.assertIn("QA", UV.pending(self.common))
 
     def test_a_wrong_keeps_it_unverified(self):
         G.apply_judgments(self.common, [_row(0, gi="wrong")], "o/r", "human")
         G.apply_judgments(self.common, [_row(i) for i in range(1, 9)], "o/r", "predict-first")
-        self.assertIn("STAKES", UV.pending(self.common))
+        self.assertIn("SPLIT", UV.pending(self.common))
         rep = dict((r["group"], r) for r in UV.report(self.common))
-        self.assertEqual((rep["STAKES"]["counted"], rep["STAKES"]["wrong"]), (9, 1))
+        self.assertEqual((rep["SPLIT"]["counted"], rep["SPLIT"]["wrong"]), (9, 1))
 
     def test_other_rows_never_count(self):
         rows = [_row(i, mode="first-sprint") for i in range(6)] + [_row(10 + i, gi="unsure") for i in range(6)]
         G.apply_judgments(self.common, rows, "o/r", "human")
-        self.assertIn("STAKES", UV.pending(self.common))
-        self.assertEqual(dict((r["group"], r) for r in UV.report(self.common))["STAKES"]["counted"], 0)
+        self.assertIn("SPLIT", UV.pending(self.common))
+        self.assertEqual(dict((r["group"], r) for r in UV.report(self.common))["SPLIT"]["counted"], 0)
 
     def test_colon_group_spelling(self):
         G.apply_judgments(self.common, [_row(i, group="EX-ARB:dismiss") for i in range(5)], "o/r", "predict-first")

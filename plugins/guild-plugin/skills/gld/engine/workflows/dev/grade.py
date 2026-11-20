@@ -20,9 +20,11 @@ Human judgments (§9.5 "사람 판정 = 블라인드 채점표 답 + predict-fir
   sheet row (`mode: inherent-gate`, `choice` = the judge's pick, `inherent_row`) the person grades on the evidence,
   open (holding the §10.2-6 release) until imported. K6 r3 m4: the row carries the Issue's post-hoc evidence and never
   the person's own earlier answer (nor the resolution that holds it).
-* K6 r3 M2: a STAKES block written before a blind KICKOFF question carries `irreversible_sha` (sealed) — §9.5 reads
-  the reveal block the run after the answer writes (`block_irreversible`); a seal nothing revealed counts as
-  irreversible (the stricter class).
+* K6 r4 (user decision 2026-11-20, scope reduction): KICKOFF and STAKES questions are asked openly
+  (`predict.OPEN_GROUPS`) — never an `ok` nor a candidate; an engine-raised (`raised_by: confirm`) KICKOFF reading
+  question and a STAKES conservative-gate question become sheet rows the same way (`inherent_row`, `mode:
+  inherent-gate`, `choice` = the engine's pick, never the person's answer), and those verdicts release the group
+  (`unverified.OPEN_ASKED`).
 
 Selection (deterministic — `(repo, issue, D-id)` hash, never random):
 * only L0/SJ decisions the engine made (`by: judge:*` / `leader:*`); a decision a person already decided (an
@@ -286,26 +288,50 @@ INHERENT_MODE = UV.INHERENT_MODE
 
 
 def _inherent_group(q):
-    """K6 r2 M1: the group of a conservative-gate question whose existence states its recommendation
-    (`conservative.INHERENT` — one non-conservative option), or None."""
+    """The group of a question whose answer is never a counted blind judgment but whose decision goes on the grading
+    sheet (`inherent_row`), or None:
+    * K6 r2 M1: a conservative-gate question of a group with ONE non-conservative option (`conservative.INHERENT`) —
+      its existence states its recommendation;
+    * K6 r4 (user decision 2026-11-20): a question of an OPEN group (`unverified.OPEN_ASKED`, asked openly) — a STAKES
+      conservative-gate question, and a KICKOFF reading question the ENGINE raised although the judge was sure
+      (`raised_by: confirm` — the first-sprint / unverified confirmation; a question the judge raised itself is not
+      its decision to grade, as before)."""
     from workflows.dev import conservative as CONS
-    if q.get("kind") != CONS.KIND:
-        return None
-    g = q.get("group") or str(q.get("point") or "").partition(":")[2]
-    return g if g in CONS.INHERENT else None
+    from workflows.dev import predict as PF
+    if q.get("kind") == CONS.KIND:
+        g = q.get("group") or str(q.get("point") or "").partition(":")[2]
+        return g if (g in CONS.INHERENT or g in UV.OPEN_ASKED) else None
+    if q.get("kind") in READING_KINDS and q.get("raised_by") == CONFIRM and \
+            PF.KIND_GROUP.get(q.get("kind")) in UV.OPEN_ASKED:
+        return PF.KIND_GROUP[q.get("kind")]
+    return None
+
+
+READING_KINDS = ("readiness", "interpretation-surface")
 
 
 def inherent_row(q, r, issue):
-    """K6 r2 M1: a person's answer (blind or not, revealed or not, after-reveal or not) to an INHERENT gate question
-    → one grading-sheet row for the person to judge the engine's decision on the evidence (`mode: inherent-gate`,
-    `choice` = the judge's non-conservative pick); open until imported. Never an `ok` nor a wrong candidate: the
-    person knew the recommendation from the question's existence. None for any other question."""
+    """K6 r2 M1 / K6 r4: a person's answer (blind or not, revealed or not, after-reveal or not) to an INHERENT gate
+    question or an OPEN group's question (`_inherent_group`) → one grading-sheet row for the person to judge the
+    engine's decision on the evidence (`mode: inherent-gate`, `choice` = the engine's pick); open until imported.
+    Never an `ok` nor a wrong candidate. None for any other question (or one with no engine pick to grade)."""
     g = _inherent_group(q)
     ch = r.get("choice")
     if g is None or not ch:
         return None
     from workflows.dev import conservative as CONS
-    rec = r.get("recommended") or q.get("recommended") or CONS.INHERENT[g]
+    rec = r.get("recommended") or q.get("recommended") or CONS.INHERENT.get(g)
+    if not rec:
+        return None
+    what = rec
+    if g == "KICKOFF":
+        from workflows.dev import analysis as AN
+        cap, _why = AN.captured(q)
+        summ = next((e.get("summary") for e in cap or () if e.get("token") == rec), None)
+        if summ:
+            what = "%s «%s»" % (rec, " ".join(str(summ).split())[:160])
+    why = ("inherent gate: the engine chose %s (the one non-conservative option)" % what if g in CONS.INHERENT
+           else "open %s question: the engine chose %s" % (g, what))
     return {"decision_id": q.id, "issue": issue, "stage": q.get("stage") or "", "group": g, "mode": INHERENT_MODE,
             "choice": rec, "coerced": "false", "coerced_by": "", "unsure": "false",
             "irreversible": "true" if q.get("irreversible") == "true" else "", "outcome": "",
@@ -313,16 +339,16 @@ def inherent_row(q, r, issue):
             # engine's pick and the post-hoc evidence — `dev grade` appends the Issue's evidence summary, as for
             # every pass-1 row), and the resolution is not named (it carries the answer)
             "note": "",
-            "reason": "inherent gate: the engine chose %s (the one non-conservative option)" % rec,
+            "reason": why,
             "given_info": "",
-            "evidence": "inherent-gate verdict — grade the engine's %s on the evidence (ok = it was right, wrong = it "
-                        "was not)" % rec}
+            "evidence": "%s verdict — grade the engine's %s on the evidence (ok = it was right, wrong = it was not)"
+                        % ("inherent-gate" if g in CONS.INHERENT else "open-question", what)}
 
 
-def sheet_rows(selected, mode, evidence, blocks_of=None):
+def sheet_rows(selected, mode, evidence):
     rows = []
     for issue, b, why in selected:
-        irr = block_irreversible(b, blocks_of(issue) if blocks_of else ())
+        irr = block_irreversible(b)
         rows.append({"decision_id": b.id, "issue": issue, "stage": b.get("stage") or "", "group": group_of(b),
                      "mode": mode, "choice": b.get("raw_choice") or b.get("choice") or "",
                      "reason": " ".join((b.get("reason") or "").split())[:300],
@@ -393,25 +419,12 @@ def irreversible_row(row):
     return str(row.get("irreversible") or "").strip().lower() == "true"
 
 
-def block_irreversible(b, blocks=()):
-    """§9.5 rule 2's irreversible mark of a block: `irreversible: true`; K6 r3 M2: a SEALED mark (`irreversible_sha` —
-    a STAKES block written before a blind KICKOFF question) reads its reveal block (`point: reveal`, value + nonce
-    checked against the seal); a seal nothing revealed (a `stop`, a clone without the journal) counts as
-    irreversible — the stricter class, never the laxer."""
-    if b.get("irreversible") == "true":
-        return True
-    sha = b.get("irreversible_sha")
-    if not sha:
-        return False
-    from guildcore import ask as ASK
-    for x in blocks or ():
-        if x.get("point") == "reveal" and x.get("refs") == b.id and x.get("field") == "irreversible" and \
-                ASK.seal_check(sha, x.get("irreversible"), x.get("nonce")):
-            return x.get("irreversible") == "true"
-    return True
+def block_irreversible(b):
+    """§9.5 rule 2's irreversible mark of a block: `irreversible: true` (K6 r4: never sealed — STAKES is asked openly)."""
+    return b.get("irreversible") == "true"
 
 
-def engine_view(b, blocks=()):
+def engine_view(b):
     """(group, irreversible) the engine's OWN record says for a sheet row's D-id — a decision block, or the pending
     block of a predict-first question (K5r6-m2)."""
     if b.get("status") == "pending-human":
@@ -422,7 +435,7 @@ def engine_view(b, blocks=()):
         g = PF.group_of(_Q(), b.get("stage"))
     else:
         g = group_of(b)
-    return g, (g in IRREVERSIBLE or block_irreversible(b, blocks))
+    return g, (g in IRREVERSIBLE or block_irreversible(b))
 
 
 def verify_rows(rows, blocks_of):
@@ -439,7 +452,10 @@ def verify_rows(rows, blocks_of):
             if n not in cache:
                 cache[n] = dict((b.id, b) for b in blocks_of(n))
             b = cache[n].get(r.get("decision_id"))
-            why = "no such decision in the engine's log"
+            # K6 r4 m6: a log with NO engine block is not "read, decision gone" — the engine's comments were not read
+            # as trusted (the association changed, a read lost it): never reconcile a candidate away on that
+            why = "no such decision in the engine's log" if cache[n] else \
+                "the Issue's decision log shows no engine block (not readable as trusted)"
         except Exception:                                        # noqa: BLE001 — unreadable = not verified
             b, why = None, "the Issue's decision log is unreadable"
         if b is None:
@@ -449,7 +465,7 @@ def verify_rows(rows, blocks_of):
             rejected.append({"decision_id": r.get("decision_id"), "issue": r.get("issue"), "why": why,
                              "gone": why.startswith("no such")})
             continue
-        g, irr = engine_view(b, cache[n].values())
+        g, irr = engine_view(b)
         if not g:
             rejected.append({"decision_id": r.get("decision_id"), "issue": r.get("issue"), "why": "no §9.5 group"})
             continue
@@ -457,7 +473,7 @@ def verify_rows(rows, blocks_of):
         # K6 r2 M1: an inherent group's sheet verdict counts toward its release only on its non-conservative pick —
         # the choice and the mode come from the log (a pending gate block: the pick its resolution revealed)
         from workflows.dev import conservative as CONS
-        if g in CONS.INHERENT:
+        if g in CONS.INHERENT or g in UV.OPEN_ASKED:
             if _inherent_group(b) is not None:
                 res = [x for x in cache[n].values() if x.get("resolves") == b.id and x.get("by") == "human"]
                 fixed["choice"] = (res[-1].get("recommended") if res else None) or b.get("recommended") or ""
@@ -835,8 +851,9 @@ def main(d, a):
                     if g.get("repo") == repo and g.get("grader_version") == "human")
     pf_cands = [r for r in pf_cands if (str(r["issue"]), r["decision_id"]) not in confirmed]
     # `ok`s only (K5r5-M2); K6 r1 m1: the candidates still open hold back their group's §10.2-6 release
+    # K6 r4 m6: only a log that shows engine blocks reconciles (an empty one is unread, not "every decision gone")
     pf = apply_judgments(common, pf_rows, repo, "predict-first", candidates=pf_cands,
-                         logs=dict((n, set(b.id for b in bs)) for n, bs in logs.items()))
+                         logs=dict((n, set(b.id for b in bs)) for n, bs in logs.items() if bs))
     watch = sorted((load_state(common).get("watch") or {}).keys())
     valves = VALVES.effective(common, d.env)
     cfg = d.config(d.toplevel())
@@ -856,8 +873,7 @@ def main(d, a):
     from workflows.dev import grader as GD
     gv = GD.version(((eng.get("grading") or {}).get("grader_model")) or GD.DEFAULT_TIER)
     sel = select(by_issue, repo, first, rate, later, grader=latest_grader_rows(common, repo, gv), watch=watch)
-    rows = sheet_rows(sel, "first-sprint" if first else "steady", lambda i: ev_sum.get(i) or "",
-                      blocks_of=lambda i: logs.get(i) or ())
+    rows = sheet_rows(sel, "first-sprint" if first else "steady", lambda i: ev_sum.get(i) or "")
     for r in pf_cands:                                                    # K5r5-M2: a person confirms
         row = dict((c, r.get(c, "")) for c in COLUMNS)
         if r.get("mode") == INHERENT_MODE:

@@ -7,7 +7,7 @@
   <why>`; `dev answer` reveals `recommended` + `nonce` (sha checks) and prints it; a resume re-asks blind.
 * unattended: the pause comment never names the recommendation; the nonce is journaled before the commitment; a
   member's `guild-answer` settles with the reveal.
-* KICKOFF's block seals `chosen` (`chosen_sha`).
+* (K6 r4: KICKOFF / STAKES are asked openly — `PF.OPEN_GROUPS`; KICKOFF's block carries `chosen` openly.)
 """
 
 import hashlib
@@ -47,8 +47,10 @@ class When(unittest.TestCase):
 
     def test_high_risk_group_is_always_predict_first(self):
         e = self._p("off")
-        for kind in ("readiness", "close-decided", "disputed-blocker", "leaf-split", "integration-gap", "escalation"):
+        for kind in ("disputed-blocker", "leaf-split", "integration-gap", "escalation"):
             self.assertEqual(PF.forced(e.h.p, q(kind)), "high-risk", kind)
+        for kind in ("readiness", "close-decided"):        # K6 r4: KICKOFF is asked openly (`PF.OPEN_GROUPS`)
+            self.assertIsNone(PF.forced(e.h.p, q(kind)), kind)
 
     def test_selective_group_is_not_forced_when_steady(self):
         e = self._p("off")

@@ -67,7 +67,7 @@ class StaticCallers(unittest.TestCase):
                                                         v.id not in bad_names)
                     self.assertTrue(good, "%s:%d — neutral= must come from predict.neutral_text" % (
                         os.path.relpath(path, ENGINE), node.lineno))
-        self.assertGreaterEqual(seen, 4)               # conservative + three analyze callers today
+        self.assertGreaterEqual(seen, 1)               # conservative today (K6 r4: the analyze callers went with KICKOFF's blind wordings)
 
     def test_conservative_helper_uses_the_registry(self):
         class S(object):
@@ -85,16 +85,14 @@ class StaticCallers(unittest.TestCase):
 
 class Registry(unittest.TestCase):
     def test_every_form_round_trips(self):
-        samples = {"conservative": (7, "Q2.5"), "readiness-unclear": ("Goal, Success", 7), "interpretation": (7,),
-                   "readiness-high": ("Constraint", "partial", 7), "kickoff-conservative": (7,),
-                   "default": (7, "readiness")}
+        # K6 r4: the KICKOFF wordings are gone with the scope reduction (KICKOFF is asked openly)
+        samples = {"conservative": (7, "Q2.5"), "default": (7, "readiness")}
         self.assertEqual(sorted(samples), sorted(PF.NEUTRAL_FORMS))
         for f, vals in samples.items():
             self.assertTrue(PF.is_template(PF.neutral_text(f, *vals)), f)
 
     def test_slot_refuses_prose(self):
-        for f, vals in (("conservative", (7, "single 이 맞음")), ("readiness-high", ("Goal", "clear-ish", 7)),
-                        ("readiness-unclear", ("Goal, i1 is best", 7)), ("default", (7, "not-a-kind"))):
+        for f, vals in (("conservative", (7, "single 이 맞음")), ("default", (7, "not-a-kind"))):
             with self.assertRaises(ValueError, msg=f):
                 PF.neutral_text(f, *vals)
 

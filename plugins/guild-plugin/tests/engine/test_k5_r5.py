@@ -4,7 +4,8 @@ evidence, m5 lowercase one-letter ids, m6 a successful shadow through a resume).
 
 M1  predict-first: everything shown before the answer is engine text (neutral template + option summaries); the
     judge's text is journaled and revealed with the recommendation; the leak check refuses any uneven mention
-    (including an elimination that never names the recommendation) or an evaluative even one.
+    (including an elimination that never names the recommendation) or an evaluative even one. K6 r4: KICKOFF /
+    STAKES questions are asked openly (`PF.OPEN_GROUPS`) — shown here on blind ESCALATE questions.
 M2  `raised_by` on the pending block; a different blind answer is a sheet candidate, never a wrong by itself.
 M3  `group.<g>.conservative` → that group's decision is a person's (ask / pause, blind) through the FSM; `watch` → all
     of the group on the sheet and the grader; the irreversible STAKES class reaches `--import`.
@@ -63,7 +64,7 @@ class M1Withheld(unittest.TestCase):
                 p.journal = e.h.journal
                 ev, blk_ = _ask_readiness(e, p, k)
                 self.assertTrue(ev["predict_first"])
-                self.assertEqual(ev["question"], "#7: readiness — 어느 선택지로 진행할까요?")
+                self.assertEqual(ev["question"], "#7: escalation — 어느 선택지로 진행할까요?")
                 self.assertEqual(ev["context_lines"], [])
                 shown = json.dumps([ev["question"], blk_.get("question"), blk_.get("cause")], ensure_ascii=False)
                 for w in ("맞지", "아니라면", "i1", "i2"):
@@ -96,7 +97,8 @@ class M1Withheld(unittest.TestCase):
         self.assertFalse(nm.names_rec("범위: i1 vs i2 중 어느 쪽인지 Issue 에 없음", markers=False))
         self.assertFalse(nm.names_rec("goal unclear", markers=False))
 
-    def test_unattended_readiness_pause_shows_engine_text_only(self):
+    def test_unattended_readiness_pause_is_open(self):
+        # K6 r4 (user decision 2026-11-20): KICKOFF is asked openly — the judge's text and the recommendation go out
         kk = kickoff(goal="unclear")
         kk.fields["readiness"]["goal"]["choice_needed"] = "A 는 제목과 맞지 않음"
         h = K4(self, roles=[evidence(self)], judges={"KICKOFF": kk, "STAKES": stakes("high")})
@@ -104,15 +106,14 @@ class M1Withheld(unittest.TestCase):
         r = A.run(h.p)
         self.assertEqual(r.kind, StageResult.PAUSE)
         pend = [b for b in h.decisions_of("ask:readiness") if b.get("status") == "pending-human"][0]
-        self.assertEqual(pend.get("predict_first"), "high-risk")
+        self.assertIsNone(pend.get("predict_first"))
+        self.assertTrue(pend.get("recommended"))
         body = [c["body"] for c in h.gh.comments(7) if "guild:needs-human" in c["body"]][-1]
-        self.assertNotIn("맞지", body)
-        self.assertIn("i1 = hide the count", body)                           # the option summaries stay
+        self.assertIn("맞지", body)
+        self.assertIn("i1 = hide the count", body)
         st = h.decisions_of("STAKES")[0]
-        self.assertEqual(st.get("question"), "Goal unclear")                  # the engine's words on GitHub
-        self.assertNotIn("맞지", r.cause or "")
-        ev = [x for x in JournalView.read(h.common, 7).entries if x.get("what") == "predict-first-nonce"][-1]
-        self.assertIn("맞지 않음", ev.get("withheld"))
+        self.assertIn("맞지 않음", st.get("question"))                       # the judge's words, openly
+        self.assertFalse([x for x in JournalView.read(h.common, 7).entries if x.get("what") == "predict-first-nonce"])
 
 
 class M2RaisedBy(unittest.TestCase):
@@ -166,13 +167,13 @@ class M3ConservativePath(unittest.TestCase):
         self.assertEqual(out.result.kind, StageResult.PAUSE)
         pend = [b for b in DecisionLog.load(h.gh.comments(7)).blocks if b.get("kind") == "group-conservative"][0]
         self.assertEqual((pend.get("group"), pend.get("raised_by"), pend.get("stage")), ("STAKES", "confirm", "analyze"))
-        self.assertTrue(pend.get("predict_first"))                           # the judge's `low` is sealed
-        self.assertIsNone(pend.get("recommended"))
+        # K6 r4 (user decision 2026-11-20): STAKES is asked openly — the judge's `low` is shown, never counted
+        self.assertIsNone(pend.get("predict_first"))
+        self.assertEqual(pend.get("recommended"), "low")
+        self.assertTrue(str(pend.get("predict_first_counted")).startswith("false — open: STAKES"))
         self.assertFalse(h.decisions_of("STAKES"))                           # nothing decided yet
         self.assertIn("guild:needs-human", h.labels())
-        body = [c["body"] for c in h.gh.comments(7) if "guild:needs-human" in c["body"]][-1]
-        self.assertNotIn("choose goal", body)                                # the judge's text is withheld
-        # the person answers `high` (blind) → STAKES high → the readiness question (a person again)
+        # the person answers `high` → STAKES high → the readiness question (a person again)
         _answer(h, "guild-answer: %s high" % pend.id)
         h.judges["KICKOFF"] = kickoff(goal="unclear")
         h.roles += [evidence(self)]
@@ -181,11 +182,10 @@ class M3ConservativePath(unittest.TestCase):
         self.assertEqual((st.get("choice"), st.get("by"), st.get("raw_choice"), st.get("coerced_by")),
                          ("high", "human", "low", "conservative"))
         self.assertTrue([b for b in h.decisions_of("ask:readiness") if b.get("status") == "pending-human"])
-        res = [b for b in DecisionLog.load(h.gh.comments(7)).blocks if b.get("resolves") == pend.id][0]
-        self.assertEqual(res.get("recommended"), "low")                     # revealed after the answer
-        # a different blind answer on an engine-raised question → a §9.5 wrong CANDIDATE, nothing counted
+        # K6 r4: the gate question is a grading-sheet row (the engine's `low`, never the answer) — nothing counted
         ok, cands = G.predict_first_judgments(DecisionLog.load(h.gh.comments(7)).blocks, 7)
-        self.assertEqual(([r["group"] for r in cands], ok), (["STAKES"], []))
+        self.assertEqual(([(r["group"], r["mode"], r["choice"]) for r in cands], ok),
+                         ([("STAKES", G.INHERENT_MODE, "low")], []))
 
     def test_without_the_valve_stakes_low_proceeds(self):
         h = K4(self, roles=[evidence(self)], judges={"KICKOFF": kickoff(goal="unclear"), "STAKES": stakes("low"),
@@ -244,7 +244,7 @@ class M3ConservativePath(unittest.TestCase):
         r = A.run(h.p)
         self.assertEqual(r.kind, StageResult.PAUSE)
         pend = [b for b in h.decisions_of("ask:interpretation-surface") if b.get("status") == "pending-human"][0]
-        self.assertEqual((pend.get("raised_by"), bool(pend.get("predict_first"))), ("confirm", True))
+        self.assertEqual((pend.get("raised_by"), bool(pend.get("predict_first"))), ("confirm", False))   # K6 r4: open
 
     def test_exarb_dismiss_conservative_forces_accept_in_both_modes(self):
         for unattended in (True, False):

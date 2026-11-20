@@ -34,7 +34,8 @@ def blk(n, **f):
     return DecisionBlock(n, list(f.items()))
 
 
-def pf_log(pf="high-risk", refused=None, reveal=None, rec="i2", choice="i1", kind="readiness", raised_by="confirm"):
+# K6 r4: a blind group's question (SPLIT's leaf question) — KICKOFF questions are asked openly now (`PF.OPEN_GROUPS`)
+def pf_log(pf="high-risk", refused=None, reveal=None, rec="i2", choice="i1", kind="leaf-split", raised_by="confirm"):
     q = dict(point="ask:%s" % kind, kind=kind, stage="analyze", by="code", status="pending-human", options="i1|i2|stop")
     if raised_by:
         q["raised_by"] = raised_by
@@ -56,7 +57,7 @@ class PredictFirstCount(unittest.TestCase):
     def test_blind_answers_count_ok_and_wrong(self):
         ok, cands = G.predict_first_judgments(pf_log(), 7)
         self.assertEqual(ok, [])
-        self.assertEqual([(r["group"], r["given_info"]) for r in cands], [("KICKOFF", "")])   # a person confirms
+        self.assertEqual([(r["group"], r["given_info"]) for r in cands], [("SPLIT", "")])     # a person confirms
         ok, cands = G.predict_first_judgments(pf_log(choice="i2"), 7)
         self.assertEqual((ok[0]["given_info"], cands), ("ok", []))
 
@@ -76,7 +77,7 @@ class PredictFirstCount(unittest.TestCase):
         self.assertEqual((res["imported"], res["watch"]), (0, []))
         self.assertEqual(G.load_state(common)["watch"], {})
         confirmed = [dict(cands[0], given_info="wrong")]                     # the person's confirmation
-        self.assertEqual(G.apply_judgments(common, confirmed, "o/r", "human")["watch"], ["KICKOFF"])
+        self.assertEqual(G.apply_judgments(common, confirmed, "o/r", "human")["watch"], ["SPLIT"])
         self.assertEqual(G.apply_judgments(common, confirmed, "o/r", "human")["imported"], 0)
 
 
@@ -96,7 +97,8 @@ class Triggers(unittest.TestCase):
 
     def test_kickoff_answered_by_a_person_is_not_on_the_sheet(self):
         log = [blk(1, point="KICKOFF", stage="analyze", by="judge:opus", choice="goal=unclear")] + \
-            [blk(b.n + 1, **dict(b.fields, **({"resolves": "D2"} if b.get("resolves") else {}))) for b in pf_log()]
+            [blk(b.n + 1, **dict(b.fields, **({"resolves": "D2"} if b.get("resolves") else {})))
+             for b in pf_log(kind="readiness")]
         sel = G.select({7: log}, "o/r", True, 0.3, lambda i, b: None)
         self.assertNotIn("D1", [b.id for _i, b, _w in sel])
 
@@ -247,9 +249,10 @@ class Cli(unittest.TestCase):
     def test_without_the_grader_no_model_and_predict_first_counted(self):
         e = self._env()
         from guildcore import ask as ASK
-        q = ASK.Question("readiness", "goal unclear — 범위", [{"token": "i1", "label": "a reading"},
-                                                             {"token": "i2", "label": "b reading"},
-                                                             {"token": "stop", "label": "stop"}],
+        # K6 r4: a blind group's question (KICKOFF is asked openly now)
+        q = ASK.Question("leaf-split", "split — 범위", [{"token": "i1", "label": "a reading"},
+                                                      {"token": "i2", "label": "b reading"},
+                                                      {"token": "stop", "label": "stop"}],
                          recommended="i2", recommended_by="judge:opus", predict_first=True, raised_by="confirm")
         q.pf_why = "high-risk"
         e.h.p.journal = e.h.journal
@@ -267,8 +270,8 @@ class Cli(unittest.TestCase):
         self.assertEqual(res["graded"], 0)
         rows = list(csv.DictReader(open(os.path.join(out, "issues.csv"))))
         cand = [r for r in rows if r["mode"] == "predict-first"]
-        self.assertEqual([(r["decision_id"], r["group"], r["choice"]) for r in cand], [(qid, "KICKOFF", "i2")])
-        self.assertNotIn("KICKOFF", [r["group"] for r in rows if r["mode"] != "predict-first"])
+        self.assertEqual([(r["decision_id"], r["group"], r["choice"]) for r in cand], [(qid, "SPLIT", "i2")])
+        self.assertNotIn("SPLIT", [r["group"] for r in rows if r["mode"] != "predict-first"])
         # the person confirms → only now a §9.5 wrong (watch)
         cand[0]["given_info"] = "wrong"
         buf = io.StringIO()
@@ -280,7 +283,7 @@ class Cli(unittest.TestCase):
             fh.write(buf.getvalue())
         self.assertEqual(CLI.main(["grade", "--import", p], e.d), 0)
         imp = json.loads(e.lines()[-1].split(">>> ENGINE <<<")[-1])
-        self.assertEqual(imp["watch"], ["KICKOFF"])
+        self.assertEqual(imp["watch"], ["SPLIT"])
         # a confirmed candidate is not put on the next sheet again
         self.assertEqual(CLI.main(["grade", "--issues", "7", "--out", out], e.d), 0)
         rows = list(csv.DictReader(open(os.path.join(out, "issues.csv"))))

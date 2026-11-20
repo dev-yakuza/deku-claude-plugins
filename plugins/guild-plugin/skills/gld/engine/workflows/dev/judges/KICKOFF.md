@@ -6,18 +6,16 @@ citations, candidate areas). You decide; the explorer only gathered.
 
 - `interpretations`: 2–3 substantively different readings when the Issue allows them, else one.
   `chosen` = the id you recommend. Each `summary` is a short noun phrase of what that reading would build —
-  never how likely, how good or how well it fits, and never which one you recommend (a person reads the
-  summaries BEFORE seeing `chosen`; the engine refuses an evaluative summary). State the reading's SCOPE in the
-  summary itself — an aside (parenthesis / dash tail) is shown only when it is an explicit limit (`제외`, `만`,
-  `only`, `except`, `not`, `keep …`) or a literal (a path, an identifier, a version); an aside about the Issue or
-  the reading is cut, and any other aside makes the question non-blind. Put WHY a reading fits or not in its
-  `rationale` (never shown in a blind question). Give EVERY reading its own footprint — `areas`, `ui_surface`,
-  `cast` (`participation` / `gates`) and `work_type` inside its `interpretations[]` entry: a person may choose a
-  reading you did not, and then that reading's footprint is the one used (a reading without one gets the widest:
-  every area, a UI surface, every role).
+  never how likely, how good or how well it fits (a person reads the summaries next to your `chosen` and picks
+  one). State the reading's SCOPE in the summary itself. Put WHY a reading fits or not in its `rationale`. Give
+  EVERY reading its own footprint — `areas`, `ui_surface`, `safety_net_visual`, `cast` (`participation` / `gates`),
+  `po` (`convene`) and `work_type` inside its `interpretations[]` entry: a person may choose a reading you did not,
+  and then that reading's footprint is the one used (a reading without one gets the widest: every area, a UI
+  surface, every gate role).
 - `human_answers` (when present): a person already chose a reading. List THAT reading among `interpretations` with
-  the id and summary the line gives, set `chosen` to it, and write `areas`, `ui_surface`, `cast`, `work_type` and
-  the AC for it — not for the reading you would have chosen.
+  the id and summary the line gives (word for word), set `chosen` to it, and write `areas`, `ui_surface`, `cast`,
+  `work_type` and the AC for it — not for the reading you would have chosen. The engine checks that the summary
+  under your `chosen` IS that reading; otherwise the run stops for the person.
 - `readiness.<goal|constraint|success>.rating`: `clear` | `partial` | `unclear` | `unsure` (RD rules):
   `partial` ONLY when something in reach points at one reading — give it as `anchor`:
   `{cite: "path:line", quote}` (a repo file line the engine re-reads; quote must be on those lines ±3)

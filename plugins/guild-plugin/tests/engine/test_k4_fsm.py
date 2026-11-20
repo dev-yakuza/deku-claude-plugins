@@ -219,7 +219,11 @@ class Resume(unittest.TestCase):
         it["timeline"].append({"id": 5, "event": "unlabeled", "label": {"name": "guild:needs-human"},
                                "created_at": "2026-11-16T01:00:01Z", "actor": {"login": "owner"}})
         h.roles += [evidence(self), out_role(self, "DONE", ac_patch=[])]
-        h.judges["KICKOFF"] = kickoff(goal="unclear")
+        # K6 r4: the person's reading (i1 = "hide the count", the judge's B) rides on the question as content — the
+        # next judge takes it; one that keeps "show" pauses (user decision 2026-11-20)
+        k2 = kickoff(goal="unclear")
+        k2.fields["chosen"] = "B"
+        h.judges["KICKOFF"] = k2
         out = driver(h, {"design": lambda p, **k: StageResult(StageResult.PAUSE, cause="design stub")}).run(7)
         self.assertIn("guild:design", h.labels())
         self.assertIn("- (선택) i1: hide the count", h.body_with("analyze:output"))

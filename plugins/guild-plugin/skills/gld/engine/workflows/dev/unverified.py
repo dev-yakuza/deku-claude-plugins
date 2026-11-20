@@ -3,14 +3,14 @@
 * The release ships `verification.json` (written by `replay/gate_report.py` from the held-out judgment replay): the
   §9.5 groups the replay VERIFIED (held-out n ≥ 20 at the gate's agreement, or a passing synthetic set). Every other
   group of `valves.GROUPS` is UNVERIFIED — "no synthetic = not passed" (R4J-m5).
-* An unverified group runs the conservative path (`predict.conservative` → the gate's blind question, KICKOFF's blind
-  confirmation, EX-ARB's dismiss → accept) until it is RELEASED: `release_after` (5) counted blind answers of that
+* An unverified group runs the conservative path (`predict.conservative` → the gate's blind question — STAKES' asked
+  openly —, KICKOFF's open confirmation, EX-ARB's dismiss → accept) until it is RELEASED: `release_after` (5) counted blind answers of that
   group judged by a person — the predict-first `ok`s and the person-confirmed candidates `dev grade` imports (§9.5
   "사람 판정") — with no confirmed wrong among them (§10.4 G1 group rule; R5J-M4: only predict-first answers count).
   A confirmed wrong keeps the group unverified (and the §9.5 count rule acts on it as on any group).
 * K6 r1 M6 — every unverified group has a release path, or is not gated with its reason:
-  - a group whose conservative path is a blind question (the gate's GATED groups, KICKOFF's confirmation) counts
-    the person's verdicts on its predict-first answers;
+  - a group whose conservative path is a blind question (the gate's GATED groups but STAKES) counts the person's
+    verdicts on its predict-first answers;
   - `SHEET_RELEASED` (EX-ARB-dismiss): its conservative path asks nothing — a BLOCKER/MAJOR dismiss is coerced to
     accept and recorded `would-dismiss` — so the person's verdicts on those decisions on the grading sheet (the human
     import, `given_info` ok / wrong on the would-dismiss) count instead;
@@ -24,6 +24,10 @@
   yet judged by a person (`open` — merged by every `dev grade` across its scopes (K6 r2 m1), cleared only by the person's import of that row); a
   verdict imported after the release still counts (`n`, `wrong` — `dev health` shows a wrong after the release; the
   §9.5 count rule acts on it as on any group).
+* K6 r4 (user decision 2026-11-20, scope reduction) — KICKOFF and STAKES (`OPEN_ASKED`, = `predict.OPEN_GROUPS`)
+  leave predict-first blind counting: their questions are asked openly and never counted; they are SHEET_RELEASED
+  like the INHERENT groups — every engine-raised KICKOFF reading question / STAKES gate question is a sheet row
+  (`grade.inherent_row`, open until imported) and the person's verdicts on those rows (any engine pick) count.
 * K6 r3 m2 — an INHERENT group counts only its `inherent-gate` rows (one per question; the decision the answer
   applied and a block a rule changed are no release verdicts — `counts`), and one decision point once (`points`: its
   re-asks `:a<k>` are the same point — an `ok` is counted once, a `wrong` always).
@@ -77,7 +81,13 @@ def _sheet_choice():
     return dict(CONS.INHERENT)
 
 
-SHEET_RELEASED = _sheet_released()
+def _open_asked():
+    from workflows.dev import predict as PF
+    return dict((canonical(g), why) for g, why in PF.OPEN_GROUPS.items())
+
+
+OPEN_ASKED = _open_asked()          # K6 r4: groups asked openly — released by their gate rows' sheet verdicts
+SHEET_RELEASED = dict(_sheet_released(), **OPEN_ASKED)
 SHEET_CHOICE = _sheet_choice()       # group → the only choice whose sheet verdict counts (EX-ARB-dismiss: any)
 # K6 r1 M6: groups with no less conservative path to gate — never unverified
 EXEMPT = {
@@ -158,6 +168,8 @@ def drop_gone(st, gone, now):
 def reconcile(st, issue, log_ids, now):
     """K6 r3 m3: `dev grade` — the open candidates of `issue` (its log READ: `log_ids`) whose D-id the log no longer
     has are dropped as `drop_gone` does."""
+    if not log_ids:
+        return []                    # K6 r4 m6: a log with no engine block was not read as trusted — never "gone"
     gone = []
     for _g, u in sorted((st.get("unverified") or {}).items()):
         for k in u.get("open") or ():
@@ -183,7 +195,11 @@ def counts(row, source):
     for an inherent gate group on its non-conservative choice only — never a predict-first `ok`)."""
     g = canonical(row.get("group"))
     if (row.get("mode") or "") == "predict-first":
-        return g not in SHEET_CHOICE          # K6 r2 M1: an inherent gate group's blind answer is never counted
+        # K6 r2 M1 / K6 r4: an inherent gate group's — or an open group's — answer is never a counted blind one
+        return g not in SHEET_CHOICE and g not in OPEN_ASKED
+    if g in OPEN_ASKED:
+        # K6 r4: only the gate-question rows (one per question, any engine pick) — like the INHERENT groups (r3 m2)
+        return source == "human" and (row.get("mode") or "") == INHERENT_MODE
     if g in SHEET_RELEASED:
         # K6 r2 M1: a sheet-released group counts the person's sheet verdicts — for an inherent gate group only on its
         # non-conservative pick (a verdict on a conservative `block` / `gap` releases nothing)

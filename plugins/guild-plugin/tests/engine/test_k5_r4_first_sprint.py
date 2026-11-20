@@ -43,13 +43,15 @@ def on(h):
 
 
 class Interpretation(unittest.TestCase):
-    def test_attended_first_sprint_asks_the_interpretation_blind(self):
+    def test_attended_first_sprint_asks_the_interpretation(self):
         h = on(K4(self, unattended=False, roles=[evidence(self)], judges={"KICKOFF": kickoff()}))
         r = A.run(h.p)
         self.assertEqual(r.kind, StageResult.ASK)
         ask = [kw for w, kw in h.events if w == "ask"][-1]
         self.assertEqual(ask["kind"], "interpretation-surface")
-        self.assertTrue(ask["predict_first"])
+        # K6 r4 (user decision 2026-11-20): asked openly — the recommendation shown; a grading-sheet row, not a count
+        self.assertFalse(ask["predict_first"])
+        self.assertTrue(ask["recommended"])
 
     def test_steady_state_does_not(self):
         h = K4(self, unattended=False, roles=[evidence(self)], judges={"KICKOFF": kickoff(), "HANDOFF": []})

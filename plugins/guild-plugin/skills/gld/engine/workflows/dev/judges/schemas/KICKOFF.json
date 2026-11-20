@@ -69,6 +69,17 @@
        "bug",
        "refactor"
       ]
+     },
+     "safety_net_visual": {
+      "type": "boolean"
+     },
+     "po": {
+      "type": "object",
+      "properties": {
+       "convene": {
+        "type": "boolean"
+       }
+      }
      }
     }
    }

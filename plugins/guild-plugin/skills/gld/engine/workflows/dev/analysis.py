@@ -351,6 +351,7 @@ class Kickoff(object):
         self.close = {"decide": "none"}
         self.surface = {"ask": False}
         self.own_footprints = {}      # token → the judge's raw interpretation entry (its own footprint — K6 r3 M1)
+        self.safety_net_visual_possible = False   # the body has safety-net lines (K6 r4 m2 — the visual case)
 
 
 def coerce_kickoff(fields, root, sources, net_lines, plan_lines, premise_unmet_dims, roster,
@@ -445,6 +446,7 @@ def coerce_kickoff(fields, root, sources, net_lines, plan_lines, premise_unmet_d
     k.po = {"convene": bool(po.get("convene")) and "product-owner" in installed, "reason": str(po.get("reason") or "")}
     k.ui_surface = bool(f.get("ui_surface"))
     k.safety_net_visual = bool(f.get("safety_net_visual")) and bool(net_lines)
+    k.safety_net_visual_possible = bool(net_lines)
     k.areas = real_dirs(root, f.get("areas") or [])
     dropped = [a for a in f.get("areas") or [] if isinstance(a, str) and os.path.normpath(a.strip().rstrip("/")) not in k.areas]
     if dropped:
@@ -465,19 +467,31 @@ def coerce_kickoff(fields, root, sources, net_lines, plan_lines, premise_unmet_d
     return k
 
 
-# ---- K6 r3 M1: the person's reading, carried as the reading itself ------------------------------------------------
-# A blind KICKOFF answer is a TOKEN (`i2`) of the canonical order of THAT run's summaries; the next run's judge writes
-# new summaries (the order — and so the token — can flip) and its own footprint (`areas` · `ui_surface` · `cast` ·
-# `work_type`) is for the reading IT chose. So the question captures, at question time, every reading the person
-# chooses between — token, the judge's id, the summary and that reading's footprint — sealed (`readings_sha` on the
-# pending block; value + nonce journaled first, revealed in the answer's resolution). The run after the answer takes
-# the readings, `chosen` and the footprint from that capture (never from the new judge's token order), tells the judge
-# which reading the person chose, and pauses when the judge does not take it (its AC would be another reading's).
+# ---- K6 r3 M1 / K6 r4: the person's reading, carried as the reading itself -----------------------------------------
+# A KICKOFF answer is a TOKEN (`i2`) of the canonical order of THAT run's summaries; the next run's judge writes new
+# summaries (the order — and so the token — can flip) and its own footprint (`areas` · `ui_surface` · `cast` ·
+# `work_type` · `safety_net_visual` · `po`) is for the reading IT chose. So the question captures, at question time,
+# every reading the person chooses between — token, the judge's id, the summary and that reading's footprint — as
+# CONTENT on its pending block (`reading_<token>`, one JSON value each — K6 r4: KICKOFF is asked openly, so nothing is
+# sealed; any clone reads it). The run after the answer takes the readings, `chosen` and the footprint from that
+# capture (never from the new judge's token order), tells the judge which reading the person chose, and pauses when the
+# judge does not take it (user decision 2026-11-20: its AC would be another reading's).
 # A reading's footprint: the judge's top-level fields for the reading it chose; for another reading its own fields
-# (`interpretations[].areas` / `ui_surface` / `cast` / `work_type`) when given, else the conservative superset (the
-# union of every known area — the explorer's directories too — and role; a UI surface, since none is known) — never
-# narrower than any reading.
-FOOT_KEYS = ("areas", "ui_surface", "cast", "work_type")
+# (`interpretations[].areas` / `ui_surface` / `cast` / `work_type` / `safety_net_visual` / `po`) when given, else the
+# conservative SUPERSET (K6 r4 m2): every known area (the explorer's directories too — an empty / non-existent own
+# `areas` is no footprint), every known participation role and EVERY installed gate role, a UI surface (the visual
+# safety net then follows `VISUAL_AVAILABLE` — design's L.1), the safety-net visual case when the body has a net, the
+# product-owner when installed, nothing skipped — never narrower than any reading.
+READING_FIELD = "reading_"         # pending block keys `reading_i1` … `reading_i5`
+READING_CAP = 1900                 # one JSON value under the decision log's VALUE_CAP (2000)
+
+
+def order_areas(areas, globs=None):
+    """K6 r4 m2: areas with the irreversible and harness ones FIRST (then the rest, sorted) — whatever a value cap
+    drops is never one §3.2 / A4 must see."""
+    a = sorted(set(x for x in areas or () if x))
+    hot = set(irreversible(a, globs)) | set(harness_hit(a))
+    return [x for x in a if x in hot] + [x for x in a if x not in hot]
 
 
 def _own_cast(raw, roster):
@@ -491,11 +505,13 @@ def _own_cast(raw, roster):
     return sorted(set(part) - set(gates)), sorted(set(gates))
 
 
-def reading_capture(k, root, roster, extra_areas=()):
-    """[{token, orig, summary, areas, ui_surface, participation, gates, work_type}] — every reading of this KICKOFF
-    with its footprint (see above). `extra_areas` (the explorer's real directories) widen the superset."""
+def reading_capture(k, root, roster, extra_areas=(), net=False, globs=None):
+    """[{token, orig, summary, areas, ui_surface, safety_net_visual, participation, gates, skipped, po_convene,
+    work_type}] — every reading of this KICKOFF with its footprint (see above). `extra_areas` (the explorer's real
+    directories) widen the superset; `net` = the body has safety-net lines (the superset's visual case)."""
     if not k.interpretations:
         return []
+    installed = set(roster or ())
     owns = getattr(k, "own_footprints", {}) or {}
     union_a = set(k.areas) | set(extra_areas or ())
     union_p, union_g = set(k.cast["participation"]), set(k.cast["gates"])
@@ -503,34 +519,95 @@ def reading_capture(k, root, roster, extra_areas=()):
     for i in k.interpretations:
         raw = owns.get(i["id"]) or {}
         a = real_dirs(root, raw.get("areas")) if isinstance(raw.get("areas"), list) else None
+        a = a or None                         # m2(b): an empty / non-existent own area list is no footprint
         c = _own_cast(raw, roster)
-        u = bool(raw.get("ui_surface")) if isinstance(raw.get("ui_surface"), bool) else None
+        u = raw.get("ui_surface") if isinstance(raw.get("ui_surface"), bool) else None
+        v = raw.get("safety_net_visual") if isinstance(raw.get("safety_net_visual"), bool) else None
+        po = raw.get("po") if isinstance(raw.get("po"), dict) and isinstance(raw["po"].get("convene"), bool) else None
         w = raw.get("work_type") if raw.get("work_type") in WORK_TYPES else None
-        per[i["id"]] = (a, c, u, w)
+        sk = [str(x)[:80] for x in raw.get("skipped") or []][:5] if isinstance(raw.get("skipped"), list) else None
+        per[i["id"]] = (a, c, u, v, po, w, sk)
         union_a |= set(a or ())
         if c:
             union_p |= set(c[0])
             union_g |= set(c[1])
+    # m2(c): a reading whose roles are unknown may need any gate — every INSTALLED gate role convenes
+    sup_g = union_g | (installed & set(GATE_ROLES))
     out = []
     for i in k.interpretations:
-        a, c, u, w = per[i["id"]]
+        a, c, u, v, po, w, sk = per[i["id"]]
         if i["id"] == k.chosen:
-            fp = {"areas": list(k.areas[:10]), "ui_surface": bool(k.ui_surface),
+            fp = {"areas": order_areas(k.areas, globs), "ui_surface": bool(k.ui_surface),
+                  "safety_net_visual": bool(k.safety_net_visual),
                   "participation": list(k.cast["participation"]), "gates": list(k.cast["gates"]),
-                  "work_type": k.work_type}
+                  "skipped": [str(x)[:80] for x in k.cast.get("skipped") or []][:5],
+                  "po_convene": bool(k.po.get("convene")), "work_type": k.work_type}
         else:
-            fp = {"areas": sorted(a if a is not None else union_a)[:10],
-                  "ui_surface": u if u is not None else True,      # unknown → the UI safety net (designer, visual)
-                  "participation": sorted(c[0] if c is not None else union_p - union_g),
-                  "gates": sorted(c[1] if c is not None else union_g),
+            fp = {"areas": order_areas(a if a is not None else union_a, globs),
+                  "ui_surface": u if u is not None else True,      # unknown → a UI surface (L.1 decides the visual)
+                  "safety_net_visual": (v and bool(net)) if v is not None else bool(net),
+                  "participation": sorted(c[0] if c is not None else union_p - sup_g),
+                  "gates": sorted(c[1] if c is not None else sup_g),
+                  "skipped": sk if (sk is not None and c is not None) else [],
+                  "po_convene": po["convene"] if po is not None else ("product-owner" in installed),
                   "work_type": w or k.work_type}
         out.append(dict(fp, token=i["id"], orig=i["orig"][:40], summary=i["summary"][:300]))
     return out
 
 
+def capture_fields(capture):
+    """The pending-block fields carrying `capture` as content — one compact JSON value per reading. A value over the
+    cap drops trailing areas (ordered: irreversible / harness first — `order_areas`) and says so (`more: true`)."""
+    import json
+    out = {}
+    for e in capture or ():
+        e = dict(e)
+        txt = json.dumps(e, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
+        while len(txt) > READING_CAP and e.get("areas"):
+            e["areas"], e["more"] = e["areas"][:-1], True
+            txt = json.dumps(e, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
+        if len(txt) > READING_CAP:
+            e["skipped"], e["summary"] = [], e["summary"][:120]
+            txt = json.dumps(e, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
+        out[READING_FIELD + e["token"]] = txt
+    return out
+
+
+def captured(block):
+    """(capture | None, why) of a pending KICKOFF question block: `why` = "legacy" (no capture — a question asked before
+    r3), "unreadable" (a field that does not parse), or None."""
+    import json
+    fields = getattr(block, "fields", None)
+    items = list(fields) if isinstance(fields, list) else list((block or {}).items()) if isinstance(block, dict) else []
+    vals = [(k, v) for k, v in items if str(k).startswith(READING_FIELD)]
+    if not vals:
+        return None, "legacy"
+    out = []
+    for k, v in vals:
+        try:
+            e = json.loads(markers.unescape(v))
+        except (TypeError, ValueError):
+            return None, "unreadable"
+        if not isinstance(e, dict) or e.get("token") != k[len(READING_FIELD):]:
+            return None, "unreadable"
+        out.append(e)
+    return sorted(out, key=lambda e: e["token"]), None
+
+
+def _raw_of(e):
+    """A captured entry in the judge's per-reading shape (`own_footprints`) — K6 r4 m1."""
+    return {"areas": list(e.get("areas") or []), "ui_surface": bool(e.get("ui_surface")),
+            "safety_net_visual": bool(e.get("safety_net_visual")),
+            "cast": {"participation": list(e.get("participation") or []), "gates": list(e.get("gates") or [])},
+            "skipped": list(e.get("skipped") or []), "po": {"convene": bool(e.get("po_convene"))},
+            "work_type": e.get("work_type")}
+
+
 def apply_reading(k, capture, token, root):
     """The person's reading (`token` of the question-time `capture`) as THIS run's KICKOFF result: the readings,
     tokens and aliases of that question, `chosen` = the person's, and its footprint (areas re-checked to exist).
+    K6 r4 m1: every reading's own footprint is the captured one from now on (`own_footprints` re-keyed to the captured
+    tokens — a later capture in this run never pairs a token with another reading's footprint).
     Returns the captured entry, or None (the token is not one of the captured readings)."""
     ent = next((e for e in capture or () if e.get("token") == token), None)
     if ent is None:
@@ -539,27 +616,57 @@ def apply_reading(k, capture, token, root):
                          for e in capture]
     k.token_map = [{"token": i["id"], "orig": i["orig"]} for i in k.interpretations]
     k.aliases = dict((i["id"], [i["orig"], i["summary"]]) for i in k.interpretations)
+    k.own_footprints = dict((e["token"], _raw_of(e)) for e in capture)
     k.chosen = token
     k.areas = real_dirs(root, ent.get("areas") or [])
     k.ui_surface = bool(ent.get("ui_surface"))
+    k.safety_net_visual = bool(ent.get("safety_net_visual")) and k.safety_net_visual_possible
     k.cast = {"participation": list(ent.get("participation") or []), "gates": list(ent.get("gates") or []),
-              "skipped": k.cast.get("skipped") or []}
+              "skipped": list(ent.get("skipped") or [])}
+    k.po = dict(k.po, convene=bool(ent.get("po_convene")))
     if ent.get("work_type") in WORK_TYPES:
         k.work_type = ent["work_type"]
     return ent
 
 
-def judge_took(fields, ent):
-    """Did this run's KICKOFF judge take the person's reading `ent` as its `chosen`? — by the judge id the reading had
-    when asked (the brief names it), or by the same (whitespace / case-folded) summary."""
+def _bigrams(s):
+    t = "".join(s.split())
+    return set(t[i:i + 2] for i in range(len(t) - 1)) or ({t} if t else set())
+
+
+def _sim(a, b):
+    x, y = _bigrams(a), _bigrams(b)
+    return (2.0 * len(x & y) / (len(x) + len(y))) if (x or y) else 0.0
+
+
+def judge_took(fields, ent, capture=()):
+    """Did this run's KICKOFF judge take the person's reading `ent` as its `chosen`? K6 r4 M1: by CONTENT, never by an
+    id alone (a judge re-letters its readings freely): the summary the judge gives its chosen id is the person's
+    reading's summary (whitespace / case folded), or — under the id the brief named (the reading's id when asked) — a
+    re-wording strictly closer (character bigrams) to the person's reading than any other reading the judge lists and
+    than every other captured reading."""
     f = fields or {}
-    ch = str(f.get("chosen") or "").strip().casefold()
-    if ch and ch == str(ent.get("orig") or "").strip().casefold():
-        return True
     norm = lambda x: " ".join(str(x or "").split()).casefold()              # noqa: E731
-    mine = [i for i in (f.get("interpretations") or []) if isinstance(i, dict)
-            and str(i.get("id") or "").strip().casefold() == ch]
-    return bool(mine) and norm(mine[0].get("summary")) == norm(ent.get("summary"))
+    ch = norm(f.get("chosen"))
+    mine = [i for i in (f.get("interpretations") or []) if isinstance(i, dict) and norm(i.get("id")) == ch]
+    if not ch or not mine:
+        return False
+    s, e = norm(mine[0].get("summary")), norm(ent.get("summary"))
+    if not s or not e:
+        return False
+    if s == e:
+        return True
+    if ch != norm(ent.get("orig")):
+        return False
+    # the judge's OTHER readings: none of them may be the person's reading (re-lettered) or closer to it
+    rest = [norm(i.get("summary")) for i in (f.get("interpretations") or []) if isinstance(i, dict) and i is not mine[0]]
+    if any(r == e or _sim(r, e) >= _sim(s, e) for r in rest if r):
+        return False
+    # and the re-wording is closer to the person's reading than to every other reading the question offered
+    others = [norm(x.get("summary")) for x in capture or () if x.get("token") != ent.get("token")]
+    if any(s == o for o in others):
+        return False
+    return all(_sim(s, e) > _sim(s, o) for o in others if o)
 
 
 def canon_key(interp):
