@@ -67,12 +67,19 @@ class BaseTools(unittest.TestCase):
     def test_cached_by_the_base_manifest_hash_and_locked(self):
         fake = FakeInstall(delay=0.3)
         CH.deps_step = fake
-        ths = [threading.Thread(target=PO.deps_main, args=(self.r, tmpdir(self), dict(os.environ)),
-                                kwargs={"tools": ["cspell"], "base": "main"}) for _ in range(2)]
+        errors = []
+
+        def run(d):
+            try:
+                PO.deps_main(self.r, d, dict(os.environ), tools=["cspell"], base="main")
+            except BaseException as e:                                    # review-k6-r9 m1: a thread's death fails
+                errors.append(repr(e))
+        ths = [threading.Thread(target=run, args=(tmpdir(self),)) for _ in range(2)]
         for t in ths:
             t.start()
         for t in ths:
             t.join()
+        self.assertEqual(errors, [])
         self.assertEqual(len(fake.calls), 2)                             # one per kind; the other thread reused both
 
     def test_branch_manifest_change_does_not_change_the_tool_dir(self):

@@ -32,9 +32,29 @@ from workflows.dev import unverified as UV
 from workflows.dev.replay import gate_report as GR
 
 
+# K6 r9 M1(c): a replay id is `issue/D-id` — each group draws its decisions from its own Issue range (the same group's
+# tuning and held-out rows share ids on purpose: the train = test cases)
+_BASE = {}
+
+
+def _issue_base(group):
+    return _BASE.setdefault(group, 1000 * (len(_BASE) + 1))
+
+
 def rep(group, n, agree, adv, set_="held-out", ids=None, **kw):
-    return [dict({"id": ids[i] if ids else "#%s/D%d" % (group, i), "group": group, "set": set_, "source": "replay",
-                  "agree": i < agree, "advance_agree": i < adv}, **kw) for i in range(n)]
+    return [dict({"id": ids[i] if ids else "#%d/D1" % (_issue_base(group) + i), "group": group, "set": set_,
+                  "source": "replay", "agree": i < agree, "advance_agree": i < adv}, **kw) for i in range(n)]
+
+
+# K6 r9 m3: train = test is checked only beside tuning rows — every case carries one tuning row per source, of an Issue
+# / scenario no held-out row uses
+TUNE = [{"id": "#999999/D1", "group": "HANDOFF", "set": "tuning", "source": "replay", "agree": True,
+         "advance_agree": True},
+        {"id": "syn-tuning-only-0", "group": "SPLIT", "set": "tuning", "source": "synthetic", "wrong": False}]
+
+
+def decide(rows):
+    return GR.decide(list(rows) + TUNE)
 
 
 def syn(group, verdicts, prefix=None, **kw):
@@ -55,8 +75,8 @@ TABLE = [
     ("a: SPLIT 3 of planned 4", "SPLIT", syn("SPLIT", [False] * 3), False),
     ("a: SPLIT 4 of planned 4", "SPLIT", syn("SPLIT", [False] * 4), True),
     ("a: SPLIT high risk wrong 1", "SPLIT", syn("SPLIT", [False] * 4 + [True]), False),
-    ("a: HANDOFF no plan, n1", "HANDOFF", syn("HANDOFF", [False]), False),               # SYNTH_MIN_N 2
-    ("a: HANDOFF no plan, n2", "HANDOFF", syn("HANDOFF", [False] * 2), True),
+    ("a: HANDOFF no plan, n1", "HANDOFF", syn("HANDOFF", [False]), False),
+    ("a: HANDOFF no plan, n2", "HANDOFF", syn("HANDOFF", [False] * 2), False),         # K6 r9 M1(a): replay only
     ("a: synthetic without verdict", "HANDOFF", syn("HANDOFF", [None] * 3), False),
     # (b) the same rows twice — one decision counts once
     ("b: HANDOFF 10 twice", "HANDOFF", rep("HANDOFF", 10, 10, 10) * 2, False),
@@ -68,11 +88,11 @@ TABLE = [
     ("c: one shared id", "HANDOFF", rep("HANDOFF", 1, 1, 1, "tuning") + rep("HANDOFF", 25, 25, 25), False),
     ("c: shared with another group's tuning", "DE-ARB",
      rep("HANDOFF", 1, 1, 1, "tuning", ids=["#9/D1"]) + rep("DE-ARB", 20, 20, 20, ids=["#9/D1"] +
-                                                            ["#d/D%d" % i for i in range(19)]), False),
+                                                            ["#%d/D1" % (500 + i) for i in range(19)]), False),
     ("c: synthetic scenario also tuned", "SPLIT",
      [dict(r, set="tuning") for r in syn("SPLIT", [False])]
      + syn("SPLIT", [False] * 4), False),
-    ("c: disjoint sets", "HANDOFF", rep("HANDOFF", 20, 20, 20, "tuning", ids=["t%d" % i for i in range(20)])
+    ("c: disjoint sets", "HANDOFF", rep("HANDOFF", 20, 20, 20, "tuning", ids=["#%d/D1" % (800 + i) for i in range(20)])
      + rep("HANDOFF", 20, 20, 20), True),
     # (d) bare EX-ARB by kind
     ("d: accept scenarios never verify dismiss", "EX-ARB-dismiss",
@@ -100,7 +120,7 @@ class M1GateReportRows(unittest.TestCase):
     def test_table(self):
         for name, g, rows, want in TABLE:
             with self.subTest(case=name):
-                v = GR.decide(rows)[g]
+                v = decide(rows)[g]
                 self.assertEqual(v["verified"], want, v["why"])
 
     def test_the_review_repro_cases(self):
@@ -118,41 +138,42 @@ class M1GateReportRows(unittest.TestCase):
                                                                for w in (True, False)])}
         for name, (g, rows) in sorted(cases.items()):
             with self.subTest(case=name):
-                self.assertFalse(GR.decide(rows)[g]["verified"])
+                self.assertFalse(decide(rows)[g]["verified"])
 
     def test_reports_why(self):
-        per = GR.decide(rep("HANDOFF", 10, 10, 10) * 2 + [{"group": "HANDOFF", "set": "held-out"}])
+        per = decide(rep("HANDOFF", 10, 10, 10) * 2 + [{"group": "HANDOFF", "set": "held-out"}])
         self.assertEqual(per["HANDOFF"]["duplicates"], 10)
         self.assertEqual(per["HANDOFF"]["replay_n"], 10)
         self.assertEqual(per["_rows_without_id"], 1)
-        per = GR.decide(rep("HANDOFF", 20, 20, 20, "tuning") + rep("HANDOFF", 20, 20, 20))
+        per = decide(rep("HANDOFF", 20, 20, 20, "tuning") + rep("HANDOFF", 20, 20, 20))
         self.assertEqual(len(per["HANDOFF"]["contaminated"]), 20)
         self.assertIn("train = test", per["HANDOFF"]["why"])
-        per = GR.decide(rep("HANDOFF", 30, 15, 30) + syn("HANDOFF", [False] * 3))
+        per = decide(rep("HANDOFF", 30, 15, 30) + syn("HANDOFF", [False] * 3))
         self.assertIn("user decision 1", per["HANDOFF"]["why"])
-        per = GR.decide(syn("SPLIT", [False] * 3))
+        per = decide(syn("SPLIT", [False] * 3))
         self.assertIn("< planned 4", per["SPLIT"]["why"])
-        per = GR.decide(syn("EX-ARB", [False] * 2))
+        per = decide(syn("EX-ARB", [False] * 2))
         self.assertEqual(per["_unknown_groups"], {"EX-ARB?": 2})
 
     def test_a_duplicate_counts_its_worst_verdict(self):
         rows = rep("HANDOFF", 20, 20, 20) + [dict(rep("HANDOFF", 1, 0, 0)[0])] * 3   # #HANDOFF/D0 disagrees too
-        per = GR.decide(rows)["HANDOFF"]
+        per = decide(rows)["HANDOFF"]
         self.assertEqual((per["replay_n"], per["replay_agree"]), (20, 19))
         self.assertTrue(per["verified"])                     # 19/20 = 95 % agreement, advance 19/20 = 95 %
         rows = syn("SPLIT", [False] * 4) + syn("SPLIT", [True])
-        self.assertFalse(GR.decide(rows)["SPLIT"]["verified"])      # syn-SPLIT-0 again, wrong: worst = wrong
+        self.assertFalse(decide(rows)["SPLIT"]["verified"])      # syn-SPLIT-0 again, wrong: worst = wrong
 
 
 class UserDecision1(unittest.TestCase):
     def test_synthetic_only_for_a_short_replay(self):
         for n in (0, 5, 19):
             with self.subTest(replay_n=n):
-                self.assertTrue(GR.decide(rep("HANDOFF", n, 0, 0) + syn("HANDOFF", [False] * 2))["HANDOFF"]
+                # K6 r9 M1(a): DIRECTIVE (a planned synthetic set) — HANDOFF has none, replay only
+                self.assertTrue(decide(rep("DIRECTIVE", n, 0, 0) + syn("DIRECTIVE", [False] * 2))["DIRECTIVE"]
                                 ["verified"])
         for agree, adv in ((16, 20), (20, 18), (0, 0)):
             with self.subTest(agree=agree, adv=adv):
-                v = GR.decide(rep("HANDOFF", 20, agree, adv) + syn("HANDOFF", [False] * 5))["HANDOFF"]
+                v = decide(rep("DIRECTIVE", 20, agree, adv) + syn("DIRECTIVE", [False] * 5))["DIRECTIVE"]
                 self.assertFalse(v["verified"])
                 self.assertIsNone(v["by"])
 
@@ -163,20 +184,20 @@ class UserDecision2(unittest.TestCase):
                                              "EX-DWC"]))
         for g in SHEET_ONLY:
             with self.subTest(group=g):
-                per = GR.decide(rep(g, 30, 30, 30) + syn(g, [False] * 6))[g]
+                per = decide(rep(g, 30, 30, 30) + syn(g, [False] * 6))[g]
                 self.assertFalse(per["verified"])
                 self.assertTrue(per["sheet_only"])
                 self.assertTrue(per["would_pass"])            # the replay result is kept
                 self.assertEqual(per["replay_n"], 30)
                 self.assertIn("user decision 2", per["why"])
-                failed = GR.decide(rep(g, 30, 10, 30))[g]
+                failed = decide(rep(g, 30, 10, 30))[g]
                 self.assertFalse(failed["would_pass"])
 
     def test_the_report_and_unverified(self):
         rows = []
         for g in SHEET_ONLY + ["HANDOFF"]:
             rows += rep(g, 20, 20, 20)
-        doc = GR.report(rows)
+        doc = GR.report(rows + TUNE)
         self.assertEqual(doc["verified"], ["HANDOFF"])
         self.assertEqual(doc["criteria"]["sheet_only"], SHEET_ONLY)
         # a hand-edited verification.json naming them is ignored: they stay unverified until the sheet releases them

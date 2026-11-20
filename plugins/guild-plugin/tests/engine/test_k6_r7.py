@@ -414,14 +414,24 @@ def _rows(group, n, agree, adv, source="replay", set_="held-out", **kw):
     # K6 r8 M1: every row carries its decision id (rows without one are dropped)
     out = []
     for i in range(n):
-        out.append(dict({"id": "#%s-%s/D%d" % (group, set_, i), "group": group, "set": set_, "source": source,
+        # K6 r9 M1(c): `issue/D-id` — an Issue range per group and set (disjoint: no train = test)
+        base = 1000 * (1 + sum(ord(c) for c in group) % 97) + (500 if set_ != "held-out" else 0)
+        out.append(dict({"id": "#%d/D1" % (base + i), "group": group, "set": set_, "source": source,
                          "agree": i < agree, "advance_agree": i < adv}, **kw))
     return out
 
 
 def _syn(group, verdicts, **kw):
-    return [dict({"id": "syn-%s-%d" % (group, i), "group": group, "set": "held-out", "source": "synthetic"},
+    # K6 r9 M1(d): one scenario id belongs to one group — the kind is part of a bare EX-ARB scenario's id
+    return [dict({"id": "syn-%s%s-%d" % (group, "-" + kw["kind"] if "kind" in kw else "", i), "group": group,
+                  "set": "held-out", "source": "synthetic"},
                  **(dict(kw, wrong=w) if w is not None else kw)) for i, w in enumerate(verdicts)]
+
+
+# K6 r9 m3: train = test is checked only beside tuning rows — one per source, of an Issue / scenario no case uses
+_TUNE = [{"id": "#999999/D1", "group": "HANDOFF", "set": "tuning", "source": "replay", "agree": True,
+          "advance_agree": True},
+         {"id": "syn-tuning-only-0", "group": "SPLIT", "set": "tuning", "source": "synthetic", "wrong": False}]
 
 
 class m4GateReport(unittest.TestCase):
@@ -438,7 +448,7 @@ class m4GateReport(unittest.TestCase):
                 + _syn("EX-ARB", [None] * 3, kind="accept")
                 + _rows("QA", 20, 20, 20)
                 + [{"id": "x", "group": "NOPE", "set": "held-out", "source": "replay", "agree": True}])
-        per = GR.decide(rows)
+        per = GR.decide(rows + _TUNE)
         want = {"HANDOFF": True,         # 17/20 = 85 %, 19/20 = 95 %
                 "DE-ARB": False,         # 16/20 = 80 % — and a failed replay is not covered by synthetic (r8 1)
                 "ESCALATE": False,       # advance 28/30 < 95 %
@@ -458,7 +468,7 @@ class m4GateReport(unittest.TestCase):
         d = tmpdir(self)
         src = os.path.join(d, "rows.json")
         with open(src, "w", encoding="utf-8") as fh:
-            json.dump({"rows": _rows("HANDOFF", 20, 20, 20)}, fh)
+            json.dump({"rows": _rows("HANDOFF", 20, 20, 20) + _TUNE}, fh)
         a, b = os.path.join(d, "a.json"), os.path.join(d, "b.json")
         self.assertEqual(GR.main(["--rows", src, "--out", a, "--replay", "test"]), 0)
         self.assertEqual(GR.main(["--rows", src, "--out", b, "--replay", "test"]), 0)

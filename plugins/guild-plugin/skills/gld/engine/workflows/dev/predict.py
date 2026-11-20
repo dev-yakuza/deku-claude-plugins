@@ -568,7 +568,24 @@ def rating_word(text):
         if f in RATING_WORDS and f not in RATING_UI_NOUNS or len(w) > 1 and w.isupper() and f in RATING_WEAK:
             if f in _CJK_STEMS and _CJK_RATING.match(t, m.start()) or f not in _CJK_STEMS and not _compound_noun(t, m):
                 return True
+    if _glued_rates(t):
+        return True
     return bool(_CJK_RATING.search(t))
+
+
+# K6 r9 M2: the pieces of a `-` / `/`-joined word run (`_GLUED`) that rate in a WHOLE label — the hyphenated rating
+# compounds (`low-risk`, `high-risk`, `risk-free`, `unsafe-only`, `riskier-path`); never the plain `safe` (`fail-safe`,
+# `thread-safe`, `type-safe` describe), nor the UI nouns / everyday words (`read-only`, `good-first-issue`)
+_GLUED_STRONG = frozenset(("risk", "risks", "risky", "riskier", "riskiest", "unsafe", "safer", "safest", "dangerous",
+                           "hazardous"))
+
+
+def _glued_rates(t):
+    """K6 r9 M2: does `t` (code spans already blanked) hold a `-` / `/`-joined run with a `_GLUED_STRONG` piece?"""
+    for m in _GLUED.finditer(t):
+        if any(p.casefold() in _GLUED_STRONG for p in re.split(r"[-/]", m.group(0))):
+            return True
+    return False
 
 
 # K6 r8 m2: a `-` / `/`-joined run of words outside a code span (`low-risk`, `safe-only`, `safe/only`) — `_WORD` skips
@@ -756,6 +773,8 @@ def blind_labels(labels):
         return nl
     if any(x is None for x in nl):
         return nl
+    if _compound_contrast(labels):                       # K6 r9 M3: "safe mode" / "unsafe mode" — a rating contrast
+        return [None] * len(nl)
     parts = [_HEAD_SPLIT.split(_mask(x), 1) for x in nl]
     heads = [pp[0].strip() for pp in parts]
     keys = [re.sub(r"\s+", " ", h).strip().lower() for h in heads]
@@ -769,6 +788,28 @@ def blind_labels(labels):
             out.append(None if bad else _unmask(h + (", " + ", ".join(kept) if kept else "")))
         return [_unmask(x) if x is not None else None for x in out]
     return nl
+
+
+# K6 r9 M3: a CJK rating stem directly before one of the compound nouns `_CJK_RATING` excepts (r8 m1)
+_CJK_COMPOUND = re.compile(r"(안전|위험|安全|危険)\s?(장치|관리|구역|지대|모드|물품|물질|물건|지역|망|물|装置|管理|地帯|区域|網|物)")
+
+
+def _compound_contrast(labels):
+    """K6 r9 M3: do the options name the SAME compound head (r8 m1's exception — `_compound_noun`, the `_CJK_RATING`
+    look-aheads) with DIFFERENT list words before it ("safe mode" / "unsafe mode", "안전 구역" / "위험 구역")? The
+    modifier is then the only thing that tells them apart — a rating contrast: the whole blind question is refused.
+    One option alone naming a compound noun ("Use the safe area insets") or the options naming it alike stays shown."""
+    by = {}
+    for i, x in enumerate(labels):
+        t = _CODE_SPAN.sub(" ", str(x or ""))
+        for m in _WORD.finditer(t):
+            f = m.group(0).casefold()
+            if f in _COMPOUND_HEADS and _compound_noun(t, m):
+                head = _COMPOUND_TAIL.match(t, m.end()).group(2).casefold()
+                by.setdefault(head, {}).setdefault(i, set()).add(f)
+        for m in _CJK_COMPOUND.finditer(t):
+            by.setdefault(m.group(2), {}).setdefault(i, set()).add(m.group(1))
+    return any(len(v) > 1 and len(set(frozenset(x) for x in v.values())) > 1 for v in by.values())
 
 
 def neutral_label(label):

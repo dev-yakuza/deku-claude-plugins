@@ -18,7 +18,7 @@
 #     build*.yaml under build_runner, the machine-report loading detector (K2r8-m1).
 # No test calls `claude`, a model or GitHub (a failing `gh` is first on PATH).
 #
-# Usage: bash plugins/guild-plugin/tests/engine_k2_test.sh
+# Usage: bash plugins/guild-plugin/tests/engine_k3_test.sh
 set -uo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 ENGINE="$HERE/../skills/gld/engine/gld_engine.py"
@@ -43,11 +43,15 @@ FAIL=$(grep -cE '\.\.\. (FAIL|ERROR)$' "$OUT")
 if [ "$RC" -ne 0 ]; then
   sed -n '/^======/,$p' "$OUT"
 fi
-echo "engine K3: $PASS passed, $FAIL failed"
-# ⚠ Keep equal to the measured PASS count; raise it only when tests are added on purpose.
-ENGINE_K3_MIN_TESTS=187
-if [ "$((PASS + FAIL))" -lt "$ENGINE_K3_MIN_TESTS" ]; then
-  echo "FAIL  실행된 검사가 $((PASS + FAIL))건뿐입니다 (최소 ${ENGINE_K3_MIN_TESTS}건)."
+# review-k6-r9 m1: count by unittest's own `Ran N tests` line too — a traceback printed by another thread can split a
+# `... ok` line, and the grep above would miss that test (the 187 / 188 flake)
+RAN=$(sed -nE 's/^Ran ([0-9]+) tests? in .*/\1/p' "$OUT" | tail -1)
+RAN=${RAN:-0}
+echo "engine K3: $PASS passed, $FAIL failed (ran $RAN)"
+# ⚠ Keep equal to the measured count; raise it only when tests are added on purpose.
+ENGINE_K3_MIN_TESTS=188
+if [ "$RAN" -lt "$ENGINE_K3_MIN_TESTS" ]; then
+  echo "FAIL  실행된 검사가 ${RAN}건뿐입니다 (최소 ${ENGINE_K3_MIN_TESTS}건)."
   exit 1
 fi
 [ "$RC" -eq 0 ] && [ "$FAIL" -eq 0 ]
