@@ -484,6 +484,10 @@ def coerce_kickoff(fields, root, sources, net_lines, plan_lines, premise_unmet_d
 # product-owner when installed, nothing skipped — never narrower than any reading.
 READING_FIELD = "reading_"         # pending block keys `reading_i1` … `reading_i5`
 READING_CAP = 1900                 # one JSON value under the decision log's VALUE_CAP (2000)
+# K6 r7 M1: a captured summary is stored cut to SUMMARY_CAP (or SUMMARY_SHORT when its reading's JSON is still over
+# READING_CAP) and the cut is RECORDED (`cut: true`) — only a summary marked cut is compared as a prefix
+SUMMARY_CAP = 300
+SUMMARY_SHORT = 120
 
 
 def order_areas(areas, globs=None):
@@ -551,7 +555,8 @@ def reading_capture(k, root, roster, extra_areas=(), net=False, globs=None):
                   "skipped": sk if (sk is not None and c is not None) else [],
                   "po_convene": po["convene"] if po is not None else ("product-owner" in installed),
                   "work_type": w or k.work_type}
-        out.append(dict(fp, token=i["id"], orig=i["orig"][:40], summary=i["summary"][:300]))
+        out.append(dict(fp, token=i["id"], orig=i["orig"][:40], summary=i["summary"][:SUMMARY_CAP],
+                        cut=len(i["summary"]) > SUMMARY_CAP))
     return out
 
 
@@ -562,6 +567,28 @@ MORE_PLACEHOLDER = 999
 # and the question's own fields, a block stays ≈ 45k at most. A reading whose rest would pass it keeps its head only
 # (`more: true` — the conservative superset at `apply_reading`; nothing narrows).
 CONTINUATION_BUDGET = 30000
+# K6 r7 m1: a head-only reading keeps its TAIL as its common ancestor directories (`reading-roots-<token>`, one JSON
+# list ≤ ROOTS_CAP) — every tail area lies under one of them, so `apply_reading` re-lists the real directories under
+# them: a true superset of the question-time reading (never only what the answer-time sources happen to cover).
+# ≤ 5 × ROOTS_CAP more per block (≈ 48k at most, under the rollover).
+READING_ROOTS = "reading-roots-"
+ROOTS_CAP = 600
+WHOLE_REPO = "."
+
+
+def tail_roots(areas, cap=ROOTS_CAP):
+    """K6 r7 m1: the fewest-levels ancestor directories that cover every one of `areas` and fit `cap` as JSON — the
+    deepest common prefix depth that fits; `["."]` (the whole repository) when even the top-level directories do not."""
+    parts = [str(a).strip().rstrip("/").split("/") for a in areas or () if str(a or "").strip()]
+    if not parts:
+        return []
+    for depth in range(max(len(x) for x in parts), 0, -1):
+        roots = sorted(set("/".join(x[:depth]) for x in parts))
+        # an area shallower than `depth` is its own root; drop roots under another root
+        roots = [r for r in roots if not any(r != q and r.startswith(q + "/") for q in roots)]
+        if len(_dump(roots)) <= cap:
+            return roots
+    return [WHOLE_REPO]
 
 
 def _dump(e):
@@ -575,7 +602,9 @@ def capture_fields(capture):
     harness first — `order_areas`) and carries the rest in continuation values `reading-areas-<token>-<n>` (each a
     JSON list under the cap), `more: <n>` naming how many; `captured` puts them back together.
     K6 r6 m2: the continuation values of the whole block stay within `CONTINUATION_BUDGET`; a reading whose rest would
-    pass it is carried as its head with `more: true` (read back as a head only → the conservative superset)."""
+    pass it is carried as its head with `more: true` (read back as a head only → the conservative superset).
+    K6 r7 m1: that head-only reading's tail is kept as its ancestor directories (`reading-roots-<token>` —
+    `tail_roots`), so the superset at `apply_reading` holds every area the question captured."""
     out = {}
     spent = 0
     for e in capture or ():
@@ -603,13 +632,17 @@ def capture_fields(capture):
                 e.pop("more")
             elif spent + cost > CONTINUATION_BUDGET:
                 e["more"] = True               # K6 r6 m2: over the block budget — a head only (the superset fallback)
+                # K6 r7 m1: … with its tail kept as ancestor directories (re-listed at `apply_reading`)
+                out["%s%s" % (READING_ROOTS, e["token"])] = _dump(tail_roots(rest))
                 chunks = []
             spent += sum(len(_dump(c)) + len(READING_MORE) + len(str(e["token"])) + 8 for c in chunks)
             for n, c in enumerate(chunks, 1):
                 out["%s%s-%d" % (READING_MORE, e["token"], n)] = _dump(c)
             txt = _dump(e)
         if len(txt) > READING_CAP:
-            e["skipped"], e["summary"] = [], e["summary"][:120]
+            summ = str(e.get("summary") or "")
+            e["skipped"], e["summary"] = [], summ[:SUMMARY_SHORT]
+            e["cut"] = bool(e.get("cut")) or len(summ) > SUMMARY_SHORT
             txt = _dump(e)
         out[READING_FIELD + e["token"]] = txt
     return out
@@ -627,6 +660,7 @@ def captured(block):
     if not vals:
         return None, "legacy"
     cont = dict((str(k), v) for k, v in items if str(k).startswith(READING_MORE))
+    roots = dict((str(k)[len(READING_ROOTS):], v) for k, v in items if str(k).startswith(READING_ROOTS))
     out = []
     for k, v in vals:
         try:
@@ -654,6 +688,13 @@ def captured(block):
                 e.pop("more")
         elif m:
             e["more"] = True
+        if e.get("more") is True:
+            # K6 r7 m1: the tail's ancestor directories (absent / broken → None: the footprint's tail is UNKNOWN)
+            try:
+                r = json.loads(markers.unescape(roots.get(e["token"])))
+            except (TypeError, ValueError):
+                r = None
+            e["tail_roots"] = r if isinstance(r, list) and r and all(isinstance(x, str) for x in r) else None
         out.append(e)
     return sorted(out, key=lambda e: e["token"]), None
 
@@ -667,14 +708,45 @@ def _raw_of(e):
             "work_type": e.get("work_type")}
 
 
-def apply_reading(k, capture, token, root, widen=()):
+_WALK_SKIP = frozenset((".git",))
+
+
+def dirs_under(root, rels):
+    """K6 r7 m1: every real directory (no symlink, never `.git`) at or under each of `rels` (`.` = the repository)."""
+    out = set()
+    base = os.path.realpath(root) if root else None
+    if not base:
+        return []
+    for rel in rels or ():
+        rel = str(rel or "").strip().rstrip("/") or WHOLE_REPO
+        if rel != WHOLE_REPO and not real_dirs(root, [rel]):
+            continue
+        top = base if rel == WHOLE_REPO else os.path.join(base, os.path.normpath(rel))
+        for cur, dirs, _files in os.walk(top, followlinks=False):
+            dirs[:] = [d for d in dirs if d not in _WALK_SKIP and not os.path.islink(os.path.join(cur, d))]
+            r = os.path.relpath(cur, base)
+            if r != ".":
+                out.add(r.replace(os.sep, "/"))
+    return sorted(out)
+
+
+def hot_dirs(root, globs=None):
+    """K6 r7 m1: every real directory of the repository an irreversible glob (§3.2) or the harness (A4) touches — the
+    areas an UNKNOWN tail is assumed to reach."""
+    alld = dirs_under(root, [WHOLE_REPO])
+    return sorted(set(irreversible(alld, globs)) | set(harness_hit(alld)))
+
+
+def apply_reading(k, capture, token, root, widen=(), globs=None):
     """The person's reading (`token` of the question-time `capture`) as THIS run's KICKOFF result: the readings,
     tokens and aliases of that question, `chosen` = the person's, and its footprint (areas re-checked to exist).
     K6 r4 m1: every reading's own footprint is the captured one from now on (`own_footprints` re-keyed to the captured
     tokens — a later capture in this run never pairs a token with another reading's footprint).
     K6 r5 m3: an entry whose areas are a head only (`more: true` — its rest was lost) is never taken as the whole
     footprint: its areas widen to the conservative superset (every captured reading's areas, this run's judge areas
-    and `widen` — the explorer's directories).
+    and `widen` — the explorer's directories). K6 r7 m1: plus its own tail — every real directory under the tail's
+    ancestor directories (`tail_roots`), or, when those are not on the block, every irreversible / harness directory
+    of the repository (`hot_dirs`, `globs` = `engine.irreversible_globs`).
     Returns the captured entry, or None (the token is not one of the captured readings)."""
     ent = next((e for e in capture or () if e.get("token") == token), None)
     if ent is None:
@@ -691,9 +763,19 @@ def apply_reading(k, capture, token, root, widen=()):
         sup = set(areas) | set(judge_areas) | set(widen or ())
         for e in capture:
             sup |= set(e.get("areas") or ())
+        roots = ent.get("tail_roots")
+        if roots:
+            # K6 r7 m1: the question-time tail itself — every real directory under its ancestor directories
+            sup |= set(dirs_under(root, roots))
+            how = "its tail re-listed under %s" % ", ".join(roots[:5])
+        else:
+            # K6 r7 m1: the tail is UNKNOWN (an r4–r6 capture, a lost value) — assume it reaches every irreversible /
+            # harness directory of the repository (§3.2 / A4 then see them); the other areas stay the answer-time ones
+            sup |= set(hot_dirs(root, globs))
+            how = "its tail unknown — every irreversible / harness directory added"
         areas = sorted(sup)
-        k.coerced.append("reading %s: its captured areas were cut — the conservative superset (%d areas)"
-                         % (token, len(areas)))
+        k.coerced.append("reading %s: its captured areas were cut — the conservative superset (%d areas; %s)"
+                         % (token, len(areas), how))
     k.areas = real_dirs(root, areas)
     k.ui_surface = bool(ent.get("ui_surface"))
     k.safety_net_visual = bool(ent.get("safety_net_visual")) and k.safety_net_visual_possible
@@ -741,45 +823,82 @@ def widen_reading(k, fp):
 PERSON_READING_ID = "person-reading"
 
 
-def _same_text(judge_text, cap_text):
-    """K6 r6 M1: equal after normalisation (NFKC, whitespace, case, a trailing full stop) — never closeness. A captured
-    summary is stored cut (300 / 120 characters): a judge's longer text that starts with such a cut summary is the
-    same text."""
+def _norm_text(x):
     import unicodedata
+    x = " ".join(unicodedata.normalize("NFKC", str(x or "")).split()).casefold()
+    return x.rstrip(" .。")
 
-    def n(x):
-        x = " ".join(unicodedata.normalize("NFKC", str(x or "")).split()).casefold()
-        return x.rstrip(" .。")
-    j, c = n(judge_text), n(cap_text)
+
+def was_cut(e):
+    """K6 r7 M1: was this captured entry's summary stored CUT? — its recorded `cut` flag. A capture written before r7
+    carries no flag: then only the two real cut lengths (SUMMARY_CAP / SUMMARY_SHORT characters) can be a cut summary
+    (a summary of a natural length of 120+ is never read as cut)."""
+    e = e if isinstance(e, dict) else {}
+    if "cut" in e:
+        return e.get("cut") is True
+    return len(str(e.get("summary") or "")) in (SUMMARY_CAP, SUMMARY_SHORT)
+
+
+def _same_text(judge_text, cap_text, cut=False):
+    """K6 r6 M1: equal after normalisation (NFKC, whitespace, case, a trailing full stop) — never closeness.
+    K6 r7 M1: a judge's longer text that starts with the captured summary is the same text ONLY when that summary was
+    stored cut (`cut` — `was_cut`); a summary of its natural length (120+ characters included) compares exactly, so
+    nested readings ("X" / "X 및 Y") stay apart."""
+    j, c = _norm_text(judge_text), _norm_text(cap_text)
     if not c or not j:
         return False
-    return j == c or (len(str(cap_text or "")) >= 120 and j.startswith(c))
+    return j == c or (bool(cut) and j.startswith(c))
 
 
-def judge_took(fields, ent=None, capture=()):
-    """Did this run's KICKOFF judge take the person's reading? K6 r5 M1: by STRUCTURE — its `chosen` is the fixed
-    engine id `PERSON_READING_ID` and exactly one of its `interpretations` carries that id. Any other id (the judge's
-    earlier letter included), the id absent or listed twice → not taken (user decision 2026-11-20: pause).
-    K6 r6 M1: two exact-equality refutations (`_same_text`, no closeness): (a) the summary under the fixed id equals
-    another captured reading's summary (`capture` other than `ent` — one whose text is not the person's own); (b) the
-    person's reading's summary (`ent`) appears under any other id of the judge's list."""
+def _same_reading(a, b):
+    """K6 r7 M1: two CAPTURED entries carry the same text — exactly, or one is a cut prefix of the other."""
+    return _same_text(a.get("summary"), b.get("summary"), was_cut(b)) or \
+        _same_text(b.get("summary"), a.get("summary"), was_cut(a))
+
+
+# K6 r7 M1 / m4(4): why a judge did not take the person's reading — each kind its own pause text
+NOT_TAKEN = {
+    "chosen": "`chosen` 이 `%s` 아님(또는 그 id 가 해석 목록에 정확히 하나가 아님)" % PERSON_READING_ID,
+    "other-text": "`%s` 아래 요약이 질문의 다른 해석의 글자와 같음(반증 a)" % PERSON_READING_ID,
+    "own-elsewhere": "사람 해석의 글자가 다른 id 아래 있음(반증 b)",
+}
+
+
+def judge_not_taken(fields, ent=None, capture=()):
+    """None when this run's KICKOFF judge took the person's reading, else the kind (`NOT_TAKEN`). K6 r5 M1: by
+    STRUCTURE — its `chosen` is the fixed engine id `PERSON_READING_ID` and exactly one of its `interpretations` carries
+    that id. Any other id (the judge's earlier letter included), the id absent or listed twice → "chosen" (user
+    decision 2026-11-20: pause). K6 r6 M1: two exact-equality refutations (`_same_text`, no closeness): (a) the summary
+    under the fixed id equals another captured reading's summary (`capture` other than `ent` — one whose text is not the
+    person's own) → "other-text"; (b) the person's reading's summary (`ent`) appears under any other id of the judge's
+    list → "own-elsewhere". K6 r7 M1: a prefix counts only for a summary stored cut (`was_cut`); (b) does not fire when
+    the text under the fixed id IS the person's (a duplicate listing of the person's reading is no other reading put
+    under the person's name)."""
     f = fields or {}
     norm = lambda x: " ".join(str(x or "").split()).casefold()              # noqa: E731
     pid = PERSON_READING_ID.casefold()
     if norm(f.get("chosen")) != pid:
-        return False
+        return "chosen"
     items = [i for i in (f.get("interpretations") or []) if isinstance(i, dict)]
     mine = [i for i in items if norm(i.get("id")) == pid]
     if len(mine) != 1:
-        return False
-    own = (ent or {}).get("summary") or ""
-    others = [e.get("summary") for e in capture or () if isinstance(e, dict) and e is not ent
-              and e.get("token") != (ent or {}).get("token") and not _same_text(e.get("summary"), own)]
-    if any(_same_text(mine[0].get("summary"), o) for o in others):
-        return False                       # (a) another offered reading's text under the person's id
-    if own and any(_same_text(i.get("summary"), own) for i in items if norm(i.get("id")) != pid):
-        return False                       # (b) the person's reading's text under another id
-    return True
+        return "chosen"
+    ent = ent if isinstance(ent, dict) else {}
+    own = ent.get("summary") or ""
+    own_cut = was_cut(ent)
+    others = [e for e in capture or () if isinstance(e, dict) and e is not ent
+              and e.get("token") != ent.get("token") and not (own and _same_reading(e, ent))]
+    if any(_same_text(mine[0].get("summary"), e.get("summary"), was_cut(e)) for e in others):
+        return "other-text"                # (a) another offered reading's text under the person's id
+    if own and not _same_text(mine[0].get("summary"), own, own_cut) and \
+            any(_same_text(i.get("summary"), own, own_cut) for i in items if norm(i.get("id")) != pid):
+        return "own-elsewhere"             # (b) the person's reading's text under another id
+    return None
+
+
+def judge_took(fields, ent=None, capture=()):
+    """Did this run's KICKOFF judge take the person's reading? — `judge_not_taken` is None."""
+    return judge_not_taken(fields, ent, capture) is None
 
 
 def canon_key(interp):

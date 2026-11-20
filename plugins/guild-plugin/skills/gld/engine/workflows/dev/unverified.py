@@ -1,7 +1,8 @@
 """workflows.dev.unverified — the §10.2-6 unverified groups and their release (K6 item 4).
 
 * The release ships `verification.json` (written by `replay/gate_report.py` from the held-out judgment replay): the
-  §9.5 groups the replay VERIFIED (held-out n ≥ 20 at the gate's agreement, or a passing synthetic set). Every other
+  §9.5 groups the replay VERIFIED (held-out n ≥ 20 at the gate's agreement, or a passing synthetic set — the criteria
+  in code: `replay/gate_report.decide`, K6 r7 m4; run it on the paid replay's graded rows before a release). Every other
   group of `valves.GROUPS` is UNVERIFIED — "no synthetic = not passed" (R4J-m5).
 * An unverified group runs the conservative path (`predict.conservative` → the gate's blind question — STAKES' asked
   openly —, KICKOFF's open confirmation, EX-ARB's dismiss → accept) until it is RELEASED: `release_after` (5) counted blind answers of that
@@ -42,6 +43,9 @@
   release reached while human drops stand records them (`after_human_drop`); a human-dropped candidate that a later
   `dev grade` lists again is OPEN again (`reopened`), and when the group's release came after that drop the release is
   REVOKED (`release_revoked` — the group runs the conservative path again until the candidate is judged).
+* K6 r7 m2 — "a later `dev grade`" is ANY `dev grade` (any `--sprint` / `--issues` scope): it also reads the log of
+  every Issue holding a standing human drop (`human_dropped`) and lists those dropped candidates again when the log
+  still shows them (only those — the Issue's other decisions stay out of a scope that did not name it).
 * State: `grade-state.json` → `unverified: {group: {"n", "wrong", "open", "points", "dropped", "released_at"}}` (local,
   like `watch`).
 * The live Ports read the pending set once per run (`ports.fsm_factory` → `p.unverified`); test harnesses that
@@ -211,6 +215,20 @@ def open_keys_of(st, issue):
                       if k.partition("/")[0] == str(issue)))
 
 
+def human_dropped(st):
+    """K6 r7 m2: {issue: {keys}} of every candidate a person dropped (`by: human`, forced or not) that still stands —
+    `dev grade` re-reads those Issues' logs whatever its scope, so a drop is re-checked by the next `dev grade`, not
+    only by one whose scope happens to hold that Issue."""
+    out = {}
+    for _g, u in sorted((st.get("unverified") or {}).items()):
+        for d in u.get("dropped") or ():
+            if d.get("by") == "human" and d.get("key"):
+                i = str(d["key"]).partition("/")[0]
+                if i.isdigit():
+                    out.setdefault(int(i), set()).add(d["key"])
+    return out
+
+
 def drop_refused(st, key, force=False):
     """K6 r6 m1: why the person's drop of `key` is refused — "not-open" (open nowhere), "readable" (open, but its log
     was read: never `unread` — a person can judge it on the sheet; `force` overrides), or None."""
@@ -356,6 +374,8 @@ def report(common, path=FILE):
                     # K6 r6 m1: a release reached while human drops stood, and a release a re-listed drop revoked
                     "after_human_drop": list(u.get("after_human_drop") or ()) if u.get("released_at") else [],
                     "release_revoked": list(u.get("release_revoked") or ()),
+                    # K6 r7 m2: the human drops a later `dev grade` found listed again (re-opened)
+                    "reopened": [r.get("key") for r in (u.get("reopened") or ())],
                     "unread": dict((k, n) for k, n in sorted((u.get("unread") or {}).items())
                                    if k in (u.get("open") or ())),
                     "way_out": ("an open candidate whose Issue log shows no engine block holds the release — if that "

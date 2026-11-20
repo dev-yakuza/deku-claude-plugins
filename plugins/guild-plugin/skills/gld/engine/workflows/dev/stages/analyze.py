@@ -371,17 +371,20 @@ def run(p, only=None, config_present=True):
         ch_ = res_.get("choice")
         cap, why = readings.get(kind) or (None, "legacy")
         if cap is not None:
-            ent = AN.apply_reading(k, cap, ch_, p.root, widen=AN.real_dirs(p.root, ev_areas))
+            ent = AN.apply_reading(k, cap, ch_, p.root, widen=AN.real_dirs(p.root, ev_areas),
+                                   globs=p.engine_cfg("irreversible_globs"))
             if ent is None:
                 reading_stop = "답 %s(%s)이 질문 %s 의 해석 중 하나가 아님" % (res_.id, ch_, q_.id)
             else:
                 k.coerced.append("reading = the person's %s (answer %s, captured at %s)" % (ch_, res_.id, q_.id))
-                if not AN.judge_took(d.fields, ent, cap):
+                why_ = AN.judge_not_taken(d.fields, ent, cap)
+                if why_:
                     # user decision 2026-11-20: its AC / readiness are another reading's — never written as the person's.
-                    # K6 r5 M1: taking = choosing the fixed id `person-reading` (no text closeness is evidence)
-                    reading_stop = ("KICKOFF 판단이 사람이 고른 해석 «%s»(답 %s)을 따르지 않음(`chosen` 이 `%s` 아님) — "
-                                    "판단의 AC 는 다른 해석의 것" % (B.one_line(ent.get("summary") or "", 80), res_.id,
-                                                                AN.PERSON_READING_ID))
+                    # K6 r5 M1: taking = choosing the fixed id `person-reading` (no text closeness is evidence);
+                    # K6 r7 M1 / m4(4): the pause names WHICH check refused it
+                    reading_stop = ("KICKOFF 판단이 사람이 고른 해석 «%s»(답 %s)을 따르지 않음(%s) — "
+                                    "판단의 AC 는 다른 해석의 것일 수 있음" % (B.one_line(ent.get("summary") or "", 80),
+                                                                res_.id, AN.NOT_TAKEN.get(why_, why_)))
                 else:
                     AN.widen_reading(k, judge_fp)      # K6 r5 m6: capture ∪ the taking judge's footprint
         elif why == "unreadable":

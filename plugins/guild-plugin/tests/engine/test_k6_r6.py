@@ -253,7 +253,8 @@ class m2BlockBudget(unittest.TestCase):
         k = AN.Kickoff()
         k.po = {"convene": False, "reason": ""}
         AN.apply_reading(k, back, tok, root, widen=areas)
-        self.assertEqual(sorted(k.areas), sorted(areas))
+        # K6 r7 m1: ⊇ — the tail is re-listed under its ancestor directories (those directories themselves included)
+        self.assertTrue(set(areas) <= set(k.areas))
         self.assertTrue(any("conservative superset" in c for c in k.coerced))
 
     def test_a_small_capture_is_unchanged(self):

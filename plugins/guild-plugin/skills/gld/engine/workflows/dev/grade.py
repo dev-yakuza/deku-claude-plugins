@@ -893,6 +893,21 @@ def main(d, a):
             texts[n] = "%s\n\n%s" % (it.get("title") or "", (it.get("body") or "")[:8000])
         except Exception:                                        # noqa: BLE001
             texts[n] = "#%d" % n
+    # K6 r7 m2: every standing human drop is re-checked by ANY `dev grade` — the Issues outside this scope are read
+    # for those dropped candidates only (a readable log that still shows one lists it again: open, a release after
+    # the drop revoked — `UV.note_candidates`)
+    rechecked = []
+    for n, keys in sorted(UV.human_dropped(load_state(common)).items()):
+        if n in logs:
+            continue
+        try:
+            blocks = DecisionLog.load(markers.trusted(gh.comments(n), ())).blocks
+        except Exception:                                        # noqa: BLE001 — unread: the drop stands
+            continue
+        _ok, cands = predict_first_judgments(blocks, n)
+        back = [r for r in cands if "%s/%s" % (r.get("issue"), r.get("decision_id")) in keys]
+        pf_cands += back
+        rechecked += ["%s/%s" % (r.get("issue"), r.get("decision_id")) for r in back]
     confirmed = set((str(g.get("issue")), g.get("decision_id")) for g in grades(common)
                     if g.get("repo") == repo and g.get("grader_version") == "human")
     pf_cands = [r for r in pf_cands if (str(r["issue"]), r["decision_id"]) not in confirmed]
@@ -935,7 +950,9 @@ def main(d, a):
     emit.engine({"rows": len(rows), "csv": os.path.join(out_dir, "%s.csv" % tag), "first_sprint": first,
                  "predict_first": {"judgments": len(pf_rows), "imported": pf["imported"], "watch": pf["watch"],
                                    "conservative": pf["conservative"], "candidates": len(pf_cands),
-                                   "candidates_dropped": pf.get("candidates_dropped") or []},
+                                   "candidates_dropped": pf.get("candidates_dropped") or [],
+                                   "human_drops_listed_again": rechecked,
+                                   "release_revoked": pf.get("unverified_release_revoked") or []},
                  "watch": watch,
                  "graded": len(graded)}, out=d.out)
     return 0

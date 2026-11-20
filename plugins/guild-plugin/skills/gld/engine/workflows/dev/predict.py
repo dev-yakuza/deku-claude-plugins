@@ -324,13 +324,19 @@ def num_rating(text):
     return bool(NUM_RATING.search(_CODE_SPAN.sub(" ", str(text or ""))))
 
 
+def _rates_by_phrase(t):
+    """`rates` without the standalone list words (`rating_word`) — the phrase / likelihood / fit / numeric readings."""
+    return bool(PREFERENCE.search(t) or LIKELIHOOD.search(t) or NEG_RATING.search(t) or FIT.search(t)
+                or num_rating(t))
+
+
 def rates(label):
     """K5r6-M2: does an option label rate its option (how likely / good / fitting)? — preference, likelihood and
     rating words; a plain negation that describes the option ("설정 화면은 바꾸지 않는다") is not a rating. K6 r3 m1:
-    a numeric / symbolic rating (`num_rating`: `90%`, `9/10`, `★★★`, `✓`, `A+`, `#1`) rates too."""
+    a numeric / symbolic rating (`num_rating`: `90%`, `9/10`, `★★★`, `✓`, `A+`, `#1`) rates too. K6 r7 M2: so does a
+    standalone word of the one rating list (`rating_word` — `RATING_WORDS`, any case), wherever `rates` is asked."""
     t = str(label or "")
-    return bool(PREFERENCE.search(t) or LIKELIHOOD.search(t) or NEG_RATING.search(t) or FIT.search(t)
-                or num_rating(t))
+    return _rates_by_phrase(t) or rating_word(t)
 
 
 _CLAUSE = re.compile(r"\s*[(（\[][^)）\]]*[)）\]]|\s*(?:—|–|--| - |;|；|:|：|,|、|，)[^—–;；:：,、，(（]*")
@@ -419,6 +425,14 @@ _CLOSE = {"(": ")", "（": "）", "[": "]", "【": "】"}
 
 
 _CODE_SPAN = re.compile(r"`[^`]*(?:`|$)")
+_SPAN_JOIN = re.compile(r"[\s/|,&+·、，;；]+")
+# K6 r7 m3: a scope relative to the request named by its scope / requirements — "in scope", "out-of-scope",
+# `IN_SCOPE`, "(요구사항 범위만)", "(요구사항 밖까지)", "要件の範囲のみ", "beyond the requirements" (a bare 요구사항 /
+# 要件 / requirement is a noun: "(요구사항 문서 제외)" stays a scope)
+_SCOPE_REF = re.compile(r"(?<![A-Za-z])(?:in|out|outside)[-_\s]*(?:of[-_\s]*)?(?:the[-_\s]*)?scope(?![A-Za-z])|"
+                        r"요구\s*사항\s*(?:의\s*)?(?:범위|밖|외(?![가-힣])|이외|대로|그대로)|"
+                        r"要件\s*(?:の\s*)?(?:範囲|外|以外|通り|どおり)|"
+                        r"\b(?:within|beyond|outside(?:\s+of)?)\s+(?:the\s+)?requirements?\b", re.I)
 # K6 r3 m5: a code span is never cut into — its brackets, commas, colons and dashes (`Get.back()`, `jq '.[]'`,
 # `foo(a, b)`) are masked to private-use characters while the asides / clauses are found, and restored after
 _MASK_SRC = "()（）[]【】,、，;；:：—–-"
@@ -463,29 +477,98 @@ def _literal(t):
 _CODE_LITERALS = ("null", "nil", "none", "true", "false", "undefined", "nan", "void")
 # K6 r6 m3(a)(b): the words that RATE an option whatever their case or wrapping — an upper-case one is no acronym
 # (`SAFE`, `RISKY`, `LGTM`, `NG`, `HIGH`), and one as a piece of an identifier-shaped span (`low-risk`, `risk: low`,
-# `is_safe=true`, `risk_low` — the pieces between `_ . / : = -` and spaces) rates as the plain word does. CamelCase is
-# not split (`SafeArea` is a widget name, not a rating).
+# `is_safe=true`, `risk_low` — the pieces between `_ . / : = - # @ ( )` and spaces) rates as the plain word does.
+# K6 r7 M2: ONE list — `rates()` reads it too (`rating_word`: a standalone word of the list, any case), so a clause
+# with a scope word ("(safe only)", "(risky without more info)") rates as the same clause without it does.
 RATING_WORDS = frozenset((
     "safe", "safer", "safest", "unsafe", "risk", "risks", "risky", "riskier", "riskiest", "lgtm", "ng", "ok", "okay",
     "good", "bad", "wrong", "correct", "incorrect", "recommended", "preferred", "likely", "unlikely",
+    "dangerous", "harmless", "hazardous",
     "안전", "위험", "추천", "권장", "安全", "危険", "推奨"))
+# K6 r7 M2: UI nouns a label names in any case ("Login (OK button only)", "NG 버튼") — no rating as a standalone word
+# (still a rating as an identifier piece or upper-case span — `_rating_piece` / `_rating_caps`)
+RATING_UI_NOUNS = frozenset(("ok", "okay", "ng"))
 # words that rate only beside one of the above inside an identifier (`risk_high`) — alone they are everyday identifier
 # pieces (`high_score`, `best_time`, `low_memory`, `fine_grained`); upper-case alone (`HIGH`, `BEST`) they rate
 RATING_WEAK = frozenset(("high", "low", "medium", "best", "better", "worse", "worst", "fine", "ideal", "optimal",
                          "poor", "weak", "strong"))
-_RATING_PIECES_SPLIT = re.compile(r"[\s_./:=\-]+")
+# K6 r7 m3: evaluative stems that are everyday domain words in lower case (a test that `pass`es, a `rejected` request,
+# a `stable` sort, `conservative` rounding) but a verdict in upper case (`(PASS)`, `` (`APPROVED`) ``, `(DANGEROUS)`)
+RATING_CAPS = frozenset(("pass", "passed", "fail", "failed", "approved", "rejected", "stable", "unstable",
+                         "conservative", "aggressive", "yes", "no", "harmful", "reckless", "trusted", "untrusted",
+                         "verified", "unverified", "default"))
+# K6 r7 m3: rating KEYS — a piece that rates only with a value piece beside it (`safety=high`, `confidence: high`,
+# `danger: none`); alone they are identifier pieces (`safety_net`, `confidence_interval`)
+RATING_KEYS = frozenset(("safety", "confidence", "danger", "certainty", "quality"))
+_RATING_VALUES = RATING_WEAK | frozenset(("none", "true", "false", "yes", "no", "zero", "min", "max", "minimal",
+                                          "maximal", "full", "partial"))
+# K6 r7 m3: camelCase pieces that rate even inside a widget-like name (`RiskyChoice`, `isUnsafe`) — never the plain
+# `safe` / `ok` / `good` / `correct` (`SafeArea`, `OkButton`, `GoodsList`, `CorrectAnswer` are product nouns), except
+# after a predicate prefix (`isSafe`, `hasRisk`, `looksGood`)
+_CAMEL_STRONG = frozenset(("risky", "riskier", "riskiest", "unsafe", "safer", "safest", "lgtm", "recommended",
+                           "preferred", "dangerous", "harmless", "hazardous"))
+_CAMEL_PREFIX = frozenset(("is", "has", "was", "are", "looks", "seems", "be"))
+_RATING_PIECES_SPLIT = re.compile(r"[\s_./:=\-#@()\[\]{}!?,;'\"]+")
+_CAMEL = re.compile(r"[A-Z]+(?=[A-Z][a-z])|[A-Z]?[a-z]+|[A-Z]+|\d+")
+_WORD = re.compile(r"(?<![\w./\-#@])[^\W\d_]+(?![\w./\-#@(])")
+# K6 r7 M2: beside a SCOPE word a UI noun that names no UI (`(NG except docs)`, `(OK only)`) is a verdict — never one
+# followed by the UI thing it names (`(OK button only)`, `(NG 버튼 제외)`, `(HTTP OK response only)`)
+_UI_VERDICT = re.compile(r"(?<![\w./\-#@])(?:ok|okay|ng)(?![\w./\-#@(])(?!\s*(?:buttons?|btns?|keys?|taps?|clicks?|labels?|"
+                         r"dialogs?|responses?|status|codes?|texts?|messages?|screens?|toasts?|버튼|키|탭|클릭|라벨|대화상자|"
+                         r"다이얼로그|응답|상태|코드|문구|메시지|표시|표기|화면|토스트|ボタン|キー|タップ|ラベル|ダイアログ|"
+                         r"レスポンス|応答|ステータス|コード|メッセージ|表示|画面|トースト))", re.I)
+_CJK_RATING = re.compile(r"안전(?!망)|위험|安全(?!網)|危険")      # 안전망 / 安全網 = a safety net (a domain noun)
+
+
+def rating_word(text):
+    """K6 r7 M2: does `text` (outside its code spans) hold a standalone rating word — `RATING_WORDS` in any case (the
+    UI nouns `ok` / `okay` / `ng` excepted), `RATING_WEAK` in upper case — or one of the CJK rating stems (안전 · 위험 ·
+    安全 · 危険, also inside a longer word: `안전하게`, `危険度`; never 안전망 / 安全網)? Identifier pieces are
+    `_rating_piece`'s; a word glued to `. / - # @ (` is part of an identifier, never read here. `RATING_CAPS` (`PASS`,
+    `FAIL` — a test verdict a descriptive AC line states: "스크립트가 PASS 한다") are read only inside an aside / a
+    dropped tail (`clause_kind` via `_literal` / `_rating_caps`), never in a whole label."""
+    t = _CODE_SPAN.sub(" ", str(text or ""))
+    for w in _WORD.findall(t):
+        f = w.casefold()
+        if f in RATING_WORDS and f not in RATING_UI_NOUNS:
+            return True
+        if len(w) > 1 and w.isupper() and f in RATING_WEAK:
+            return True
+    return bool(_CJK_RATING.search(t))
+
+
+def _camel_rates(w):
+    parts = [x.casefold() for x in _CAMEL.findall(w)]
+    if len(parts) < 2:
+        return False
+    if parts[0] in _CAMEL_PREFIX and parts[1] in RATING_WORDS:
+        return True
+    return any(x in _CAMEL_STRONG for x in parts)
 
 
 def _rating_piece(x):
     """K6 r6 m3(b): does an identifier-shaped text carry a rating word (`RATING_WORDS`) as one of its pieces? The
-    `RATING_WEAK` words never by themselves (`high_score`), only as the value of a rating word (`risk_low`)."""
-    return any(w.casefold() in RATING_WORDS for w in _RATING_PIECES_SPLIT.split(str(x or "")) if w)
+    `RATING_WEAK` words never by themselves (`high_score`), only as the value of a rating word (`risk_low`).
+    K6 r7 m3: the pieces split at `# @ ( )` too (`#safe`, `@safe`, `safe()`); an upper-case `RATING_CAPS` piece
+    (`IS_APPROVED`); a rating KEY with a value piece (`safety=high`, `confidence: high`, `danger: none`); camelCase
+    (`isSafe`, `RiskyChoice` — `_camel_rates`; `SafeArea` stays a name)."""
+    pieces = [w for w in _RATING_PIECES_SPLIT.split(str(x or "")) if w]
+    folded = [w.casefold() for w in pieces]
+    if any(f in RATING_WORDS for f in folded):
+        return True
+    if any(w.isupper() and len(w) > 1 and f in RATING_CAPS for w, f in zip(pieces, folded)):
+        return True
+    if any(f in RATING_KEYS for f in folded) and any(f in _RATING_VALUES or re.fullmatch(r"\d+(?:\.\d+)?", f)
+                                                     for f in folded if f not in RATING_KEYS):
+        return True
+    return any(_camel_rates(w) for w in pieces)
 
 
 def _rating_caps(w):
-    """K6 r6 m3(a): an upper-case word that is a rating word in lower case — never an acronym literal."""
+    """K6 r6 m3(a): an upper-case word that is a rating word in lower case — never an acronym literal. K6 r7 m3: the
+    upper-case-only verdict stems (`RATING_CAPS`: `PASS`, `FAIL`, `APPROVED`, `DANGEROUS` …) too."""
     w = w.strip("`'\"“”‘’()[]{}.,;")
-    return w.isupper() and w.casefold() in (RATING_WORDS | RATING_WEAK)
+    return len(w) > 1 and w.isupper() and w.casefold() in (RATING_WORDS | RATING_WEAK | RATING_CAPS)
 
 
 def _ident_shaped(x):
@@ -515,6 +598,15 @@ def clause_kind(text):
     bare = _CODE_SPAN.sub(" ", t)
     sc = bool(_SCOPE.search(bare))
     spans = _CODE_SPAN.findall(t)
+    if _SCOPE_REF.search(t):
+        # K6 r7 m3: "in scope" / "out of scope" / `IN_SCOPE` / 요구사항 범위 — a scope relative to the request: refused
+        return "other"
+    if spans and bare.strip(" ()（）[]【】") and not _SPAN_JOIN.sub("", bare.strip(" ()（）[]【】")):
+        # K6 r7 m3: spans joined only by separators (`` `safe`/`ok` ``, `` `A`·`B` ``) — a span that rates (a plain
+        # rating word, an upper-case verdict, a rating piece) refuses the clause; identifiers stay as r6 reads them
+        inner = [x.strip("`").strip() for x in spans]
+        if any(_rating_caps(x) or _rating_piece(x) or (not _ident_shaped(x) and rates(x)) for x in inner):
+            return "other"
     if spans and not bare.strip(" ()（）[]【】"):
         # K6 r4 m4: a clause made of code spans only — a number inside one still rates (`(`90%`)`, `(`p=0.9`)`), and a
         # bare number (`(`0.9`)`, `(`2`)`) is no identifier: refused, never shown as a literal (a line reference
@@ -535,8 +627,13 @@ def clause_kind(text):
         # K6 r5 m4: a clause about what the source named / listed ("unnamed screens too", "언급 안 된 것도") states a
         # scope relative to the source even without a scope word — never cut silently, never shown: refused
         return "other"
-    if rates(bare):
+    if _rates_by_phrase(bare) or (sc and (rating_word(bare) or _UI_VERDICT.search(bare))):
+        # K6 r7 M2: beside a scope word a standalone list word rates too ("(safe only)", "(risky without more info)");
+        # without one, a clause rated only by a list word goes on as in r6 (a remark when it speaks of the reading,
+        # else refused — "(safe)", "(`안전`)" are never cut silently)
         return "scope-rating" if sc else "remark"
+    if sc and any(_rating_caps(x.strip("`")) or _rating_piece(x.strip("`")) for x in spans):
+        return "scope-rating"     # K6 r7 M2: a rating piece in a span beside a scope word (`` (`low-risk` only) ``)
     if _literal(t):
         return "scope"
     ref = bool(_REMARK_REF.search(bare))
