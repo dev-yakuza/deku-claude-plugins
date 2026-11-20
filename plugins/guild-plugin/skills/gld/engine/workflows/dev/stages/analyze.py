@@ -20,8 +20,9 @@ L0-KICKOFF, SJ-STAKES, §3.3 AN-PO).
         work needed" → attended `ask close-decided`, unattended `ambiguity:` pause
     K6 r3 M1 / K6 r4: a reading answer (readiness / interpretation-surface) is carried as the READING captured when
         the question was asked (content on its pending block — `reading_<token>` → `analysis.apply_reading`: readings,
-        tokens, `chosen`, footprint) — the judge is told which; a judge that does not take it (by content —
-        `analysis.judge_took`), or a capture that does not parse, pauses with `reask` (ask the reading again) / `stop`.
+        tokens, `chosen`, footprint) — the judge is told which; a judge that does not take it (K6 r5/r6: the fixed id
+        `person-reading`, refuted by exact text equality only — `analysis.judge_took`), or a capture that does not
+        parse, pauses with `reask` (ask the reading again) / `stop`.
         Of two unapplied reading answers the one to the LATEST question is carried; the older is retired with it.
         KICKOFF / STAKES questions are asked openly (user decision 2026-11-20 — `predict.OPEN_GROUPS`).
     A6  readiness gate: attended — unclear → `ask readiness` (options = interpretations), surface →
@@ -339,6 +340,7 @@ def run(p, only=None, config_present=True):
                 "human answer %s to %s question %s: the person chose the reading «%s». Take it: list it among "
                 "`interpretations` with the id `%s` (exactly this id — no other reading may use it) and this summary, "
                 "and set `chosen` to `%s`; `areas`, `ui_surface`, `cast`, `work_type` and the AC are this reading's. "
+                "Never put another reading's summary under that id, nor this summary under another id. "
                 "Any other `chosen` stops the run for the person." % (
                     res.id, kind, q.id, ent.get("summary"), pid, pid))
         else:

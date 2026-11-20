@@ -561,8 +561,9 @@ def apply_judgments(common, rows, repo, version, irreversible=lambda row: False,
     st.setdefault("watch", {})
     st.setdefault("streak", {})
     sync_releases(common, st)
+    revoked = []
     if candidates is not None:
-        UV.note_candidates(st, candidates)            # K6 r1 m1: no release while a candidate of the group is open
+        revoked = UV.note_candidates(st, candidates, now=_now())   # K6 r1 m1 / r6 m1: open again, release revoked
     dropped = UV.drop_gone(st, gone, _now()) if gone else []      # K6 r3 m3
     unread_keys = list(unread or ())
     for n_, ids in sorted((logs or {}).items()):                   # K6 r3 m3: `dev grade` reconciles its scope
@@ -630,6 +631,8 @@ def apply_judgments(common, rows, repo, version, irreversible=lambda row: False,
         out["candidates_unread"] = sorted(set(noted))      # K6 r5 m7: `dev health` shows them with the way out
     if released:
         out["unverified_released"] = sorted(set(released))
+    if revoked:
+        out["unverified_release_revoked"] = sorted(set(revoked))   # K6 r6 m1
     return out
 
 
@@ -813,22 +816,31 @@ def trust_of(item):
     return "member" if a in markers.TRUSTED else "outsider"
 
 
-def drop_candidate(common, key, reason):
+def drop_candidate(common, key, reason, force=False):
     """K6 r5 m7: `dev grade --drop-candidate <issue/D-id> --reason <why>` — the person drops an open candidate nothing
     can judge any more (logged in the group's `dropped` with `by: human` and the reason); then the release check (it
-    may have been the last hold). A reason is required."""
+    may have been the last hold). A reason is required. K6 r6 m1: only a candidate whose log is UNREAD (`unread` ≥ 1);
+    a readable one needs `--force` (recorded), and a dropped candidate listed again by a later `dev grade` is open
+    again (a release after the drop is revoked — `UV.note_candidates`)."""
     import re as _re
     if not _re.fullmatch(r"[0-9]+/D[0-9]+(?::a[0-9]+)*", str(key or "")):
         return {"error": "--drop-candidate takes <issue>/<D-id> (as `dev health` lists it), e.g. 4/D9"}
     if not str(reason or "").strip():
         return {"error": "--drop-candidate needs --reason <why> (recorded with the drop)"}
     st = load_state(common)
-    dropped = UV.drop_by_human(st, key, reason.strip(), _now())
-    if not dropped:
+    why = UV.drop_refused(st, key, force)
+    if why == "not-open":
         return {"error": "%s is not an open candidate of any unverified group (dev health lists them)" % key}
+    if why == "readable":
+        return {"error": "%s: its Issue log reads fine (never unread) — judge it on the grading sheet (`dev grade` → "
+                         "import); the way out is for a candidate whose log is gone. To drop it anyway: "
+                         "--force --reason <why> (recorded; it opens again if a later dev grade lists it)" % key}
+    dropped = UV.drop_by_human(st, key, reason.strip(), _now(), force=force)
     released = UV.release_check(st, _now())
     J.atomic_write(state_path(common), json.dumps(st, sort_keys=True, indent=1))
     out = {"candidates_dropped": dropped, "by": "human", "reason": reason.strip()}
+    if force:
+        out["forced"] = True
     if released:
         out["unverified_released"] = sorted(set(released))
     return out
@@ -838,7 +850,7 @@ def main(d, a):
     from guildcore import emit
     common = d.common()
     if getattr(a, "drop_candidate", None):
-        res = drop_candidate(common, a.drop_candidate, getattr(a, "reason", None))
+        res = drop_candidate(common, a.drop_candidate, getattr(a, "reason", None), force=bool(getattr(a, "force", False)))
         emit.engine(res, out=d.out)
         return 64 if "error" in res else 0
     if a.import_csv:

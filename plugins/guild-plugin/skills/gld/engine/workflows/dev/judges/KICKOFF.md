@@ -16,7 +16,7 @@ citations, candidate areas). You decide; the explorer only gathered.
   the id `person-reading` (exactly this id, for that reading only) and the summary the line gives, set `chosen` to
   `person-reading`, and write `areas`, `ui_surface`, `cast`, `work_type` and the AC for it — not for the reading you
   would have chosen. The engine runs the person's stored reading under that id; any other `chosen` stops the run
-  for the person.
+  for the person, and so does another reading's summary under that id or the person's summary under another id.
 - `readiness.<goal|constraint|success>.rating`: `clear` | `partial` | `unclear` | `unsure` (RD rules):
   `partial` ONLY when something in reach points at one reading — give it as `anchor`:
   `{cite: "path:line", quote}` (a repo file line the engine re-reads; quote must be on those lines ±3)

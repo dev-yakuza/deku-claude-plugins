@@ -190,15 +190,20 @@ class M1JudgeTookByContent(unittest.TestCase):
         """re-lettering × the pick it keeps × verbatim / re-worded summaries. K6 r5 M1: taking is STRUCTURAL — only
         `chosen` = the fixed engine id counts; the person's summary verbatim under any letter is no evidence."""
         ent = self.CAP[0]                                   # the person's reading: B = 앱 전체
-        for letters in ("same", "swapped", "fixed"):
+        # K6 r6 M1: + "fixed-other-text" — the fixed id over the OTHER reading's text, the person's text under `A`
+        # (verbatim: refuted by exact equality; re-worded: no equality to see — taken, as any re-wording is)
+        for letters in ("same", "swapped", "fixed", "fixed-other-text"):
             for words in (SUMM, REWORD):
                 for takes in (True, False):
                     ids = {"A": "A", "B": "B"} if letters == "same" else {"A": "B", "B": "A"} \
                         if letters == "swapped" else {"A": "A", "B": AN.PERSON_READING_ID}
-                    interps = [{"id": ids[r], "summary": words[r]} for r in ("A", "B")]
+                    texts = dict(words)
+                    if letters == "fixed-other-text":
+                        texts = {"A": words["B"], "B": words["A"]}
+                    interps = [{"id": ids[r], "summary": texts[r]} for r in ("A", "B")]
                     chosen = ids["B"] if takes else ids["A"]
                     got = AN.judge_took({"chosen": chosen, "interpretations": interps}, ent, self.CAP)
-                    want = takes and letters == "fixed"
+                    want = takes and (letters == "fixed" or (letters == "fixed-other-text" and words is REWORD))
                     with self.subTest(letters=letters, reworded=words is REWORD, takes=takes):
                         self.assertEqual(got, want)
 

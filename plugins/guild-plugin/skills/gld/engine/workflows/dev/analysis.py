@@ -557,6 +557,11 @@ def reading_capture(k, root, roster, extra_areas=(), net=False, globs=None):
 
 READING_MORE = "reading-areas-"    # K6 r5 m3: continuation values `reading-areas-<token>-<n>` (the rest of the areas)
 MORE_PLACEHOLDER = 999
+# K6 r6 m2: the continuation values of ONE pending block together — well under the decision log's rollover (60,000;
+# a single block is never split, and GitHub refuses a comment over 65,536). With ≤ 5 readings of ≤ READING_CAP each
+# and the question's own fields, a block stays ≈ 45k at most. A reading whose rest would pass it keeps its head only
+# (`more: true` — the conservative superset at `apply_reading`; nothing narrows).
+CONTINUATION_BUDGET = 30000
 
 
 def _dump(e):
@@ -568,8 +573,11 @@ def capture_fields(capture):
     """The pending-block fields carrying `capture` as content — one compact JSON value per reading. K6 r5 m3: nothing
     is lost to the value cap — a reading whose JSON is over it keeps the head of its areas (ordered: irreversible /
     harness first — `order_areas`) and carries the rest in continuation values `reading-areas-<token>-<n>` (each a
-    JSON list under the cap), `more: <n>` naming how many; `captured` puts them back together."""
+    JSON list under the cap), `more: <n>` naming how many; `captured` puts them back together.
+    K6 r6 m2: the continuation values of the whole block stay within `CONTINUATION_BUDGET`; a reading whose rest would
+    pass it is carried as its head with `more: true` (read back as a head only → the conservative superset)."""
     out = {}
+    spent = 0
     for e in capture or ():
         e = dict(e)
         txt = _dump(e)
@@ -590,8 +598,13 @@ def capture_fields(capture):
                 chunks.append(cur)
             e["more"] = len(chunks)
             assert sum(len(c) for c in chunks) + len(e["areas"]) == len(areas)
+            cost = sum(len(_dump(c)) + len(READING_MORE) + len(str(e["token"])) + 8 for c in chunks)
             if not chunks:
                 e.pop("more")
+            elif spent + cost > CONTINUATION_BUDGET:
+                e["more"] = True               # K6 r6 m2: over the block budget — a head only (the superset fallback)
+                chunks = []
+            spent += sum(len(_dump(c)) + len(READING_MORE) + len(str(e["token"])) + 8 for c in chunks)
             for n, c in enumerate(chunks, 1):
                 out["%s%s-%d" % (READING_MORE, e["token"], n)] = _dump(c)
             txt = _dump(e)
@@ -718,24 +731,55 @@ def widen_reading(k, fp):
 # K6 r5 M1 / m1: the person's reading is handed to the judge under this FIXED engine id (never the judge's earlier id —
 # a judge re-letters freely and may list its own reading under that letter) with the reading's exact text. Taking it
 # is STRUCTURAL: `chosen` is this id. The engine then runs the STORED reading (the capture's summary and footprint —
-# `apply_reading`), whatever words the judge gives it, so a re-wording costs nothing (m1) and the judge's own text can
-# never put another scope under the person's name (M1: "로그인 화면만" ← "로그인 화면 제외" — text closeness cannot see
-# a negation, so no text is evidence of taking).
+# `apply_reading`), whatever words the judge gives it, so a re-wording costs nothing (m1). Text closeness is never
+# evidence of taking ("로그인 화면만" ← "로그인 화면 제외" — closeness cannot see a negation).
+# K6 r6 M1: but exact (normalised) EQUALITY is decidable and is evidence against: the judge's text under the fixed id
+# that IS another captured reading's text, or the person's reading's text under another id, is the judge putting
+# another reading under the person's name — not taken. What stays unchecked is the judge's AC / readiness under a
+# taken id (they are the judge's words for "this reading"): their fidelity to the person's reading is checked only
+# post hoc (the KICKOFF grading-sheet row, the design stage) — k6-notes r6.
 PERSON_READING_ID = "person-reading"
 
 
+def _same_text(judge_text, cap_text):
+    """K6 r6 M1: equal after normalisation (NFKC, whitespace, case, a trailing full stop) — never closeness. A captured
+    summary is stored cut (300 / 120 characters): a judge's longer text that starts with such a cut summary is the
+    same text."""
+    import unicodedata
+
+    def n(x):
+        x = " ".join(unicodedata.normalize("NFKC", str(x or "")).split()).casefold()
+        return x.rstrip(" .。")
+    j, c = n(judge_text), n(cap_text)
+    if not c or not j:
+        return False
+    return j == c or (len(str(cap_text or "")) >= 120 and j.startswith(c))
+
+
 def judge_took(fields, ent=None, capture=()):
-    """Did this run's KICKOFF judge take the person's reading? K6 r5 M1: by STRUCTURE only — its `chosen` is the
-    fixed engine id `PERSON_READING_ID` and exactly one of its `interpretations` carries that id. Any other id (the
-    judge's earlier letter included), the id absent or listed twice → not taken (user decision 2026-11-20: pause).
-    `ent` / `capture` are no longer read (the stored reading is what runs — `apply_reading`); kept for callers."""
+    """Did this run's KICKOFF judge take the person's reading? K6 r5 M1: by STRUCTURE — its `chosen` is the fixed
+    engine id `PERSON_READING_ID` and exactly one of its `interpretations` carries that id. Any other id (the judge's
+    earlier letter included), the id absent or listed twice → not taken (user decision 2026-11-20: pause).
+    K6 r6 M1: two exact-equality refutations (`_same_text`, no closeness): (a) the summary under the fixed id equals
+    another captured reading's summary (`capture` other than `ent` — one whose text is not the person's own); (b) the
+    person's reading's summary (`ent`) appears under any other id of the judge's list."""
     f = fields or {}
     norm = lambda x: " ".join(str(x or "").split()).casefold()              # noqa: E731
     pid = PERSON_READING_ID.casefold()
     if norm(f.get("chosen")) != pid:
         return False
-    mine = [i for i in (f.get("interpretations") or []) if isinstance(i, dict) and norm(i.get("id")) == pid]
-    return len(mine) == 1
+    items = [i for i in (f.get("interpretations") or []) if isinstance(i, dict)]
+    mine = [i for i in items if norm(i.get("id")) == pid]
+    if len(mine) != 1:
+        return False
+    own = (ent or {}).get("summary") or ""
+    others = [e.get("summary") for e in capture or () if isinstance(e, dict) and e is not ent
+              and e.get("token") != (ent or {}).get("token") and not _same_text(e.get("summary"), own)]
+    if any(_same_text(mine[0].get("summary"), o) for o in others):
+        return False                       # (a) another offered reading's text under the person's id
+    if own and any(_same_text(i.get("summary"), own) for i in items if norm(i.get("id")) != pid):
+        return False                       # (b) the person's reading's text under another id
+    return True
 
 
 def canon_key(interp):

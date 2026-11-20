@@ -400,7 +400,17 @@ _REF_ACT = re.compile(r"(?:언급|명시|기재|거론|지목|열거|나열|명�
                       r"(?:言及|明記|明示|記載|列挙|名指し|指名)\s*(?:された|されて|され|の(?:ある|ない)|済み|なし|あり)|"
                       r"(?:挙げ|書か|書い|示さ|触れ)(?:られた|れた|た|ていない|ない|れていない)|"
                       r"\b(?:un)?(?:named|mentioned|listed|stated|specified|cited|referenced|enumerated|quoted)\b|"
-                      r"\bcalled[- ]out\b|\bspelled[- ]out\b|\bnot\s+(?:named|mentioned|listed|stated|specified|cited)\b", re.I)
+                      r"\bcalled[- ]out\b|\bspelled[- ]out\b|\bnot\s+(?:named|mentioned|listed|stated|specified|cited)\b|"
+                      # K6 r6 m3(c): the act of ASKING as a modifier, and "outside what was asked" — 요구된 · 요청받은 ·
+                      # 의뢰한 · 요구 밖 · 依頼外 · 要望以外 · 頼まれた · unrequested · out of the request (a bare
+                      # 요구사항 / 依頼一覧 / `required field` is a noun, not an act of reference; 주문/注文 left out —
+                      # an order is a shop's product noun: "주문한 상품만")
+                      r"(?:요구|요청|의뢰)\s*(?:된|한|받은|하지\s*않은|되지\s*않은|안\s*된|대로)(?![가-힣])|"
+                      r"(?:요구|요청|의뢰)\s*(?:밖|외|이외|범위\s*(?:밖|외))|"
+                      r"(?:依頼|要望|要求)\s*(?:外|以外|範囲外|された|されて|され(?:ていない|なかった)|の(?:ある|ない))|"
+                      r"頼ま(?:れた|れて|れていない|れなかった)|"
+                      r"\b(?:un|not\s+|non-)(?:requested|asked(?:\s+for)?|required)\b|"
+                      r"\bout(?:side)?\s+(?:of\s+)?(?:the\s+)?(?:request|ask|requested\s+scope)\b", re.I)
 # (원문 / 原文 are not on it: a quiz's or a translation's "original text" is a product noun — measured, k6-notes r5)
 _SOURCE_SYN = re.compile(r"타이틀|티켓|件名|チケット|\btickets?\b|\bOP\b|\boriginal\s+post\b", re.I)
 _NEGATION = re.compile(r"않|없이|아니|n't|not|no|never|しない|せず", re.I)   # a scope match that only negates
@@ -440,6 +450,8 @@ def _literal(t):
             continue
         if re.match(r"^[0-9.,:]+$", w):
             continue                                     # a bare number next to an identifier (`status: 401`)
+        if _rating_caps(w) or _rating_piece(w):
+            return False                                 # K6 r6 m3: `SAFE`, `LGTM`, `is_safe=true` rate
         if _LIT_TOKEN.fullmatch(w) and re.search(r"[A-Za-z]", w) and \
                 (re.search(r"[0-9_./#:+$<>=*·↔→&|@]", w) or re.search(r"[a-z][A-Z]", w) or re.match(r"^[A-Z]{2,}s?$", w)):
             ident = True
@@ -449,6 +461,31 @@ def _literal(t):
 
 
 _CODE_LITERALS = ("null", "nil", "none", "true", "false", "undefined", "nan", "void")
+# K6 r6 m3(a)(b): the words that RATE an option whatever their case or wrapping — an upper-case one is no acronym
+# (`SAFE`, `RISKY`, `LGTM`, `NG`, `HIGH`), and one as a piece of an identifier-shaped span (`low-risk`, `risk: low`,
+# `is_safe=true`, `risk_low` — the pieces between `_ . / : = -` and spaces) rates as the plain word does. CamelCase is
+# not split (`SafeArea` is a widget name, not a rating).
+RATING_WORDS = frozenset((
+    "safe", "safer", "safest", "unsafe", "risk", "risks", "risky", "riskier", "riskiest", "lgtm", "ng", "ok", "okay",
+    "good", "bad", "wrong", "correct", "incorrect", "recommended", "preferred", "likely", "unlikely",
+    "안전", "위험", "추천", "권장", "安全", "危険", "推奨"))
+# words that rate only beside one of the above inside an identifier (`risk_high`) — alone they are everyday identifier
+# pieces (`high_score`, `best_time`, `low_memory`, `fine_grained`); upper-case alone (`HIGH`, `BEST`) they rate
+RATING_WEAK = frozenset(("high", "low", "medium", "best", "better", "worse", "worst", "fine", "ideal", "optimal",
+                         "poor", "weak", "strong"))
+_RATING_PIECES_SPLIT = re.compile(r"[\s_./:=\-]+")
+
+
+def _rating_piece(x):
+    """K6 r6 m3(b): does an identifier-shaped text carry a rating word (`RATING_WORDS`) as one of its pieces? The
+    `RATING_WEAK` words never by themselves (`high_score`), only as the value of a rating word (`risk_low`)."""
+    return any(w.casefold() in RATING_WORDS for w in _RATING_PIECES_SPLIT.split(str(x or "")) if w)
+
+
+def _rating_caps(w):
+    """K6 r6 m3(a): an upper-case word that is a rating word in lower case — never an acronym literal."""
+    w = w.strip("`'\"“”‘’()[]{}.,;")
+    return w.isupper() and w.casefold() in (RATING_WORDS | RATING_WEAK)
 
 
 def _ident_shaped(x):
@@ -457,6 +494,8 @@ def _ident_shaped(x):
     `:3180-3218`), a code literal (`null`, `true`), a symbol without letters (`,`), or several words (a quoted name or
     phrase — `Single PR`, `수렴 뒤 …`). A single plain word (`safe`, `high`, `ok`, `ng`) is read as that word."""
     x = str(x or "").strip()
+    if x and (_rating_caps(x) or _rating_piece(x)):
+        return False                       # K6 r6 m3(a)(b): `SAFE`, `low-risk`, `risk: low`, `is_safe=true` — read
     if not x or re.search(r"\s", x) or not re.search(r"[^\W\d_]", x):
         return True
     return bool(re.search(r"[_./()\[\]{}:#$<>=*\\@0-9-]", x) or re.search(r"[a-z][A-Z]", x)

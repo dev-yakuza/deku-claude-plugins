@@ -37,6 +37,11 @@
 * K6 r5 m7 — an open candidate whose Issue log shows NO engine block (r4 m6: never reconciled away) is counted
   `unread` (consecutive times; a read log resets it) and `report` shows it with the way out: the person's
   `dev grade --drop-candidate <issue/D-id> --reason <why>` (`drop_by_human` — `dropped` with `by: human` and the reason).
+* K6 r6 m1 — that way out is for an UNREAD candidate only (`unread` ≥ 1): a candidate whose log reads fine is a
+  decision a person can still judge on the sheet; dropping it anyway needs `--force` (recorded `forced: true`). A
+  release reached while human drops stand records them (`after_human_drop`); a human-dropped candidate that a later
+  `dev grade` lists again is OPEN again (`reopened`), and when the group's release came after that drop the release is
+  REVOKED (`release_revoked` — the group runs the conservative path again until the candidate is judged).
 * State: `grade-state.json` → `unverified: {group: {"n", "wrong", "open", "points", "dropped", "released_at"}}` (local,
   like `watch`).
 * The live Ports read the pending set once per run (`ports.fsm_factory` → `p.unverified`); test harnesses that
@@ -123,23 +128,41 @@ def _key(row):
     return "%s/%s" % (row.get("issue"), row.get("decision_id"))
 
 
-def note_candidates(st, cands, path=FILE):
+def note_candidates(st, cands, path=FILE, now=None):
     """K6 r1 m1: `dev grade` lists the wrong candidates still waiting for a person (blind disagreements not yet
     confirmed, and — K6 r2 M1 — the inherent-gate sheet rows). K6 r2 m1: MERGED into each unverified group's `open`
     set, never replaced — a `dev grade` reads only its scope (`--sprint T` / `--issues N,M`), and an older scope's
-    unjudged candidate must keep holding the release; only the person's import of that row removes it (`count`)."""
+    unjudged candidate must keep holding the release; only the person's import of that row removes it (`count`).
+    K6 r6 m1: a candidate the person dropped (`by: human`) that is listed again is open again (`reopened`); a release
+    reached after that drop (`after_human_drop`) is revoked (`release_revoked`). Returns the revoked groups."""
     groups = unverified(path)
     by = {}
     for c in cands or ():
         g = canonical(c.get("group"))
         if g in groups:
             by.setdefault(g, set()).add(_key(c))
+    revoked = []
     for g in groups:
         u = st.setdefault("unverified", {}).get(g)
         if u is None and g not in by:
             continue
         u = st["unverified"].setdefault(g, {"n": 0, "wrong": 0})
         u["open"] = sorted(set(u.get("open") or ()) | by.get(g, set()))
+        back = sorted(set(d.get("key") for d in (u.get("dropped") or ()) if d.get("by") == "human")
+                      & by.get(g, set()))
+        if not back:
+            continue
+        was = [d for d in u.get("dropped") or () if d.get("by") == "human" and d.get("key") in back]
+        u.setdefault("reopened", []).extend({"key": d.get("key"), "at": now, "drop": d} for d in was)
+        u["dropped"] = [d for d in u.get("dropped") or () if d not in was]
+        hit = sorted(set(back) & set(u.get("after_human_drop") or ()))
+        if hit and u.get("released_at"):
+            u.setdefault("release_revoked", []).append(
+                {"released_at": u.pop("released_at"), "at": now, "keys": hit,
+                 "why": "a candidate the person dropped is listed again — it holds the release until judged"})
+            u.pop("after_human_drop", None)
+            revoked.append(g)
+    return revoked
 
 
 INHERENT_MODE = "inherent-gate"         # the sheet row of an INHERENT gate question (`grade.inherent_row`)
@@ -188,18 +211,36 @@ def open_keys_of(st, issue):
                       if k.partition("/")[0] == str(issue)))
 
 
-def drop_by_human(st, key, reason, now):
+def drop_refused(st, key, force=False):
+    """K6 r6 m1: why the person's drop of `key` is refused — "not-open" (open nowhere), "readable" (open, but its log
+    was read: never `unread` — a person can judge it on the sheet; `force` overrides), or None."""
+    groups = [u for u in (st.get("unverified") or {}).values() if key in (u.get("open") or ())]
+    if not groups:
+        return "not-open"
+    if not force and not any(int((u.get("unread") or {}).get(key) or 0) >= 1 for u in groups):
+        return "readable"
+    return None
+
+
+def drop_by_human(st, key, reason, now, force=False):
     """K6 r5 m7: the person's way out for an open candidate nothing can judge any more (its Issue's decision log is
     gone — deleted comments, a changed association): `dev grade --drop-candidate <issue/D-id> --reason <why>`. Removed
     from every group's `open` and recorded in `dropped` with `by: human` and the reason. Returns [{group, key}] (empty
-    when the key is open nowhere). A reason is required (the caller refuses an empty one)."""
+    when the key is open nowhere). A reason is required (the caller refuses an empty one).
+    K6 r6 m1: only an UNREAD candidate (`drop_refused`); `force` drops a readable one (recorded `forced: true`)."""
+    if drop_refused(st, key, force):
+        return []
     out = []
     for g, u in sorted((st.get("unverified") or {}).items()):
         if key not in (u.get("open") or ()):
             continue
+        n_unread = int((u.get("unread") or {}).get(key) or 0)
         u["open"] = [k for k in u["open"] if k != key]
         (u.get("unread") or {}).pop(key, None)
-        u.setdefault("dropped", []).append({"key": key, "why": str(reason)[:300], "by": "human", "at": now})
+        d = {"key": key, "why": str(reason)[:300], "by": "human", "at": now, "unread": n_unread}
+        if force and n_unread < 1:
+            d["forced"] = True
+        u.setdefault("dropped", []).append(d)
         out.append({"group": g, "key": key})
     return out
 
@@ -288,6 +329,9 @@ def _release(u, now, path=FILE):
     if int(u.get("n") or 0) >= int(shipped(path).get("release_after") or 5) and not u.get("wrong") \
             and not u.get("open"):
         u["released_at"] = now
+        hd = sorted(set(d.get("key") for d in (u.get("dropped") or ()) if d.get("by") == "human"))
+        if hd:
+            u["after_human_drop"] = hd          # K6 r6 m1: released while these human drops stand
         return True
     return None
 
@@ -306,8 +350,12 @@ def report(common, path=FILE):
                     "dropped": [d.get("key") for d in (u.get("dropped") or ())],
                     # K6 r5 m7: the person's drops (with the reason) and the candidates whose log shows no engine
                     # block (n times in a row) — the way out is the person's
-                    "dropped_by_human": [{"key": d.get("key"), "reason": d.get("why"), "at": d.get("at")}
+                    "dropped_by_human": [{"key": d.get("key"), "reason": d.get("why"), "at": d.get("at"),
+                                          "forced": bool(d.get("forced"))}
                                          for d in (u.get("dropped") or ()) if d.get("by") == "human"],
+                    # K6 r6 m1: a release reached while human drops stood, and a release a re-listed drop revoked
+                    "after_human_drop": list(u.get("after_human_drop") or ()) if u.get("released_at") else [],
+                    "release_revoked": list(u.get("release_revoked") or ()),
                     "unread": dict((k, n) for k, n in sorted((u.get("unread") or {}).items())
                                    if k in (u.get("open") or ())),
                     "way_out": ("an open candidate whose Issue log shows no engine block holds the release — if that "

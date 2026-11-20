@@ -95,8 +95,12 @@ class M1Structural(unittest.TestCase):
             ent = {"token": "i1", "orig": "B", "summary": person}
             for other in ("앱 전체 다크 모드", "dark theme on every screen of the app", ""):
                 with self.subTest(person=person, words=words, other=other):
-                    self.assertTrue(AN.judge_took(_fields(PID, PID, words, other_text=other), ent, [ent]))
-                    self.assertTrue(AN.judge_took(_fields(" Person-Reading ", PID, words), ent, [ent]))   # case/space
+                    # K6 r6 M1(b): the person's own text under another id refutes taking — the r5 table's default
+                    # other reading "앱 전체 다크 모드" IS the person's text in one row (that row is now not taken)
+                    same = AN._same_text(other, person)
+                    self.assertEqual(AN.judge_took(_fields(PID, PID, words, other_text=other), ent, [ent]), not same)
+                    self.assertEqual(AN.judge_took(_fields(" Person-Reading ", PID, words), ent, [ent]),   # case/space
+                                     not AN._same_text("앱 전체 다크 모드", person))
 
     def test_fixed_id_absent_other_pick_or_twice_pauses(self):
         ent = {"token": "i1", "orig": "B", "summary": "x"}
@@ -411,6 +415,8 @@ class m7WayOut(unittest.TestCase):
                                                                                 given_info="")])
         self.assertEqual(CLI.main(["grade", "--drop-candidate", "8/D9"], e.d), 64)
         self.assertIn("--reason", e.lines()[-1])
+        # K6 r6 m1: the way out is for an UNREAD candidate — its log showed no engine block once
+        G.apply_judgments(e.common, [], "o/r", "predict-first", logs={8: set()})
         self.assertEqual(CLI.main(["grade", "--drop-candidate", "8/D9", "--reason", "log deleted"], e.d), 0)
         res = json.loads(e.lines()[-1].split(">>> ENGINE <<<")[-1])
         self.assertEqual((res["by"], res["candidates_dropped"][0]["key"]), ("human", "8/D9"))

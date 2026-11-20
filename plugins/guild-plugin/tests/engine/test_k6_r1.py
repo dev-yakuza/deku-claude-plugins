@@ -310,7 +310,10 @@ class M4Labels(unittest.TestCase):
         # neither shown nor dropped — the label refuses (None: the question is not blind, never counted)
         # K6 r3 m5: a strong guard — exactly these three are refused (unclassifiable); every other label shows its head
         # (a regression to "refuse everything" fails here)
-        refused = ("アプリ全体（やりすぎ）", "Login only (narrow but safe)", "Whole app (more than needed)")
+        # K6 r6 m3(c): "outside the request" (요청 범위 밖) is a scope relative to the source by the act of asking —
+        # refused like r5's act of naming (its pair "(요청 범위 안)" stays a cut remark: the question is refused)
+        refused = ("アプリ全体（やりすぎ）", "Login only (narrow but safe)", "Whole app (more than needed)",
+                   "앱 전체 (요청 범위 밖)")
         for s in HELD_OUT_R1:
             with self.subTest(label=s):
                 if s in refused:
