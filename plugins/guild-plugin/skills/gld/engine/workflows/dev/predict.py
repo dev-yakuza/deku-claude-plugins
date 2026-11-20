@@ -296,11 +296,26 @@ def evaluative(text):
     return bool(PREFERENCE.search(text) or NEGATIVE.search(text) or LIKELIHOOD.search(text) or FIT.search(text))
 
 
+# K6 r3 m1: a number / symbol that RATES — a percentage, a score `9/10`, stars, check / cross marks, a letter grade
+# with a sign (`A+`, `B-`), a rank (`#1` alone, `1st`, `1위`, `1位`) — never a scope, whatever the word lists say
+NUM_RATING = re.compile(r"\d+(?:[.,]\d+)?\s*[%％]|(?<![\w./])\d+(?:\.\d+)?\s*/\s*\d+(?:\.\d+)?(?![\w./])|"
+                        r"[★☆⭐✓✔✗✘○◎△◯●❌✅👍👎]|(?<![A-Za-z0-9_])[A-F][+\-]{1,2}(?![A-Za-z0-9_])|"
+                        r"(?<![\w#])\d+(?:st|nd|rd|th)\b|\d+\s*(?:위|등|位|番目)|"
+                        r"(?:^|\s)#\d{1,2}(?:\s|$)|\b(?:rank|top|tier)\s*-?\s*\d+\b|\bP[0-4]\b", re.I)
+
+
+def num_rating(text):
+    """K6 r3 m1: does `text` (outside its code spans) carry a numeric / symbolic rating (`NUM_RATING`)?"""
+    return bool(NUM_RATING.search(_CODE_SPAN.sub(" ", str(text or ""))))
+
+
 def rates(label):
     """K5r6-M2: does an option label rate its option (how likely / good / fitting)? — preference, likelihood and
-    rating words; a plain negation that describes the option ("설정 화면은 바꾸지 않는다") is not a rating."""
+    rating words; a plain negation that describes the option ("설정 화면은 바꾸지 않는다") is not a rating. K6 r3 m1:
+    a numeric / symbolic rating (`num_rating`: `90%`, `9/10`, `★★★`, `✓`, `A+`, `#1`) rates too."""
     t = str(label or "")
-    return bool(PREFERENCE.search(t) or LIKELIHOOD.search(t) or NEG_RATING.search(t) or FIT.search(t))
+    return bool(PREFERENCE.search(t) or LIKELIHOOD.search(t) or NEG_RATING.search(t) or FIT.search(t)
+                or num_rating(t))
 
 
 _CLAUSE = re.compile(r"\s*[(（\[][^)）\]]*[)）\]]|\s*(?:—|–|--| - |;|；|:|：|,|、|，)[^—–;；:：,、，(（]*")
@@ -328,48 +343,100 @@ _SCOPE = re.compile(r"제외|빼고|말고|(?:\S)만(?=$|\s|[)）\]】,.、])|(?
                     r"\bonly\b|\bexcept|\bexclud|\bwithout\b|\bnever\b|\bnot\b|n't\b|\bno\b|\bkeep|\bkept\b|\bretain|"
                     r"\bpreserv|\binclud|\bincl\.|\ball\b|\bwhole\b|\bentire|\bevery\b|\bpartial|\bsoft\b|\bhard\b|"
                     r"\bread-only\b|\blimited\b|\bsolely\b", re.I)
-_REMARK_REF = re.compile(r"제목|본문|요청|이슈|설명|의도|취지|해석|근거|문구|작성자|보고자|뜻하|말하는|원한|원하는|읽|"
-                         r"タイトル|本文|依頼|要望|要求|説明|趣旨|意図|解釈|読み|読む|根拠|文言|"
-                         r"\btitle|\bissue\b|\bticket\b|\brequest|\breporter|\bauthor\b|\bdescription\b|\bbody\b|"
-                         r"\bintent|\bmeant\b|\breading\b|\breads\b|\binterpret|\bevidence\b|\bbasis\b|\bask(?:ed|s)?\b|"
-                         r"\bsays?\b|\bsaid\b|\bmention|\bwritten\b|\bwording\b|\bliteral", re.I)
+# K6 r3 M3: a REMARK speaks of the Issue / the reading. Two strengths:
+#   READING  the reading itself (intent · interpretation · "asks" · "says" · wording · literal …) — a remark even inside
+#            a scope clause ("only what the request asks" → neither shown nor dropped: refused);
+#   SOURCE   a reference TO the Issue's text ("the request", "the title", "requested", "제목이 말하는", "요청대로",
+#            "タイトル通り") — a remark only when the clause states no scope: a scope word wins over it.
+# The bare product nouns the source is made of (제목 · 본문 · 설명 · 이슈 · 요청 · title · body · description · issue ·
+# request · タイトル · 本文 · 依頼 …) are an app's everyday domain nouns too (a post's 본문, an issue tracker's issue, API
+# requests) and are no remark by themselves: "(본문 편집기 제외)", "(write requests only)", "（依頼通知のみ）" are scope
+# clauses and shown; "(셸 주석에 이슈번호가 있으면 게이트가 차단)" is neither → refused, never cut.
+_REMARK_REF = re.compile(r"의도|취지|해석|근거|문구|뜻하|말하는|원한|원하는|읽(?!기\s*전용)|"
+                         r"趣旨|意図|解釈|読み(?!取り専用|込み)|読む|根拠|文言|"
+                         r"\bintent|\bmeant\b|\breading\b|\breads\b|\binterpret|\bevidence\b|\bbasis\b|"
+                         r"\bask(?:ed|s)?\b|\bsays?\b|\bsaid\b|\bmention|\bwritten\b|\bwording\b|\bliteral", re.I)
+_SOURCE_REF = re.compile(r"(?:제목|본문|요청|이슈|설명|보고)\s*(?:이|가|은|는|에서|에|과|와|의)?\s*"
+                         r"(?:말하|요구|원하|적힌|적은|쓰인|명시|언급|범위|그대로|대로|기준|따르|따른|맞)|"
+                         r"요청(?:한|된|받은|하는)|요청자|작성자|보고자|"
+                         r"(?:제목|본문|요청|이슈|설명)\s*(?:과|와)\s*(?:거리|다르|다름|어긋|일치|들어|가깝|멀)|"
+                         r"依頼者|要望者|報告者|起票者|"
+                         r"(?:タイトル|本文|依頼|要望|説明|イシュー)\s*(?:が|の)?\s*(?:示|求め)|"
+                         r"(?:タイトル|本文|依頼|要望|説明|イシュー)\s*と\s*(?:ずれ|違|異な|一致|合)|"
+                         r"(?:タイトル|本文|依頼|要望|要求|説明|イシュー|報告)\s*(?:の|に|が|で)?\s*"
+                         r"(?:範囲|通り|どおり|沿|記載|書|言)|"
+                         r"\bthe\s+(?:title|issue|ticket|request|body|description|report|reporter|author)\b|"
+                         r"\b(?:requested|described|reported|titled)\b|"
+                         r"\bper\s+(?:the\s+)?(?:title|issue|ticket|request|body|description)\b", re.I)
+_NEGATION = re.compile(r"않|없이|아니|n't|not|no|never|しない|せず", re.I)   # a scope match that only negates
 _CLAUSES = re.compile(r"\s*[,、，;；]\s*")
 _CLOSE = {"(": ")", "（": "）", "[": "]", "【": "】"}
 
 
 _CODE_SPAN = re.compile(r"`[^`]*(?:`|$)")
+# K6 r3 m5: a code span is never cut into — its brackets, commas, colons and dashes (`Get.back()`, `jq '.[]'`,
+# `foo(a, b)`) are masked to private-use characters while the asides / clauses are found, and restored after
+_MASK_SRC = "()（）[]【】,、，;；:：—–-"
+_MASK = dict((c, chr(0xE000 + n)) for n, c in enumerate(_MASK_SRC))
+_UNMASK = dict((v, k) for k, v in _MASK.items())
+
+
+def _mask(s):
+    return _CODE_SPAN.sub(lambda m: "".join(_MASK.get(c, c) for c in m.group(0)), str(s or ""))
+
+
+def _unmask(s):
+    return s if not s else "".join(_UNMASK.get(c, c) for c in s)
+
+
 _LIT_TOKEN = re.compile(r"[A-Za-z0-9_./#:+\-~%$<>=!*·↔→&|@]+")
 
 
 def _literal(t):
-    """K6 r2 M3: a clause made only of code spans, numbers, paths, identifiers (`_runAutoSync`, `v2.0`, `#1684`, `CSV`,
-    `iOS/Android`, `status: 401`) — no natural-language word that could rate: shown as it is."""
+    """K6 r2 M3: a clause made only of code spans, paths, identifiers, versions (`_runAutoSync`, `v2.0`, `CSV`,
+    `iOS/Android`, `status: 401`) — no natural-language word that could rate: shown as it is. K6 r3 m1: at least one
+    code span or LETTER-bearing identifier; numbers, `%`, stars, checks, grades and ranks alone (`(90%)`, `(#1)`,
+    `(★★★)`, `(✓)`, `(9/10)`, `(A+)`, `(C)`) are no literal (and `num_rating` refuses them first)."""
+    ident = bool(_CODE_SPAN.search(t))
     rest = _CODE_SPAN.sub(" ", t)
     for w in rest.split():
         w = w.strip("'\"“”‘’()[]{}.,;")
-        if not w or re.match(r"^[^\w]+$", w):
+        if not w or re.match(r"^[-–—/·,;:.|&+]+$", w):
             continue
-        if _LIT_TOKEN.fullmatch(w) and (re.search(r"[0-9_./#:+$<>=*·↔→&|@]", w) or re.search(r"[a-z][A-Z]", w)
-                                        or re.match(r"^[A-Z]{2,}s?$", w)):
+        if re.match(r"^[0-9.,:]+$", w):
+            continue                                     # a bare number next to an identifier (`status: 401`)
+        if _LIT_TOKEN.fullmatch(w) and re.search(r"[A-Za-z]", w) and \
+                (re.search(r"[0-9_./#:+$<>=*·↔→&|@]", w) or re.search(r"[a-z][A-Z]", w) or re.match(r"^[A-Z]{2,}s?$", w)):
+            ident = True
             continue
         return False
-    return True
+    return ident
 
 
 def clause_kind(text):
-    """K6 r2 M3: "remark" | "scope" | "scope-rating" | "other" for one clause of an aside / a dropped tail (a literal —
-    `_literal` — counts as scope: it is shown)."""
-    t = str(text or "").strip()
+    """K6 r2 M3: "remark" | "scope" | "scope-rating" | "other" for one clause of an aside / a dropped tail.
+    K6 r3: the order is (1) a numeric / symbolic rating (`num_rating`) → refused ("scope-rating" with a scope word,
+    else "other" — never cut silently, never shown); (2) a rating word (`rates`) → "scope-rating" with a scope word,
+    else "remark" (cut); (3) a literal (`_literal`) → "scope" (shown); (4) a SCOPE word wins over a product noun —
+    "scope", unless it also speaks of the reading (`_REMARK_REF`: "only what the request asks") → "other"; (5) a
+    reading remark or a reference to the source (`_SOURCE_REF`) → "remark"; (6) anything else → "other"."""
+    t = _unmask(str(text or "")).strip()
     if not t:
         return "remark"
+    bare = _CODE_SPAN.sub(" ", t)
+    sc = bool(_SCOPE.search(bare))
+    if num_rating(t):
+        return "scope-rating" if sc else "other"
+    if FIT.search(bare) and all(_NEGATION.fullmatch(m.group(0).strip()) for m in _SCOPE.finditer(bare)):
+        return "remark"          # "(제목과 어울리지 않음)", "(the title does not mention login)": a fit remark, negated
+    if rates(bare):
+        return "scope-rating" if sc else "remark"
     if _literal(t):
         return "scope"
-    sc = bool(_SCOPE.search(t)) and not _REMARK_REF.search(t)
-    if rates(t):
-        return "scope-rating" if sc else "remark"
-    if _REMARK_REF.search(t):
-        return "remark"
-    return "scope" if sc else "other"
+    ref = bool(_REMARK_REF.search(bare))
+    if sc:
+        return "other" if ref else "scope"
+    return "remark" if ref or _SOURCE_REF.search(bare) else "other"
 
 
 def _kept_clauses(inner):
@@ -387,7 +454,7 @@ def _kept_clauses(inner):
 def aside_split(label):
     """K6 r2 M3: (the label with each aside reduced to its SCOPE clauses — remarks cut — , refuse?) — refuse when an
     aside holds a clause that can be neither shown nor dropped (`clause_kind` other / scope-rating)."""
-    lb = str(label or "")
+    lb = _mask(label)
     refuse = [False]
 
     def one(m):
@@ -406,7 +473,7 @@ def aside_split(label):
         refuse[0] = refuse[0] or bad
         return (" %s %s" % (dash, ", ".join(kept))) if kept else ""
     out = _ASIDE.sub(one, lb).strip(" —–-;:,、")
-    return out, refuse[0]
+    return _unmask(out), refuse[0]
 
 
 def aside_cut(label):
@@ -431,7 +498,7 @@ def blind_labels(labels):
         return nl
     if any(x is None for x in nl):
         return nl
-    parts = [_HEAD_SPLIT.split(x, 1) for x in nl]
+    parts = [_HEAD_SPLIT.split(_mask(x), 1) for x in nl]
     heads = [pp[0].strip() for pp in parts]
     keys = [re.sub(r"\s+", " ", h).strip().lower() for h in heads]
     if all(keys) and len(set(keys)) == len(keys) and not any(rates(h) for h in heads):
@@ -441,8 +508,8 @@ def blind_labels(labels):
                 out.append(h)
                 continue
             kept, bad = _kept_clauses(re.sub(r"\s*[:：]\s*", ", ", pp[1]))
-            out.append(None if bad else (h + (", " + ", ".join(kept) if kept else "")))
-        return out
+            out.append(None if bad else _unmask(h + (", " + ", ".join(kept) if kept else "")))
+        return [_unmask(x) if x is not None else None for x in out]
     return nl
 
 
@@ -457,10 +524,11 @@ def neutral_label(label):
     if not rates(lb):
         return lb or None
     cut = []
-    out = _CLAUSE.sub(lambda m: _cut(m, cut), lb).strip(" —–-;:,、")
-    if not out or rates(out) or any(clause_kind(c.strip(" —–-;；:：,、，()（）[]")) == "scope-rating" for c in cut):
+    out = _CLAUSE.sub(lambda m: _cut(m, cut), _mask(lb)).strip(" —–-;:,、")
+    # K6 r3 m1: a cut clause must be a REMARK — a numeric rating (`other`) or a rated scope is refused, never dropped
+    if not out or rates(out) or any(clause_kind(c.strip(" —–-;；:：,、，()（）[]")) not in ("remark",) for c in cut):
         return None
-    return out
+    return _unmask(out)
 
 
 _PAREN = re.compile(r"^(\s*)([(（\[])([^)）\]]*)([)）\]])$")
@@ -573,6 +641,33 @@ def leak(p, q, stage=None, texts=()):
                 if f == "question" and b.get("status") == "pending-human" and b.get("recommended_sha"):
                     continue                                     # an earlier blind question passed this same check
                 return "decision-log %s" % b.id
+    if q.kind in READING_KINDS:
+        why = earlier_reading(p, log)
+        if why:
+            return why
+    return None
+
+
+READING_KINDS = ("readiness", "interpretation-surface")
+
+
+def earlier_reading(p, log):
+    """K6 r3 M2 (Issue-wide, not run-wide): a blind KICKOFF reading question is refused when this Issue already shows,
+    in plain text, what an EARLIER run read — a KICKOFF block with an open footprint (`areas` · `ui_surface` · `cast` ·
+    `work_type` · `safety_net_visual`: a run with no question, a run after an answer — the loop-back re-analysis case)
+    or an `analyze:output` (it names the chosen reading). Either can state this question's recommendation; the run
+    that stops before its gate (A4 / A5) seals its footprint instead (`kickoff_footprint_sealed(reveal=False)`), so the
+    first-time path stays blind. Returns why, or None."""
+    for b in log.blocks:
+        if b.get("point") == "KICKOFF" and any(b.get(f) not in (None, "") for f in KICKOFF_FOOTPRINT):
+            return "decision-log %s (an earlier KICKOFF footprint)" % b.id
+    try:
+        from guildcore.records import outputs as OUT
+        from workflows.dev.stages import base as B
+        if OUT.find(B.records(p), "analyze:output") is not None:
+            return "analyze:output (an earlier run named its reading)"
+    except Exception:                                            # noqa: BLE001 — unreadable: fail closed (K5r4-m2)
+        return "analyze:output unreadable"
     return None
 
 
@@ -773,11 +868,44 @@ KICKOFF_FOOTPRINT = ("work_type", "cast", "ui_surface", "safety_net_visual", "ar
 FOOTPRINT_WITHHELD = "(withheld until the person's blind answer — predict-first)"
 
 
-def kickoff_footprint_sealed(p, values):
+def kickoff_footprint_sealed(p, values, reveal=True):
     """The KICKOFF block's footprint while a blind interpretation question follows in the same run: one seal
     (`footprint_sha` — the values and the nonce journaled first) and a fixed placeholder, so the visible block is the
     same whichever reading the judge chose; the values ride with the question's withheld texts (revealed with the
-    answer) and the run after the answer writes them openly."""
+    answer) and the run after the answer writes them openly. K6 r3 M2: also when the run stops BEFORE its readiness
+    gate (A4 harness / A5 close question — `reveal=False`: that question's answer must not reveal it either; the
+    run that goes on writes the footprint of ITS reading — openly after a person's reading answer)."""
     txt = json.dumps(values, sort_keys=True, ensure_ascii=False, default=str)
-    p.__dict__.setdefault("_withheld_next", []).append("KICKOFF footprint: %s" % txt)
+    if reveal:
+        p.__dict__.setdefault("_withheld_next", []).append("KICKOFF footprint: %s" % txt)
     return {"footprint_sha": sealed(p, txt, "KICKOFF.footprint"), "footprint": FOOTPRINT_WITHHELD}
+
+
+def kickoff_readings_sealed(p, capture):
+    """K6 r3 M1: the readings a KICKOFF question chooses between (`analysis.reading_capture`), sealed for its pending
+    block (`readings_sha`) — revealed with the answer (`ask._reveal_fields`)."""
+    from guildcore import ask as ASK
+    if not capture or getattr(p, "journal", None) is None:
+        return None                 # no journal (a bare test harness — live Ports always journal): nothing could open it
+    return sealed(p, json.dumps(capture, sort_keys=True, ensure_ascii=False), ASK.READINGS_FIELD)
+
+
+def kickoff_readings(p, q, res):
+    """K6 r3 M1: the readings the pending KICKOFF question `q` chose between, as captured when it was asked — from this
+    clone's journal, else from the answer's resolution (`readings` + `readings_nonce`, checked against the seal).
+    Returns (capture | None, why): `why` = "legacy" (a question asked before r3 — no seal), "unavailable" (sealed but
+    neither source can open it), or None."""
+    from guildcore import ask as ASK
+    sha = q.get("readings_sha")
+    if not sha:
+        return None, "legacy"
+    v, _n = ASK.seal_value(getattr(p, "journal", None), sha, ASK.READINGS_FIELD)
+    if v is None and res is not None and ASK.seal_check(sha, res.get("readings"), res.get("readings_nonce")):
+        v = res.get("readings")
+    if v is None:
+        return None, "unavailable"
+    try:
+        cap = json.loads(v)
+    except ValueError:
+        return None, "unavailable"
+    return (cap if isinstance(cap, list) else None), (None if isinstance(cap, list) else "unavailable")

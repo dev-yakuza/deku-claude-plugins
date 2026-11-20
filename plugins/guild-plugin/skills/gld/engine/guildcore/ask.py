@@ -216,12 +216,39 @@ def _reveal(journal, qid):
     return {}
 
 
+def seal_value(journal, sha, field):
+    """(value, nonce) of a seal (`predict.sealed`: sha256(value + nonce), journaled before the block) — or
+    (None, None) when this journal does not hold it."""
+    if journal is None or not sha:
+        return None, None
+    for e in reversed(journal.entries):
+        if e.get("kind") == "event" and e.get("what") == "predict-first-seal" and e.get("field") == field:
+            v, n = e.get("value"), e.get("nonce")
+            if hashlib.sha256((str(v) + str(n)).encode("utf-8")).hexdigest() == sha:
+                return v, n
+    return None, None
+
+
+def seal_check(sha, value, nonce):
+    return bool(sha) and value is not None and \
+        hashlib.sha256((str(value) + str(nonce)).encode("utf-8")).hexdigest() == sha
+
+
+# K6 r3 M1: the KICKOFF readings a question chose between (`readings_sha` on its pending block) — revealed with the
+# answer (`readings` + `readings_nonce` on the resolution, checked against the seal) so a clone without this journal
+# still carries the person's reading as the reading itself
+READINGS_FIELD = "KICKOFF.readings"
+
+
 def _reveal_fields(journal, blk):
     """The reveal for a predict-first block; K5r3-m4: when the journal cannot reveal it (another clone, a crash
     between the block and `journal_qid`) the resolution says `reveal: unavailable` — §9.5 must not count it."""
     out = _reveal(journal, blk.id)
     if not out and blk.get("recommended_sha"):
         out = {"reveal": "unavailable"}
+    v, n = seal_value(journal, blk.get("readings_sha"), READINGS_FIELD)
+    if v is not None:
+        out = dict(out, readings=v, readings_nonce=n)
     return out
 
 

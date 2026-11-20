@@ -308,10 +308,17 @@ class M4Labels(unittest.TestCase):
     def test_asides_never_shown(self):
         # K6 r2 M3: a remark aside is cut; an aside the engine cannot classify ("(narrow but safe)", "（やりすぎ）") is
         # neither shown nor dropped — the label refuses (None: the question is not blind, never counted)
+        # K6 r3 m5: a strong guard — exactly these three are refused (unclassifiable); every other label shows its head
+        # (a regression to "refuse everything" fails here)
+        refused = ("アプリ全体（やりすぎ）", "Login only (narrow but safe)", "Whole app (more than needed)")
         for s in HELD_OUT_R1:
             with self.subTest(label=s):
-                self.assertIn(PF.neutral_label(s), ("로그인만", "앱 전체", "ログインのみ", "アプリ全体", "Login only", "Whole app",
-                                                    None))
+                if s in refused:
+                    self.assertIsNone(PF.neutral_label(s))
+                else:
+                    head = s.split(" (")[0].split("（")[0]
+                    self.assertIn(head, ("로그인만", "앱 전체", "ログインのみ", "アプリ全体", "Login only", "Whole app"))
+                    self.assertEqual(PF.neutral_label(s), head)
 
     def test_heads_when_they_tell_options_apart(self):
         self.assertEqual(PF.blind_labels(["export function, as the request reads", "quiz module: risky interpretation"]),

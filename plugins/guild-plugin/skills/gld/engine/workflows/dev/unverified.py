@@ -24,7 +24,14 @@
   yet judged by a person (`open` — merged by every `dev grade` across its scopes (K6 r2 m1), cleared only by the person's import of that row); a
   verdict imported after the release still counts (`n`, `wrong` — `dev health` shows a wrong after the release; the
   §9.5 count rule acts on it as on any group).
-* State: `grade-state.json` → `unverified: {group: {"n", "wrong", "open", "released_at"}}` (local, like `watch`).
+* K6 r3 m2 — an INHERENT group counts only its `inherent-gate` rows (one per question; the decision the answer
+  applied and a block a rule changed are no release verdicts — `counts`), and one decision point once (`points`: its
+  re-asks `:a<k>` are the same point — an `ok` is counted once, a `wrong` always).
+* K6 r3 m3 — an open candidate whose decision is GONE from the Issue's log (read, not found: an import `verify_rows`
+  rejects, or `dev grade` reconciling its scope) is dropped and recorded (`dropped`) — an unreadable log keeps it;
+  `report` lists the open keys (`issue/D-id`) so `dev health` names what holds a release.
+* State: `grade-state.json` → `unverified: {group: {"n", "wrong", "open", "points", "dropped", "released_at"}}` (local,
+  like `watch`).
 * The live Ports read the pending set once per run (`ports.fsm_factory` → `p.unverified`); test harnesses that
   build Ports themselves start with none.
 """
@@ -122,6 +129,54 @@ def note_candidates(st, cands, path=FILE):
         u["open"] = sorted(set(u.get("open") or ()) | by.get(g, set()))
 
 
+INHERENT_MODE = "inherent-gate"         # the sheet row of an INHERENT gate question (`grade.inherent_row`)
+
+
+def point_of(refs):
+    """K6 r3 m2: the decision point of a conservative-gate question's `refs` — its re-asks (`:a<k>`) are the same point."""
+    import re
+    return re.sub(r"(?::a[0-9]+)+$", "", str(refs or ""))
+
+
+def drop_gone(st, gone, now):
+    """K6 r3 m3: open candidates whose decision is GONE from the Issue's log (read, not found — `grade.verify_rows`) are
+    reconciled away: nothing is left for a person to judge, and keeping them held the release forever. Recorded per
+    group (`dropped`: key, why, when) and returned [{group, key}]."""
+    keys = set("%s/%s" % (x.get("issue"), x.get("decision_id")) for x in gone or ())
+    out = []
+    for g, u in sorted((st.get("unverified") or {}).items()):
+        hit = [k for k in (u.get("open") or ()) if k in keys]
+        if not hit:
+            continue
+        u["open"] = [k for k in u["open"] if k not in hit]
+        u.setdefault("dropped", []).extend({"key": k, "why": "gone from the Issue's decision log", "at": now}
+                                           for k in hit)
+        out += [{"group": g, "key": k} for k in hit]
+    return out
+
+
+def reconcile(st, issue, log_ids, now):
+    """K6 r3 m3: `dev grade` — the open candidates of `issue` (its log READ: `log_ids`) whose D-id the log no longer
+    has are dropped as `drop_gone` does."""
+    gone = []
+    for _g, u in sorted((st.get("unverified") or {}).items()):
+        for k in u.get("open") or ():
+            i, _s, did = k.partition("/")
+            if str(i) == str(issue) and did not in log_ids:
+                gone.append({"issue": i, "decision_id": did})
+    return drop_gone(st, gone, now)
+
+
+def release_check(st, now, path=FILE):
+    """The groups that reach their release now (after open candidates were reconciled)."""
+    out = []
+    for g in unverified(path):
+        u = (st.get("unverified") or {}).get(g)
+        if u is not None and _release(u, now, path):
+            out.append(g)
+    return out
+
+
 def counts(row, source):
     """Does this human verdict count toward the release of its group? — a predict-first answer's verdict, or (K6 r1
     M6) for a SHEET_RELEASED group the person's own sheet verdict (`source` = the import version `human`; K6 r2 M1:
@@ -133,7 +188,12 @@ def counts(row, source):
         # K6 r2 M1: a sheet-released group counts the person's sheet verdicts — for an inherent gate group only on its
         # non-conservative pick (a verdict on a conservative `block` / `gap` releases nothing)
         need = SHEET_CHOICE.get(g)
-        return source == "human" and (need is None or (row.get("choice") or "").strip() == need)
+        if need is not None:
+            # K6 r3 m2: only the inherent-gate row (one per question; the decision the answer applied, or a block a
+            # rule changed, is no release verdict) on the non-conservative pick
+            return source == "human" and (row.get("mode") or "") == INHERENT_MODE and \
+                (row.get("choice") or "").strip() == need
+        return source == "human"
     return False
 
 
@@ -150,6 +210,11 @@ def count(st, row, now, path=FILE, source=None):
         u["open"] = [k for k in u["open"] if k != _key(row)]
     if gi not in ("ok", "wrong") or not counts(row, source):
         return g if gi in ("ok", "wrong", "unsure") and _release(u, now, path) else None
+    pk = row.get("point_key")
+    if pk and gi == "ok" and pk in (u.get("points") or ()):
+        return g if _release(u, now, path) else None      # K6 r3 m2: this decision point already counted
+    if pk:
+        u["points"] = sorted(set(u.get("points") or ()) | {pk})
     u["n"] = int(u.get("n") or 0) + 1
     if gi == "wrong":
         u["wrong"] = int(u.get("wrong") or 0) + 1
@@ -177,6 +242,9 @@ def report(common, path=FILE):
         u = st.get(g) or {}
         out.append({"group": g, "counted": int(u.get("n") or 0), "wrong": int(u.get("wrong") or 0),
                     "open_candidates": len(u.get("open") or ()), "released_at": u.get("released_at"),
+                    # K6 r3 m3: WHICH Issue / D-id holds the release (and what was reconciled away)
+                    "open": sorted(u.get("open") or ()),
+                    "dropped": [d.get("key") for d in (u.get("dropped") or ())],
                     "wrong_after_release": int(u.get("wrong_after_release") or 0),
                     "release_by": "sheet verdicts" if g in SHEET_RELEASED else "blind answers"})
     return out

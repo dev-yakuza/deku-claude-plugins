@@ -255,7 +255,11 @@ class Attended(unittest.TestCase):
 
     def test_answer_overriding_recommendation_is_applied_and_captured(self):
         from guildcore import ask as ASK
-        h = K4(self, unattended=False, roles=[evidence(self)], judges={"KICKOFF": [kickoff(goal="unclear"), kickoff(goal="unclear")]})
+        # K6 r3 M1: the run after the answer carries the person's reading (B = "hide the count") — its judge takes it
+        # (`chosen` B); a judge that keeps its own pick pauses instead (test_k6_r3.M1ReadingCarried)
+        k2 = kickoff(goal="unclear")
+        k2.fields["chosen"] = "B"
+        h = K4(self, unattended=False, roles=[evidence(self)], judges={"KICKOFF": [kickoff(goal="unclear"), k2]})
         h.p.journal = h.journal                    # K6: the nonce of the hidden recommendation lives in the journal
         r = A.run(h.p)
         res_id = ASK.answer(h.decisions, h.writer, h.n, r.qid, "i1", journal=h.journal)

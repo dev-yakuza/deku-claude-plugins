@@ -93,7 +93,9 @@ def run(logs, out_dir, sample=400):
                                   "cut": sum(1 for x in desc if x["cut"]) / n},
            "evaluative_paraphrases": {"n": len(ev), "leaked": [x["text"] for x in ev if not x["rates"]]},
            "descriptive_mirror": {"n": len(dd), "false_refusals": [x["text"] for x in dd if x["refused"] or x["cut"]]},
-           "flagged_descriptive_lines": [x for x in desc if x["rates"]]}
+           "flagged_descriptive_lines": [x for x in desc if x["rates"]],
+           # K6 r3 m5: every line whose blind form differs (cut) — to read WHAT was cut, not only how many
+           "cut_lines": [{"text": x["text"], "shown": x["shown"]} for x in desc if x["cut"]]}
     os.makedirs(out_dir, exist_ok=True)  # fs-ok: report dir chosen by the caller
     with open(os.path.join(out_dir, "label_audit.json"), "w", encoding="utf-8") as fh:
         json.dump(rep, fh, indent=1, ensure_ascii=False)

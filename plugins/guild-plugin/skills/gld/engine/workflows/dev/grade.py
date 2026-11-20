@@ -18,7 +18,11 @@ Human judgments (§9.5 "사람 판정 = 블라인드 채점표 답 + predict-fir
   K6 r2 M1: a conservative-gate question of a group with ONE non-conservative option (`conservative.INHERENT`) exists
   only because the judge chose that option — its answer is neither an `ok` nor a candidate; every such question is a
   sheet row (`mode: inherent-gate`, `choice` = the judge's pick, `inherent_row`) the person grades on the evidence,
-  open (holding the §10.2-6 release) until imported.
+  open (holding the §10.2-6 release) until imported. K6 r3 m4: the row carries the Issue's post-hoc evidence and never
+  the person's own earlier answer (nor the resolution that holds it).
+* K6 r3 M2: a STAKES block written before a blind KICKOFF question carries `irreversible_sha` (sealed) — §9.5 reads
+  the reveal block the run after the answer writes (`block_irreversible`); a seal nothing revealed counts as
+  irreversible (the stricter class).
 
 Selection (deterministic — `(repo, issue, D-id)` hash, never random):
 * only L0/SJ decisions the engine made (`by: judge:*` / `leader:*`); a decision a person already decided (an
@@ -278,7 +282,7 @@ def predict_first_judgments(blocks, issue):
     return counted, cands
 
 
-INHERENT_MODE = "inherent-gate"
+INHERENT_MODE = UV.INHERENT_MODE
 
 
 def _inherent_group(q):
@@ -305,22 +309,26 @@ def inherent_row(q, r, issue):
     return {"decision_id": q.id, "issue": issue, "stage": q.get("stage") or "", "group": g, "mode": INHERENT_MODE,
             "choice": rec, "coerced": "false", "coerced_by": "", "unsure": "false",
             "irreversible": "true" if q.get("irreversible") == "true" else "", "outcome": "",
-            "note": "resolution %s" % r.id,
-            "reason": "inherent gate: asked only because the engine chose %s; the person answered %s" % (rec, ch),
+            # K6 r3 m4: the row never shows the person's own earlier answer (the grader-human verdict is on the
+            # engine's pick and the post-hoc evidence — `dev grade` appends the Issue's evidence summary, as for
+            # every pass-1 row), and the resolution is not named (it carries the answer)
+            "note": "",
+            "reason": "inherent gate: the engine chose %s (the one non-conservative option)" % rec,
             "given_info": "",
             "evidence": "inherent-gate verdict — grade the engine's %s on the evidence (ok = it was right, wrong = it "
-                        "was not); the question's existence revealed it, so the answer was no blind judgment" % rec}
+                        "was not)" % rec}
 
 
-def sheet_rows(selected, mode, evidence):
+def sheet_rows(selected, mode, evidence, blocks_of=None):
     rows = []
     for issue, b, why in selected:
+        irr = block_irreversible(b, blocks_of(issue) if blocks_of else ())
         rows.append({"decision_id": b.id, "issue": issue, "stage": b.get("stage") or "", "group": group_of(b),
                      "mode": mode, "choice": b.get("raw_choice") or b.get("choice") or "",
                      "reason": " ".join((b.get("reason") or "").split())[:300],
                      "coerced": b.get("coerced") or "false", "coerced_by": b.get("coerced_by") or "",
                      "unsure": b.get("unsure") or "false",
-                     "irreversible": "true" if b.get("irreversible") == "true" else "",
+                     "irreversible": "true" if irr else "",
                      "evidence": "%s; %s" % (why, evidence(issue)),
                      "given_info": "", "outcome": "", "note": ""})
     return rows
@@ -385,7 +393,25 @@ def irreversible_row(row):
     return str(row.get("irreversible") or "").strip().lower() == "true"
 
 
-def engine_view(b):
+def block_irreversible(b, blocks=()):
+    """§9.5 rule 2's irreversible mark of a block: `irreversible: true`; K6 r3 M2: a SEALED mark (`irreversible_sha` —
+    a STAKES block written before a blind KICKOFF question) reads its reveal block (`point: reveal`, value + nonce
+    checked against the seal); a seal nothing revealed (a `stop`, a clone without the journal) counts as
+    irreversible — the stricter class, never the laxer."""
+    if b.get("irreversible") == "true":
+        return True
+    sha = b.get("irreversible_sha")
+    if not sha:
+        return False
+    from guildcore import ask as ASK
+    for x in blocks or ():
+        if x.get("point") == "reveal" and x.get("refs") == b.id and x.get("field") == "irreversible" and \
+                ASK.seal_check(sha, x.get("irreversible"), x.get("nonce")):
+            return x.get("irreversible") == "true"
+    return True
+
+
+def engine_view(b, blocks=()):
     """(group, irreversible) the engine's OWN record says for a sheet row's D-id — a decision block, or the pending
     block of a predict-first question (K5r6-m2)."""
     if b.get("status") == "pending-human":
@@ -396,7 +422,7 @@ def engine_view(b):
         g = PF.group_of(_Q(), b.get("stage"))
     else:
         g = group_of(b)
-    return g, (g in IRREVERSIBLE or b.get("irreversible") == "true")
+    return g, (g in IRREVERSIBLE or block_irreversible(b, blocks))
 
 
 def verify_rows(rows, blocks_of):
@@ -413,13 +439,17 @@ def verify_rows(rows, blocks_of):
             if n not in cache:
                 cache[n] = dict((b.id, b) for b in blocks_of(n))
             b = cache[n].get(r.get("decision_id"))
+            why = "no such decision in the engine's log"
         except Exception:                                        # noqa: BLE001 — unreadable = not verified
-            b = None
+            b, why = None, "the Issue's decision log is unreadable"
         if b is None:
-            rejected.append({"decision_id": r.get("decision_id"), "issue": r.get("issue"),
-                             "why": "no such decision in the engine's log"})
+            # K6 r3 m3: `gone` = the log was READ and has no such decision (comment edited / deleted / no longer
+            # trusted, Issue moved) — nothing is left to judge, so its open candidate is reconciled away (reported);
+            # an unreadable log keeps it (transient)
+            rejected.append({"decision_id": r.get("decision_id"), "issue": r.get("issue"), "why": why,
+                             "gone": why.startswith("no such")})
             continue
-        g, irr = engine_view(b)
+        g, irr = engine_view(b, cache[n].values())
         if not g:
             rejected.append({"decision_id": r.get("decision_id"), "issue": r.get("issue"), "why": "no §9.5 group"})
             continue
@@ -432,10 +462,16 @@ def verify_rows(rows, blocks_of):
                 res = [x for x in cache[n].values() if x.get("resolves") == b.id and x.get("by") == "human"]
                 fixed["choice"] = (res[-1].get("recommended") if res else None) or b.get("recommended") or ""
                 fixed["mode"] = INHERENT_MODE
+                # K6 r3 m2: ONE decision point (its re-asks `:a<k>` included) is one verdict toward the release
+                fixed["point_key"] = "%s/%s" % (n, UV.point_of(b.get("refs") or b.id))
             else:
-                fixed["choice"] = b.get("raw_choice") or b.get("choice") or ""
+                # K6 r3 m2: any other block of the group (the decision the answer applied — `by: human`, the same
+                # decision as its gate question; a block a rule changed) is never a release verdict, and its choice
+                # is the EFFECTIVE one the person saw (`choice`), never the judge's `raw_choice`
+                fixed["choice"] = b.get("choice") or ""
                 if fixed.get("mode") == INHERENT_MODE:
                     fixed["mode"] = ""
+                fixed.pop("point_key", None)
         # K5r7-m5: a release forgives by DECISION time — K5r8-m4: the log's time only; none in the log = unknown
         # (no forgiveness), never the sheet's `decided_at` column
         fixed["decided_at"] = b.get("at") or ""
@@ -457,7 +493,8 @@ def import_sheet(common, text, repo, irreversible=irreversible_row, blocks_of=No
         rows, rejected = verify_rows(rows, blocks_of)
     else:                                                    # K5r8-m4: a sheet's own `decided_at` is not trusted
         rows = [dict(r, decided_at="") for r in rows]
-    res = apply_judgments(common, rows, repo, "human", irreversible)
+    res = apply_judgments(common, rows, repo, "human", irreversible,
+                          gone=[x for x in rejected if x.get("gone")])
     if rejected:
         res["rejected"] = rejected
     gv_rows = latest_grader_rows(common, repo)
@@ -495,7 +532,8 @@ def on_release(common):
         J.atomic_write(state_path(common), json.dumps(st, sort_keys=True, indent=1))
 
 
-def apply_judgments(common, rows, repo, version, irreversible=lambda row: False, candidates=None):
+def apply_judgments(common, rows, repo, version, irreversible=lambda row: False, candidates=None, gone=(),
+                    logs=None):
     """Human judgments (sheet rows or predict-first answers) → grades.jsonl (key (repo, issue, D-id, version),
     present keys skipped) → the count rules. K5r6-M3: `conservative` lists only groups whose valve is IN FORCE after
     this import (the count rule set it now, or it already was); a set the valves refused is `blocked_by_release`."""
@@ -507,6 +545,9 @@ def apply_judgments(common, rows, repo, version, irreversible=lambda row: False,
     sync_releases(common, st)
     if candidates is not None:
         UV.note_candidates(st, candidates)            # K6 r1 m1: no release while a candidate of the group is open
+    dropped = UV.drop_gone(st, gone, _now()) if gone else []      # K6 r3 m3
+    for n_, ids in sorted((logs or {}).items()):                   # K6 r3 m3: `dev grade` reconciles its scope
+        dropped += UV.reconcile(st, n_, ids, _now())
     released_at = VALVES.load(common)["human"].get("released_at") or {}
     blocked, forgiven, released = [], [], []
     n, cons, watch = 0, [], []
@@ -550,6 +591,8 @@ def apply_judgments(common, rows, repo, version, irreversible=lambda row: False,
             st["streak"][g] = st["streak"].get(g, 0) + 1
             if g in st["watch"] and st["streak"][g] >= WATCH_CLEAR_AFTER:
                 del st["watch"][g]
+    if dropped:
+        released += UV.release_check(st, _now())      # K6 r3 m3: a reconciled candidate may have been the last hold
     J.atomic_write(state_path(common), json.dumps(st, sort_keys=True, indent=1))
     eff = VALVES.effective(common, {})
     cons = [g for g in cons if eff.get("group.%s.conservative" % g.replace(":", "-")) not in (None, False)]
@@ -558,6 +601,8 @@ def apply_judgments(common, rows, repo, version, irreversible=lambda row: False,
         out["blocked_by_release"] = sorted(set(blocked))
     if forgiven:
         out["forgiven_by_release"] = forgiven
+    if dropped:
+        out["candidates_dropped"] = dropped
     if released:
         out["unverified_released"] = sorted(set(released))
     return out
@@ -766,10 +811,11 @@ def main(d, a):
         return 64
     by_issue, later_fn, ev_sum, ev_full, texts, ev_untr = {}, {}, {}, {}, {}, {}
     pf_rows, pf_cands = [], []
-    acs = {}
+    acs, logs = {}, {}
     for n in issues:
         tcs = markers.trusted(gh.comments(n), ())
         log = DecisionLog.load(tcs)
+        logs[n] = log.blocks
         acs[n] = ac_text(tcs)                                  # K6 item 11: call ① sees the Issue's AC
         gone = log.resolved_ids()
         by_issue[n] = [b for b in log.blocks if b.id not in gone or b.get("by") == "human"]
@@ -789,7 +835,8 @@ def main(d, a):
                     if g.get("repo") == repo and g.get("grader_version") == "human")
     pf_cands = [r for r in pf_cands if (str(r["issue"]), r["decision_id"]) not in confirmed]
     # `ok`s only (K5r5-M2); K6 r1 m1: the candidates still open hold back their group's §10.2-6 release
-    pf = apply_judgments(common, pf_rows, repo, "predict-first", candidates=pf_cands)
+    pf = apply_judgments(common, pf_rows, repo, "predict-first", candidates=pf_cands,
+                         logs=dict((n, set(b.id for b in bs)) for n, bs in logs.items()))
     watch = sorted((load_state(common).get("watch") or {}).keys())
     valves = VALVES.effective(common, d.env)
     cfg = d.config(d.toplevel())
@@ -809,8 +856,14 @@ def main(d, a):
     from workflows.dev import grader as GD
     gv = GD.version(((eng.get("grading") or {}).get("grader_model")) or GD.DEFAULT_TIER)
     sel = select(by_issue, repo, first, rate, later, grader=latest_grader_rows(common, repo, gv), watch=watch)
-    rows = sheet_rows(sel, "first-sprint" if first else "steady", lambda i: ev_sum.get(i) or "")
-    rows += [dict((c, r.get(c, "")) for c in COLUMNS) for r in pf_cands]   # K5r5-M2: a person confirms
+    rows = sheet_rows(sel, "first-sprint" if first else "steady", lambda i: ev_sum.get(i) or "",
+                      blocks_of=lambda i: logs.get(i) or ())
+    for r in pf_cands:                                                    # K5r5-M2: a person confirms
+        row = dict((c, r.get(c, "")) for c in COLUMNS)
+        if r.get("mode") == INHERENT_MODE:
+            # K6 r3 m4: an inherent-gate verdict is made on the post-hoc evidence, like every pass-1 row
+            row["evidence"] = "%s; %s" % (r.get("evidence") or "", ev_sum.get(r.get("issue")) or "")
+        rows.append(row)
     out_dir = a.out or os.path.join(J.engine_dir(common), "grading")
     os.makedirs(out_dir, exist_ok=True)  # fs-ok: the engine's grading sheet dir under <git-common-dir>/guild/engine or the person's --out
     tag = ("sprint-%s" % a.sprint) if a.sprint else "issues"
@@ -818,7 +871,8 @@ def main(d, a):
     J.atomic_write(os.path.join(out_dir, "%s.md" % tag), render_md(rows))
     emit.engine({"rows": len(rows), "csv": os.path.join(out_dir, "%s.csv" % tag), "first_sprint": first,
                  "predict_first": {"judgments": len(pf_rows), "imported": pf["imported"], "watch": pf["watch"],
-                                   "conservative": pf["conservative"], "candidates": len(pf_cands)},
+                                   "conservative": pf["conservative"], "candidates": len(pf_cands),
+                                   "candidates_dropped": pf.get("candidates_dropped") or []},
                  "watch": watch,
                  "graded": len(graded)}, out=d.out)
     return 0

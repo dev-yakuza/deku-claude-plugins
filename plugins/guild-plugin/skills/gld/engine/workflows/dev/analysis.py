@@ -259,15 +259,33 @@ def verify_anchor(anchor, root, sources, tracked=None):
 # ---- paths -------------------------------------------------------------------------------------
 
 def _glob_match(path, globs):
-    p = path.lstrip("./")
+    # K6 r3 (found with M4): `lstrip("./")` stripped the leading DOT of `.claude/…` too — the harness globs
+    # (`.claude/settings*.json`, `.claude/guild/gates/**`) never matched a path; only a `./` prefix is dropped now
+    p = str(path or "")
+    while p.startswith("./"):
+        p = p[2:]
     for g in globs:
         if fnmatch.fnmatch(p, g) or (g.startswith("**/") and fnmatch.fnmatch(p, g[3:])):
             return True
     return False
 
 
+# K6 r3 M4: an AREA is a directory (KICKOFF `areas`, the explorer's dirs — `real_dirs` strips the trailing `/`). A
+# directory glob (`**/migrations/**`, `**/db/**`, `.claude/guild/gates/**`) needs a path component AFTER the directory,
+# so the directory itself — `supabase/migrations`, `lib/db`, `migrations` — never matched: §3.2 "irreversible path →
+# never low" and the §9.5 irreversible class were dead for directory inputs. An area matches when the area itself, or
+# anything directly inside it, matches (`<area>/<probe>`); the probe holds no `.` so a file glob (`**/*.sql`,
+# `**/schema*.*`) does not match a plain directory by it.
+_DIR_PROBE = "_guild_area_probe_"
+
+
+def _area_match(path, globs):
+    p = str(path or "").strip().rstrip("/")
+    return bool(p) and (_glob_match(p, globs) or _glob_match(p + "/" + _DIR_PROBE, globs))
+
+
 def harness_hit(paths):
-    return sorted(set(p for p in paths if p and _glob_match(p, HARNESS_GLOBS)))
+    return sorted(set(p for p in paths if p and _area_match(p, HARNESS_GLOBS)))
 
 
 def harness_text_hit(texts):
@@ -280,8 +298,9 @@ def harness_text_hit(texts):
 
 
 def irreversible(paths, globs=None):
+    """§3.2 — the paths (files or directory AREAS — K6 r3 M4) that touch an irreversible glob."""
     gl = tuple(globs) if globs else IRREVERSIBLE_DEFAULT
-    return sorted(set(p for p in paths if p and _glob_match(p, gl)))
+    return sorted(set(p for p in paths if p and _area_match(p, gl)))
 
 
 def real_dirs(root, paths):
@@ -331,6 +350,7 @@ class Kickoff(object):
         self.areas = []
         self.close = {"decide": "none"}
         self.surface = {"ask": False}
+        self.own_footprints = {}      # token → the judge's raw interpretation entry (its own footprint — K6 r3 M1)
 
 
 def coerce_kickoff(fields, root, sources, net_lines, plan_lines, premise_unmet_dims, roster,
@@ -344,6 +364,7 @@ def coerce_kickoff(fields, root, sources, net_lines, plan_lines, premise_unmet_d
     order = sorted(range(len(interp)), key=lambda n: canon_key(interp[n]))
     k.interpretations = [{"id": "i%d" % (r + 1), "summary": str(interp[n].get("summary") or ""),
                           "orig": str(interp[n]["id"])[:40]} for r, n in enumerate(order)]
+    k.own_footprints = dict((k.interpretations[r]["id"], interp[n]) for r, n in enumerate(order))
     k.token_map = [{"token": i["id"], "orig": i["orig"]} for i in k.interpretations]
     # K5r4-M1: the judge's own ids are aliases of the engine tokens — case-insensitive (`I2` = `i2` to a reader)
     by_orig = dict((i["orig"].strip().casefold(), i["id"]) for i in k.interpretations)
@@ -442,6 +463,103 @@ def coerce_kickoff(fields, root, sources, net_lines, plan_lines, premise_unmet_d
     st = f.get("surface_to_human") or {}
     k.surface = {"ask": bool(st.get("ask")), "question": to_tokens(str(st.get("question") or ""), k.token_map)}
     return k
+
+
+# ---- K6 r3 M1: the person's reading, carried as the reading itself ------------------------------------------------
+# A blind KICKOFF answer is a TOKEN (`i2`) of the canonical order of THAT run's summaries; the next run's judge writes
+# new summaries (the order — and so the token — can flip) and its own footprint (`areas` · `ui_surface` · `cast` ·
+# `work_type`) is for the reading IT chose. So the question captures, at question time, every reading the person
+# chooses between — token, the judge's id, the summary and that reading's footprint — sealed (`readings_sha` on the
+# pending block; value + nonce journaled first, revealed in the answer's resolution). The run after the answer takes
+# the readings, `chosen` and the footprint from that capture (never from the new judge's token order), tells the judge
+# which reading the person chose, and pauses when the judge does not take it (its AC would be another reading's).
+# A reading's footprint: the judge's top-level fields for the reading it chose; for another reading its own fields
+# (`interpretations[].areas` / `ui_surface` / `cast` / `work_type`) when given, else the conservative superset (the
+# union of every known area — the explorer's directories too — and role; a UI surface, since none is known) — never
+# narrower than any reading.
+FOOT_KEYS = ("areas", "ui_surface", "cast", "work_type")
+
+
+def _own_cast(raw, roster):
+    installed = set(roster or ())
+    c = raw.get("cast") if isinstance(raw.get("cast"), dict) else None
+    if c is None:
+        return None
+    part = [r for r in c.get("participation") or [] if r in installed and r not in SPINE]
+    gates = [r for r in (list(c.get("gates") or []) + list(c.get("unresolved_gates") or []))
+             if r in installed and r in GATE_ROLES]
+    return sorted(set(part) - set(gates)), sorted(set(gates))
+
+
+def reading_capture(k, root, roster, extra_areas=()):
+    """[{token, orig, summary, areas, ui_surface, participation, gates, work_type}] — every reading of this KICKOFF
+    with its footprint (see above). `extra_areas` (the explorer's real directories) widen the superset."""
+    if not k.interpretations:
+        return []
+    owns = getattr(k, "own_footprints", {}) or {}
+    union_a = set(k.areas) | set(extra_areas or ())
+    union_p, union_g = set(k.cast["participation"]), set(k.cast["gates"])
+    per = {}
+    for i in k.interpretations:
+        raw = owns.get(i["id"]) or {}
+        a = real_dirs(root, raw.get("areas")) if isinstance(raw.get("areas"), list) else None
+        c = _own_cast(raw, roster)
+        u = bool(raw.get("ui_surface")) if isinstance(raw.get("ui_surface"), bool) else None
+        w = raw.get("work_type") if raw.get("work_type") in WORK_TYPES else None
+        per[i["id"]] = (a, c, u, w)
+        union_a |= set(a or ())
+        if c:
+            union_p |= set(c[0])
+            union_g |= set(c[1])
+    out = []
+    for i in k.interpretations:
+        a, c, u, w = per[i["id"]]
+        if i["id"] == k.chosen:
+            fp = {"areas": list(k.areas[:10]), "ui_surface": bool(k.ui_surface),
+                  "participation": list(k.cast["participation"]), "gates": list(k.cast["gates"]),
+                  "work_type": k.work_type}
+        else:
+            fp = {"areas": sorted(a if a is not None else union_a)[:10],
+                  "ui_surface": u if u is not None else True,      # unknown → the UI safety net (designer, visual)
+                  "participation": sorted(c[0] if c is not None else union_p - union_g),
+                  "gates": sorted(c[1] if c is not None else union_g),
+                  "work_type": w or k.work_type}
+        out.append(dict(fp, token=i["id"], orig=i["orig"][:40], summary=i["summary"][:300]))
+    return out
+
+
+def apply_reading(k, capture, token, root):
+    """The person's reading (`token` of the question-time `capture`) as THIS run's KICKOFF result: the readings,
+    tokens and aliases of that question, `chosen` = the person's, and its footprint (areas re-checked to exist).
+    Returns the captured entry, or None (the token is not one of the captured readings)."""
+    ent = next((e for e in capture or () if e.get("token") == token), None)
+    if ent is None:
+        return None
+    k.interpretations = [{"id": e["token"], "summary": e.get("summary") or "", "orig": e.get("orig") or ""}
+                         for e in capture]
+    k.token_map = [{"token": i["id"], "orig": i["orig"]} for i in k.interpretations]
+    k.aliases = dict((i["id"], [i["orig"], i["summary"]]) for i in k.interpretations)
+    k.chosen = token
+    k.areas = real_dirs(root, ent.get("areas") or [])
+    k.ui_surface = bool(ent.get("ui_surface"))
+    k.cast = {"participation": list(ent.get("participation") or []), "gates": list(ent.get("gates") or []),
+              "skipped": k.cast.get("skipped") or []}
+    if ent.get("work_type") in WORK_TYPES:
+        k.work_type = ent["work_type"]
+    return ent
+
+
+def judge_took(fields, ent):
+    """Did this run's KICKOFF judge take the person's reading `ent` as its `chosen`? — by the judge id the reading had
+    when asked (the brief names it), or by the same (whitespace / case-folded) summary."""
+    f = fields or {}
+    ch = str(f.get("chosen") or "").strip().casefold()
+    if ch and ch == str(ent.get("orig") or "").strip().casefold():
+        return True
+    norm = lambda x: " ".join(str(x or "").split()).casefold()              # noqa: E731
+    mine = [i for i in (f.get("interpretations") or []) if isinstance(i, dict)
+            and str(i.get("id") or "").strip().casefold() == ch]
+    return bool(mine) and norm(mine[0].get("summary")) == norm(ent.get("summary"))
 
 
 def canon_key(interp):

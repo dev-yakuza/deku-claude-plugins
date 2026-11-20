@@ -48,6 +48,15 @@ def stakes(p, stage, refs, question, options, about_to_take, body, areas, irreve
         before the answer (sealed: `reason_sha`, journaled; revealed with the answer — `withhold_for_next`)."""
         ex = dict(extra)
         r = reason
+        if withhold:
+            from workflows.dev import predict as PF
+            # K6 r3 M2: `irreversible` is computed from the CHOSEN reading's areas — when the readings differ in
+            # touching an irreversible path it IS the recommendation. Sealed like the reason (always — its absence
+            # would say "false"); the value is journaled and revealed on GitHub by the run after the person's answer
+            # (`reveal_sealed_stakes`); §9.5 reads the revealed value, and an unrevealed seal as irreversible
+            # (`grade.block_irreversible` — the stricter class, fail-safe)
+            ex.pop("irreversible", None)
+            ex["irreversible_sha"] = PF.sealed(p, "true" if irreversible_paths else "false", IRREVERSIBLE_FIELD)
         if withhold and reason:
             from workflows.dev import predict as PF
             ex["reason_sha"] = PF.sealed(p, reason, "STAKES.reason")
@@ -58,6 +67,31 @@ def stakes(p, stage, refs, question, options, about_to_take, body, areas, irreve
         return level, record
     record()
     return level
+
+
+IRREVERSIBLE_FIELD = "STAKES.irreversible"
+REVEAL = "reveal"
+
+
+def reveal_sealed_stakes(p, stage, comments):
+    """K6 r3 M2: after a person's answer, every STAKES block of `stage` whose `irreversible` was sealed and is not yet
+    revealed gets a reveal block (`point: reveal`, `refs` = the STAKES block, `irreversible` + `nonce`, checked against
+    the seal by `grade.block_irreversible`) — from this clone's journal; a seal it cannot open stays sealed (§9.5 then
+    reads it as irreversible). Returns the ids written."""
+    from guildcore import ask as ASK
+    from guildcore.decisions import DecisionLog
+    log = DecisionLog.load(comments)
+    done = set(b.get("refs") for b in log.blocks if b.get("point") == REVEAL)
+    out = []
+    for b in log.blocks:
+        if b.get("point") != "STAKES" or b.get("stage") != stage or not b.get("irreversible_sha") or b.id in done:
+            continue
+        v, n = ASK.seal_value(getattr(p, "journal", None), b.get("irreversible_sha"), IRREVERSIBLE_FIELD)
+        if v is None:
+            continue
+        out.append(B.record_code(p, stage, REVEAL, "irreversible", refs=b.id,
+                                 extra={"field": "irreversible", "irreversible": v, "nonce": n}))
+    return out
 
 
 def withhold_for_next(p, text):

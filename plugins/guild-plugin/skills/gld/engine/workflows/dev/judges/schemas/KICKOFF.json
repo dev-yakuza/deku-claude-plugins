@@ -35,6 +35,40 @@
      },
      "rationale": {
       "type": "string"
+     },
+     "areas": {
+      "type": "array",
+      "items": {
+       "type": "string"
+      }
+     },
+     "ui_surface": {
+      "type": "boolean"
+     },
+     "cast": {
+      "type": "object",
+      "properties": {
+       "participation": {
+        "type": "array",
+        "items": {
+         "type": "string"
+        }
+       },
+       "gates": {
+        "type": "array",
+        "items": {
+         "type": "string"
+        }
+       }
+      }
+     },
+     "work_type": {
+      "type": "string",
+      "enum": [
+       "feature",
+       "bug",
+       "refactor"
+      ]
      }
     }
    }

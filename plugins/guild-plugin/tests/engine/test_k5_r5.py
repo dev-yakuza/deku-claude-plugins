@@ -449,6 +449,7 @@ class Minors(unittest.TestCase):
         _answer(h, "guild-answer: %s i1" % r.qid)
         h.roles += [evidence(self), out_role(self, "DONE", ac_patch=[])]
         h.judges["KICKOFF"] = kickoff(goal="unclear")
+        h.judges["KICKOFF"].fields["chosen"] = "B"         # K6 r3 M1: the judge takes the person's reading (B = i1)
         driver(h, DESIGN_STUB).run(7)
         self.assertIn("guild:design", h.labels())
         self.assertIn("- (선택) i1: hide the count", h.body_with("analyze:output"))
