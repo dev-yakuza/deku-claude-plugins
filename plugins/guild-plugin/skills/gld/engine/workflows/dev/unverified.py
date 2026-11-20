@@ -100,6 +100,8 @@ def _open_asked():
 
 OPEN_ASKED = _open_asked()          # K6 r4: groups asked openly — released by their gate rows' sheet verdicts
 SHEET_RELEASED = dict(_sheet_released(), **OPEN_ASKED)
+# K6 r8 user decision 2: the groups only the grading sheet releases — never by `verification.json`
+SHEET_ONLY = frozenset(list(OPEN_ASKED) + list(_sheet_choice()))
 SHEET_CHOICE = _sheet_choice()       # group → the only choice whose sheet verdict counts (EX-ARB-dismiss: any)
 # K6 r1 M6: groups with no less conservative path to gate — never unverified
 EXEMPT = {
@@ -113,7 +115,9 @@ def unverified(path=FILE):
     """The §9.5 groups the shipped replay result did not verify (valve spelling: `EX-ARB-dismiss`), without the
     EXEMPT ones (K6 r1 M6)."""
     from guildcore import valves as VALVES
-    ver = set(canonical(g) for g in (shipped(path).get("verified") or []))
+    # K6 r8 user decision 2: an OPEN / INHERENT group is released only by sheet verdicts — a `verified` entry for one
+    # (a hand-edited file, an older writer) is ignored
+    ver = set(canonical(g) for g in (shipped(path).get("verified") or [])) - set(SHEET_ONLY)
     return [g for g in VALVES.GROUPS if g not in ver and g not in EXEMPT]
 
 
@@ -227,6 +231,29 @@ def human_dropped(st):
                 if i.isdigit():
                     out.setdefault(int(i), set()).add(d["key"])
     return out
+
+
+RECHECK_FAILED = ("unreadable", "no-engine-block")      # K6 r8 m3: a re-check that could not look
+
+
+def note_rechecks(st, checks, now):
+    """K6 r8 m3: record each standing human drop's re-check of this `dev grade` (`checks`: {key: result} — "absent"
+    (the log was read, the candidate is not in it: the drop stands, checked), "unreadable" / "no-engine-block" (the
+    log could not show it: the drop stands UNCHECKED)) as `last_check` {at, result} and `check_failures` (consecutive
+    failed re-checks; a successful one resets it). Revocation is untouched: every `dev grade` still re-reads every
+    standing human drop — this only makes a failed look visible. Returns the sorted unchecked keys."""
+    bad = set()
+    for _g, u in sorted((st.get("unverified") or {}).items()):
+        for d in u.get("dropped") or ():
+            k = d.get("key")
+            if d.get("by") != "human" or k not in checks:
+                continue
+            r = checks[k]
+            d["last_check"] = {"at": now, "result": r}
+            d["check_failures"] = int(d.get("check_failures") or 0) + 1 if r in RECHECK_FAILED else 0
+            if r in RECHECK_FAILED:
+                bad.add(k)
+    return sorted(bad)
 
 
 def drop_refused(st, key, force=False):
@@ -369,8 +396,16 @@ def report(common, path=FILE):
                     # K6 r5 m7: the person's drops (with the reason) and the candidates whose log shows no engine
                     # block (n times in a row) — the way out is the person's
                     "dropped_by_human": [{"key": d.get("key"), "reason": d.get("why"), "at": d.get("at"),
-                                          "forced": bool(d.get("forced"))}
+                                          "forced": bool(d.get("forced")),
+                                          # K6 r8 m3: the last re-check by a `dev grade` (and how many failed in a row)
+                                          "last_check": d.get("last_check"),
+                                          "check_failures": int(d.get("check_failures") or 0)}
                                          for d in (u.get("dropped") or ()) if d.get("by") == "human"],
+                    # K6 r8 m3: human drops the last `dev grade` could NOT re-check (log unreadable / no engine block)
+                    # — the drop stands, but nobody has looked; never read as "checked"
+                    "human_drops_unchecked": sorted(d.get("key") for d in (u.get("dropped") or ())
+                                                    if d.get("by") == "human" and
+                                                    (d.get("last_check") or {}).get("result") in RECHECK_FAILED),
                     # K6 r6 m1: a release reached while human drops stood, and a release a re-listed drop revoked
                     "after_human_drop": list(u.get("after_human_drop") or ()) if u.get("released_at") else [],
                     "release_revoked": list(u.get("release_revoked") or ()),

@@ -410,55 +410,63 @@ def _read(path):
         return fh.read()
 
 
-def _rows(group, n, agree, adv, source="replay", set_="held-out"):
+def _rows(group, n, agree, adv, source="replay", set_="held-out", **kw):
+    # K6 r8 M1: every row carries its decision id (rows without one are dropped)
     out = []
     for i in range(n):
-        out.append({"group": group, "set": set_, "source": source, "agree": i < agree, "advance_agree": i < adv})
+        out.append(dict({"id": "#%s-%s/D%d" % (group, set_, i), "group": group, "set": set_, "source": source,
+                         "agree": i < agree, "advance_agree": i < adv}, **kw))
     return out
 
 
+def _syn(group, verdicts, **kw):
+    return [dict({"id": "syn-%s-%d" % (group, i), "group": group, "set": "held-out", "source": "synthetic"},
+                 **(dict(kw, wrong=w) if w is not None else kw)) for i, w in enumerate(verdicts)]
+
+
 class m4GateReport(unittest.TestCase):
+    # K6 r8: rows carry ids (M1), a failed replay is not covered by synthetic (user decision 1), the OPEN / INHERENT
+    # groups are recorded but never verified (user decision 2) — the table moved its cases to groups the writer may
+    # verify (HANDOFF · DE-ARB · DIRECTIVE · ESCALATE · SPLIT · EX-ARB); the sheet-only cases are `test_k6_r8`'s
     def test_criteria(self):
-        rows = (_rows("QA", 20, 17, 19) + _rows("TEST", 19, 19, 19) + _rows("AN-PO", 20, 16, 20)
-                + _rows("HANDOFF", 30, 30, 28) + _rows("DE-ARB", 40, 40, 40, set_="tuning")
-                + [{"group": "SPLIT", "set": "held-out", "source": "synthetic", "wrong": False}] * 4
-                + [{"group": "STAKES", "set": "held-out", "source": "synthetic", "wrong": False}] * 4
-                + [{"group": "STAKES", "set": "held-out", "source": "synthetic", "wrong": True}]
-                + [{"group": "VIS-ENV", "set": "held-out", "source": "synthetic", "wrong": True}]
-                + [{"group": "VIS-ENV", "set": "held-out", "source": "synthetic", "wrong": False}] * 2
-                + [{"group": "DIRECTIVE", "set": "held-out", "source": "synthetic"}] * 3
-                + [{"group": "EX-ARB:dismiss", "set": "held-out", "source": "synthetic", "wrong": False}] * 3
-                + [{"group": "NOPE", "set": "held-out", "source": "replay", "agree": True}])
+        rows = (_rows("HANDOFF", 20, 17, 19) + _rows("DIRECTIVE", 19, 19, 19) + _rows("DE-ARB", 20, 16, 20)
+                + _syn("DE-ARB", [False] * 3)
+                + _rows("ESCALATE", 30, 30, 28) + _rows("EX-ARB:accept", 40, 40, 40, set_="tuning")
+                + _syn("SPLIT", [False] * 4)
+                + _syn("EX-ARB:dismiss", [False, False]) + _syn("EX-ARB", [True], kind="dispute")
+                + _syn("DIRECTIVE", [True, False, False])
+                + _syn("EX-ARB", [None] * 3, kind="accept")
+                + _rows("QA", 20, 20, 20)
+                + [{"id": "x", "group": "NOPE", "set": "held-out", "source": "replay", "agree": True}])
         per = GR.decide(rows)
-        want = {"QA": True,           # 17/20 = 85 %, 19/20 = 95 %
-                "TEST": False,        # n 19
-                "AN-PO": False,       # 16/20 = 80 %
-                "HANDOFF": False,     # advance 28/30 < 95 %
-                "DE-ARB": False,      # tuning never gates
-                "SPLIT": True,        # synthetic, wrong 0
-                "STAKES": False,      # high risk: wrong 1 > 0
-                "VIS-ENV": True,      # wrong 1 ≤ 1
-                "DIRECTIVE": False,   # synthetic rows without a verdict
-                "EX-ARB-dismiss": True,
-                "KICKOFF": False}     # nothing — "no synthetic = not passed"
+        want = {"HANDOFF": True,         # 17/20 = 85 %, 19/20 = 95 %
+                "DE-ARB": False,         # 16/20 = 80 % — and a failed replay is not covered by synthetic (r8 1)
+                "ESCALATE": False,       # advance 28/30 < 95 %
+                "SPLIT": True,           # synthetic n 4 = planned, wrong 0
+                "EX-ARB-dismiss": False,  # high risk: the dispute row is wrong 1 > 0
+                "DIRECTIVE": True,       # replay n 19 < 20 → synthetic: n 3 ≥ planned 2, wrong 1 ≤ 1
+                "EX-ARB-accept": False,  # tuning never gates; synthetic rows without a verdict
+                "QA": False,             # INHERENT — sheet only (r8 2), recorded as would_pass
+                "KICKOFF": False}        # nothing — "no synthetic = not passed"
         for g, v in want.items():
             with self.subTest(group=g):
                 self.assertEqual(per[g]["verified"], v, per[g]["why"])
+        self.assertTrue(per["QA"]["would_pass"])
         self.assertEqual(per["_unknown_groups"], {"NOPE": 1})
 
     def test_writer_is_deterministic_and_unverified_reads_it(self):
         d = tmpdir(self)
         src = os.path.join(d, "rows.json")
         with open(src, "w", encoding="utf-8") as fh:
-            json.dump({"rows": _rows("QA", 20, 20, 20)}, fh)
+            json.dump({"rows": _rows("HANDOFF", 20, 20, 20)}, fh)
         a, b = os.path.join(d, "a.json"), os.path.join(d, "b.json")
         self.assertEqual(GR.main(["--rows", src, "--out", a, "--replay", "test"]), 0)
         self.assertEqual(GR.main(["--rows", src, "--out", b, "--replay", "test"]), 0)
         self.assertEqual(_read(a), _read(b))
         doc = json.loads(_read(a))
-        self.assertEqual(doc["verified"], ["QA"])
+        self.assertEqual(doc["verified"], ["HANDOFF"])
         self.assertEqual(doc["release_after"], 5)
-        self.assertNotIn("QA", UV.unverified(a))
+        self.assertNotIn("HANDOFF", UV.unverified(a))
         self.assertIn("TEST", UV.unverified(a))
 
     def test_the_shipped_file_names_a_real_writer(self):

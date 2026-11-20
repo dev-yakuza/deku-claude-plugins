@@ -40,9 +40,10 @@ class Shipped(unittest.TestCase):
         d = tmpdir(self)
         path = os.path.join(d, "v.json")
         with open(path, "w") as fh:
-            json.dump({"verified": ["QA", "EX-ARB:dismiss"], "release_after": 5}, fh)
+            json.dump({"verified": ["QA", "HANDOFF", "EX-ARB:dismiss"], "release_after": 5}, fh)
         u = UV.unverified(path)
-        self.assertNotIn("QA", u)
+        self.assertNotIn("HANDOFF", u)
+        self.assertIn("QA", u)          # K6 r8 user decision 2: an INHERENT group is released only by the sheet
         self.assertNotIn("EX-ARB-dismiss", u)
         self.assertIn("STAKES", u)
 

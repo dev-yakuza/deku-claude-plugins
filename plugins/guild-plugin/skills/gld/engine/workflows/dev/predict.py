@@ -510,14 +510,48 @@ _CAMEL_STRONG = frozenset(("risky", "riskier", "riskiest", "unsafe", "safer", "s
 _CAMEL_PREFIX = frozenset(("is", "has", "was", "are", "looks", "seems", "be"))
 _RATING_PIECES_SPLIT = re.compile(r"[\s_./:=\-#@()\[\]{}!?,;'\"]+")
 _CAMEL = re.compile(r"[A-Z]+(?=[A-Z][a-z])|[A-Z]?[a-z]+|[A-Z]+|\d+")
-_WORD = re.compile(r"(?<![\w./\-#@])[^\W\d_]+(?![\w./\-#@(])")
+# K6 r8 M2: a `.` glues a word to an identifier only with a letter on its other side (`foo.safe`, `safe.dart`) — a
+# sentence-final full stop ("(all safe.)", "Split in two. Safe.") is a word boundary
+_WORD = re.compile(r"(?<![\w/\-#@])(?<!\w\.)[^\W\d_]+(?![\w/\-#@(]|\.\w)")
 # K6 r7 M2: beside a SCOPE word a UI noun that names no UI (`(NG except docs)`, `(OK only)`) is a verdict — never one
 # followed by the UI thing it names (`(OK button only)`, `(NG 버튼 제외)`, `(HTTP OK response only)`)
-_UI_VERDICT = re.compile(r"(?<![\w./\-#@])(?:ok|okay|ng)(?![\w./\-#@(])(?!\s*(?:buttons?|btns?|keys?|taps?|clicks?|labels?|"
+_UI_VERDICT = re.compile(r"(?<![\w/\-#@])(?<!\w\.)(?:ok|okay|ng)(?![\w/\-#@(]|\.\w)(?!\s*(?:buttons?|btns?|keys?|taps?|clicks?|labels?|"
                          r"dialogs?|responses?|status|codes?|texts?|messages?|screens?|toasts?|버튼|키|탭|클릭|라벨|대화상자|"
                          r"다이얼로그|응답|상태|코드|문구|메시지|표시|표기|화면|토스트|ボタン|キー|タップ|ラベル|ダイアログ|"
                          r"レスポンス|応答|ステータス|コード|メッセージ|表示|画面|トースト))", re.I)
-_CJK_RATING = re.compile(r"안전(?!망)|위험|安全(?!網)|危険")      # 안전망 / 安全網 = a safety net (a domain noun)
+_CJK_RATING = re.compile(r"안전(?!망)(?!\s?(?:장치|관리|구역|지대|모드))|위험(?!\s?(?:물품|물질|물건|물|구역|지역|관리))|"
+                         r"安全(?!網|装置|管理|地帯|区域)|危険(?!物|区域|地帯)")
+# 안전망 / 安全網 = a safety net (a domain noun). K6 r8 m1: so are the compound nouns a stem heads — 위험 물품 / 危険物
+# (dangerous goods), 안전 장치 / 安全装置 (a safety device), 위험 관리 / 安全管理 (risk / safety management), 구역 / 区域
+# (a zone) — the stem names a product thing there, it rates nothing
+# K6 r8 m1: an English list word that heads a known compound noun names a product thing, not a rating — "safe area
+# insets", "a risk register", "dangerous goods", "HIGH / LOW contrast" (a `/`-joined run of list words before the
+# head counts as one compound). Only these heads, only after these words: "(safe only)", "Safe." still rate.
+_CJK_STEMS = frozenset(("안전", "위험", "安全", "危険"))     # read through `_CJK_RATING` (its compound-noun exceptions)
+_COMPOUND_HEADS = {
+    "safe": ("area", "areas", "inset", "insets", "mode", "zone", "zones", "harbor", "harbour", "search"),
+    "unsafe": ("area", "areas", "mode", "zone", "zones"),
+    "risk": ("register", "registers", "registry", "management", "assessment", "assessments", "matrix", "log"),
+    "risks": ("register", "registers", "registry", "log"),
+    "dangerous": ("goods", "materials", "substances", "zone", "zones", "area", "areas"),
+    "hazardous": ("goods", "materials", "substances", "waste", "zone", "zones", "area", "areas"),
+    "high": ("contrast",),
+    "low": ("contrast",),
+}
+_COMPOUND_TAIL = re.compile(r"((?:\s*/\s*[^\W\d_]+)*)\s+([^\W\d_]+)(?![\w/\-#@(]|\.\w)")
+
+
+def _compound_noun(t, m):
+    """K6 r8 m1: is the list word `m` (a `_WORD` match in `t`) the modifier of a known compound noun
+    (`_COMPOUND_HEADS`) — directly ("risk register") or through a `/`-joined run of list words ("HIGH / LOW
+    contrast")?"""
+    f = m.group(0).casefold()
+    tail = _COMPOUND_TAIL.match(t, m.end())
+    if not tail:
+        return False
+    head = tail.group(2).casefold()
+    run = [f] + [x.strip().casefold() for x in tail.group(1).split("/") if x.strip()]
+    return all(head in _COMPOUND_HEADS.get(w, ()) for w in run)
 
 
 def rating_word(text):
@@ -528,13 +562,29 @@ def rating_word(text):
     `FAIL` — a test verdict a descriptive AC line states: "스크립트가 PASS 한다") are read only inside an aside / a
     dropped tail (`clause_kind` via `_literal` / `_rating_caps`), never in a whole label."""
     t = _CODE_SPAN.sub(" ", str(text or ""))
-    for w in _WORD.findall(t):
+    for m in _WORD.finditer(t):
+        w = m.group(0)
         f = w.casefold()
-        if f in RATING_WORDS and f not in RATING_UI_NOUNS:
-            return True
-        if len(w) > 1 and w.isupper() and f in RATING_WEAK:
-            return True
+        if f in RATING_WORDS and f not in RATING_UI_NOUNS or len(w) > 1 and w.isupper() and f in RATING_WEAK:
+            if f in _CJK_STEMS and _CJK_RATING.match(t, m.start()) or f not in _CJK_STEMS and not _compound_noun(t, m):
+                return True
     return bool(_CJK_RATING.search(t))
+
+
+# K6 r8 m2: a `-` / `/`-joined run of words outside a code span (`low-risk`, `safe-only`, `safe/only`) — `_WORD` skips
+# its pieces as identifier parts; beside a scope word a list piece of it rates (`clause_kind`), as in a span
+_GLUED = re.compile(r"(?<![\w./#@\-])[^\W\d_]+(?:[-/][^\W\d_]+)+(?![\w/#@(\-]|\.\w)")
+
+
+def _glued_rating(t):
+    """K6 r8 m2: does `t` hold a `-` / `/`-joined word run with a piece of the rating list (`RATING_WORDS`, the UI
+    nouns `ok` / `okay` / `ng` excepted)? Read only beside a scope word (`clause_kind`): "(low-risk only)" refuses;
+    "fail-safe" in a clause without one is untouched."""
+    for m in _GLUED.finditer(t):
+        if any(p.casefold() in RATING_WORDS and p.casefold() not in RATING_UI_NOUNS
+               for p in re.split(r"[-/]", m.group(0))):
+            return True
+    return False
 
 
 def _camel_rates(w):
@@ -634,6 +684,8 @@ def clause_kind(text):
         return "scope-rating" if sc else "remark"
     if sc and any(_rating_caps(x.strip("`")) or _rating_piece(x.strip("`")) for x in spans):
         return "scope-rating"     # K6 r7 M2: a rating piece in a span beside a scope word (`` (`low-risk` only) ``)
+    if sc and _glued_rating(bare):
+        return "scope-rating"     # K6 r8 m2: the same outside a span (`(low-risk only)`, `(safe-only)`, `(safe/only)`)
     if _literal(t):
         return "scope"
     ref = bool(_REMARK_REF.search(bare))

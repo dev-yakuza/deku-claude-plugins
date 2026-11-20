@@ -896,18 +896,33 @@ def main(d, a):
     # K6 r7 m2: every standing human drop is re-checked by ANY `dev grade` — the Issues outside this scope are read
     # for those dropped candidates only (a readable log that still shows one lists it again: open, a release after
     # the drop revoked — `UV.note_candidates`)
-    rechecked = []
+    # K6 r8 m3: each standing drop's re-check is recorded (`last_check`) and a failed one is REPORTED
+    # (`human_drops_unchecked` — never silent); each Issue is read once per run (an in-scope Issue: the read above)
+    rechecked, checks, unchecked_why = [], {}, {}
     for n, keys in sorted(UV.human_dropped(load_state(common)).items()):
         if n in logs:
-            continue
-        try:
-            blocks = DecisionLog.load(markers.trusted(gh.comments(n), ())).blocks
-        except Exception:                                        # noqa: BLE001 — unread: the drop stands
+            blocks = logs[n]                                     # in scope: already read this run — no second read
+        else:
+            try:
+                blocks = DecisionLog.load(markers.trusted(gh.comments(n), ())).blocks
+            except Exception as e:                               # noqa: BLE001 — unread: the drop stands, unchecked
+                for k in keys:
+                    checks[k], unchecked_why[k] = "unreadable", "log unreadable (%s)" % type(e).__name__
+                continue
+        if not blocks:
+            # K6 r4 m6: a log with no engine block is unread, not "the candidate is gone" — the drop stands, unchecked
+            for k in keys:
+                checks[k], unchecked_why[k] = "no-engine-block", "the log shows no engine block"
             continue
         _ok, cands = predict_first_judgments(blocks, n)
         back = [r for r in cands if "%s/%s" % (r.get("issue"), r.get("decision_id")) in keys]
-        pf_cands += back
-        rechecked += ["%s/%s" % (r.get("issue"), r.get("decision_id")) for r in back]
+        listed = set("%s/%s" % (r.get("issue"), r.get("decision_id")) for r in back)
+        for k in keys:
+            if k not in listed:
+                checks[k] = "absent"
+        if n not in logs:
+            pf_cands += back                                     # in scope: already among the candidates
+            rechecked += sorted(listed)
     confirmed = set((str(g.get("issue")), g.get("decision_id")) for g in grades(common)
                     if g.get("repo") == repo and g.get("grader_version") == "human")
     pf_cands = [r for r in pf_cands if (str(r["issue"]), r["decision_id"]) not in confirmed]
@@ -916,6 +931,10 @@ def main(d, a):
     # K6 r5 m7: an empty one is passed too — its open candidates are counted `unread` (shown, the person's way out)
     pf = apply_judgments(common, pf_rows, repo, "predict-first", candidates=pf_cands,
                          logs=dict((n, set(b.id for b in bs)) for n, bs in logs.items()))
+    if checks:
+        st_ = load_state(common)
+        UV.note_rechecks(st_, checks, _now())
+        J.atomic_write(state_path(common), json.dumps(st_, sort_keys=True, indent=1))
     watch = sorted((load_state(common).get("watch") or {}).keys())
     valves = VALVES.effective(common, d.env)
     cfg = d.config(d.toplevel())
@@ -952,6 +971,9 @@ def main(d, a):
                                    "conservative": pf["conservative"], "candidates": len(pf_cands),
                                    "candidates_dropped": pf.get("candidates_dropped") or [],
                                    "human_drops_listed_again": rechecked,
+                                   # K6 r8 m3: the standing human drops this run could not re-check (and why)
+                                   "human_drops_unchecked": [{"key": k, "why": unchecked_why[k]}
+                                                             for k in sorted(unchecked_why)],
                                    "release_revoked": pf.get("unverified_release_revoked") or []},
                  "watch": watch,
                  "graded": len(graded)}, out=d.out)
