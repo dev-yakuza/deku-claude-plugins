@@ -162,7 +162,7 @@ class M1GateRows(unittest.TestCase):
         self.assertEqual(per["_rows_rejected"], {"kind contradicts group": 4})
         self.assertEqual(per["EX-ARB-dismiss"]["synthetic_n"], 0)
 
-    def test_latest_pass_reported(self):
+    def test_passes_reported_never_counted(self):
         # review-k6-r10 M1: the passes are reported, never counted — worst verdict of the copies
         per = decide(rep("SPLIT", issues(700, 20), agree=False, **{"pass": 1})
                      + rep("SPLIT", issues(700, 20), **{"pass": 2}))["SPLIT"]

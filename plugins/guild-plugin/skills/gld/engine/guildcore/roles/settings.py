@@ -594,10 +594,12 @@ def export_gates_readonly(worktree, base_sha):
         shutil.rmtree(dest)  # fs-ok: engine export dir (base content) or the run dir in/ — engine-owned destination
     os.makedirs(os.path.dirname(dest), exist_ok=True)  # fs-ok: engine export dir (base content) or the run dir in/ — engine-owned destination
     tmp = tmp_name(dest)          # review-k6-r10 m5 / m6: unique per call, so two engines never share it
-    if not export_gates(worktree, base_sha, tmp):
-        _drop_tree(tmp)
-        return None, None
-    return _publish_readonly(tmp, dest)
+    try:
+        if not export_gates(worktree, base_sha, tmp):
+            return None, None
+        return _publish_readonly(tmp, dest)
+    finally:
+        _drop_tree(tmp)           # review-k6-r11 m1: whatever failed (or nothing left after the rename) — no litter
 
 
 def _drop_tree(path):
@@ -619,6 +621,13 @@ def _publish_readonly(tmp, dest):
     directory rename fails for the later one (`dest` already there, non-empty): when `dest` holds the SAME tree (its
     digest equals ours) the later engine uses it and drops its own temp tree; a different tree raises as before. The
     stamp is written through a temp file + `os.replace`, so a reader never sees it half written."""
+    try:
+        return _publish(tmp, dest)
+    finally:
+        _drop_tree(tmp)           # review-k6-r11 m1: a chmod / rename / stamp failure leaves no temp tree behind
+
+
+def _publish(tmp, dest):
     digest = tree_digest(tmp)
     for base, _dirs, fs in os.walk(tmp, topdown=False):
         for f in fs:
@@ -629,13 +638,16 @@ def _publish_readonly(tmp, dest):
         os.replace(tmp, dest)  # fs-ok: engine home export / run dir in/ (roles denyWrite)
     except OSError:
         if not (os.path.isdir(dest) and not os.path.islink(dest) and tree_digest(dest) == digest):
-            _drop_tree(tmp)
             raise
-        _drop_tree(tmp)        # the other engine's export of the same base — identical; use it
+        # the other engine's export of the same base — identical; use it (the caller drops our temp tree)
     stamp_tmp = tmp_name(dest + ".sha256")
-    with open(stamp_tmp, "x") as fh:  # fs-ok: engine home export / run dir in/ (roles denyWrite)
-        fh.write(digest + "\n")
-    os.replace(stamp_tmp, dest + ".sha256")  # fs-ok: engine home export / run dir in/ (roles denyWrite)
+    try:
+        with open(stamp_tmp, "x") as fh:  # fs-ok: engine home export / run dir in/ (roles denyWrite)
+            fh.write(digest + "\n")
+        os.replace(stamp_tmp, dest + ".sha256")  # fs-ok: engine home export / run dir in/ (roles denyWrite)
+    finally:
+        if os.path.lexists(stamp_tmp):
+            os.unlink(stamp_tmp)  # fs-ok: our own temp stamp (review-k6-r11 m1)
     return dest, digest
 
 

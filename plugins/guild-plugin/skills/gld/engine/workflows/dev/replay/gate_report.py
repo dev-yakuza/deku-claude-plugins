@@ -12,9 +12,8 @@ replay VERIFIED it:
   person-approved answer key): n ≥ the group's PLANNED held-out count (`SYNTH_PLANNED` — half of design §10.2-3's
   synthetic set per group; K6 r9 M1(a): a group §10.2-3 plans NO synthetic set for — HANDOFF — has no synthetic
   path at all, replay only) ∧ wrong < n ∧ wrong ≤ 1 — **wrong 0** for the high-risk groups
-  (`HIGH_RISK`: STAKES · EX-ARB · SPLIT · INTEGRATE · ESCALATE, R5J-m3) — and ONLY for a group whose held-out replay
-  is short (n < `MIN_N`): a group the replay measured (n ≥ 20) and failed is never covered by synthetic rows (K6 r8
-  user decision 1 — it goes back to tuning and a held-out final pass);
+  (`HIGH_RISK`: STAKES · EX-ARB · SPLIT · INTEGRATE · ESCALATE, R5J-m3) — and ONLY for a group the input has NO
+  replay row for at all (K6 r11 M1, see below);
 * anything else — tuning rows, an unknown group, a row without its verdict — never verifies ("no synthetic = not
   passed", R4J-m5). An `undeterminable` / `unsure` verdict is no agreement (it counts in n, never as agree).
 
@@ -40,12 +39,18 @@ K6 r9 M1 / m2 / m3 — and checked against each other:
   is not verified (`_no_tuning_rows`) — feed the tuning rows too.
 K6 r10 M1 / m1 — r9 m2's "latest pass" is gone:
 * the copies of one held-out id always count ONCE, their worst verdict — a `pass` field is reported (`passes`), never
-  used to drop rows: one held-out set, graded once. A group the replay measured (n ≥ 20) and failed stays failed
-  whatever later rows say, so synthetic never covers it (K6 r8 user decision 1). Re-grading a re-tuned group needs a
-  FRESH held-out set (new Issues): the old held-out rows go in as tuning rows (checklist F), so the split check keeps
-  them out;
-* the tuning Issues are read from EVERY tuning row with an `issue/D-id` id — an unknown group, a kind conflict or a
-  missing source does not hide its Issue from the split check.
+  used to drop rows: one held-out set, graded once;
+* the tuning Issues are read from EVERY non-held-out row with an `issue/D-id` id — an unknown group, a kind conflict
+  or a missing source does not hide its Issue from the split check.
+K6 r11 M1 — a replayed group is verified by replay only (K6 r8 user decision 1, without an n ≥ 20 boundary):
+* a group is "replayed" when the input has ANY row for it whose `source` is not `synthetic` — held-out, tuning,
+  retired, a row without an id, a rejected or a conflicting row alike (read before any check or dedupe; a bare
+  `EX-ARB` row without a kind marks both EX-ARB groups). Synthetic rows never verify a replayed group, so a group
+  the replay failed stays failed whatever rows are added later — only a held-out replay that meets the bar
+  verifies it;
+* re-measuring a re-tuned group needs a FRESH held-out set (new Issues); the old held-out rows go in as
+  `set: "retired"` (checklist F) — they keep the group "replayed", are not counted for verification, and block their
+  Issues and ids like tuning rows do (a fresh held-out decision of a retired Issue is contaminated).
 K6 r8 user decision 2 — the OPEN groups (KICKOFF · STAKES, `predict.OPEN_GROUPS`) and the INHERENT groups
 (`conservative.INHERENT`) are released ONLY by the person's grading-sheet verdicts: their replay / synthetic results
 are recorded (`would_pass`) but never put under `verified` (`sheet_only`); `unverified()` ignores them in a shipped
@@ -56,6 +61,7 @@ Input rows (JSON list, or {"rows": [...]}) — one per graded decision:
     {"id": "syn-split-07", "group": "SPLIT", "set": "held-out", "source": "synthetic", "wrong": false}
     {"id": "syn-exarb-03", "group": "EX-ARB", "kind": "dismiss", "set": "held-out", "source": "synthetic", "wrong": false}
     {"id": "#3/D1", "group": "SPLIT", "set": "tuning", "source": "replay", "agree": true, "advance_agree": true}
+    {"id": "#7/D2", "group": "SPLIT", "set": "retired", "source": "replay", "agree": false, "advance_agree": true}
 
     gate_report.py --rows <graded.json> --out <verification.json> [--replay "<what was run>"]
 
@@ -168,6 +174,22 @@ def _pass_of(row):
     return None
 
 
+def _replayed_groups(rows):
+    """K6 r11 M1: every group some non-synthetic row names — before any check, dedupe or set filter. The row's group
+    and the group its `kind` names both count; a bare `EX-ARB` row (or an unknown kind) names both EX-ARB groups."""
+    out = set()
+    for r in rows:
+        if str(r.get("source") or "").strip().lower() == "synthetic":
+            continue
+        names = set([canonical(r.get("group"))])
+        if str(r.get("kind") or "").strip():
+            names.add(_kind_group(r))
+        if names & set(("EX-ARB", "EX-ARB?")):
+            names.update(_EXARB)
+        out.update(n for n in names if n)
+    return out
+
+
 def sheet_only():
     """K6 r8 user decision 2: {group: why} — the groups only the grading sheet releases (OPEN + INHERENT)."""
     from workflows.dev import conservative as CONS
@@ -199,6 +221,7 @@ def decide(rows, groups=None):
                     "ignored": 0, "duplicates": 0}) for g in groups)
     # K6 r10 m1: the split unit is the Issue whatever the row's group — read the tuning Issues (and tuning ids) from
     # EVERY tuning row before any group / kind / source check can drop it
+    replayed = _replayed_groups(rows)
     tuning_issues = set()
     tuning_ids = set()
     for r in rows:
@@ -223,7 +246,8 @@ def decide(rows, groups=None):
         if g not in acc:
             _bump(unknown, g)
             continue
-        st = "held-out" if str(r.get("set") or "").strip().lower() == "held-out" else "tuning"
+        st = str(r.get("set") or "").strip().lower()
+        st = st if st in ("held-out", "retired") else "tuning"
         src = str(r.get("source") or "").strip().lower()
         if src not in ("replay", "synthetic"):
             acc[g]["ignored"] += 1
@@ -249,7 +273,7 @@ def decide(rows, groups=None):
     for r, g, st, src, cid, issue in kept:
         a = acc[g]
         if st != "held-out":
-            a["ignored"] += 1                            # tuning rows never gate
+            a["ignored"] += 1                            # tuning / retired rows never gate
             continue
         if len(groups_of[(src, cid)]) > 1:
             continue
@@ -286,8 +310,8 @@ def decide(rows, groups=None):
         lim = 0 if g in HIGH_RISK else SYNTH_MAX_WRONG
         planned = SYNTH_PLANNED.get(g)                   # K6 r9 M1(a): no plan in §10.2-3 → no synthetic path
         ok_replay = n >= MIN_N and a["replay_agree"] >= MIN_AGREE * n and a["replay_advance"] >= MIN_ADVANCE * n
-        replay_failed = n >= MIN_N and not ok_replay
-        ok_synth = (planned is not None and not replay_failed and sn >= planned and sw < sn and sw <= lim)
+        was_replayed = g in replayed                     # K6 r11 M1: replay only, whatever the counts
+        ok_synth = (planned is not None and not was_replayed and sn >= planned and sw < sn and sw <= lim)
         parts = []
         if ok_replay:
             parts.append("held-out replay n=%d, agreement %d/%d, advance %d/%d" % (n, a["replay_agree"], n,
@@ -300,13 +324,13 @@ def decide(rows, groups=None):
             else:
                 parts.append("held-out replay agreement %d/%d or advance %d/%d below %.0f%% / %.0f%%"
                              % (a["replay_agree"], n, a["replay_advance"], n, MIN_AGREE * 100, MIN_ADVANCE * 100))
-            if replay_failed:
-                parts.append("a failed replay is not covered by synthetic (K6 r8 user decision 1 — tuning re-run, "
-                             "then a held-out final pass)")
-            elif planned is None:
+            if planned is None:
                 parts.append("no synthetic set planned for this group in design §10.2-3 — replay only (K6 r9 "
                              "M1(a); %d synthetic row(s) not counted)" % sn if sn else
                              "no synthetic set planned for this group in design §10.2-3 — replay only (K6 r9 M1(a))")
+            elif was_replayed:
+                parts.append("the input has replay rows for this group — verified by replay only, never by synthetic "
+                             "(K6 r8 user decision 1, r11 M1; re-measure with a fresh held-out set, old rows retired)")
             elif not sn:
                 parts.append("no held-out synthetic")
             elif sn < planned:
@@ -331,7 +355,7 @@ def decide(rows, groups=None):
         if g in sheet:
             verified = False
             parts.append("sheet only: " + sheet[g])
-        out[g] = dict(a, verified=verified, by=by if verified else None, why="; ".join(parts))
+        out[g] = dict(a, verified=verified, by=by if verified else None, why="; ".join(parts), replayed=was_replayed)
         if g in sheet:
             out[g]["sheet_only"] = True
             out[g]["would_pass"] = passed and not contaminated[g] and not unchecked
@@ -362,10 +386,10 @@ def report(rows, replay="", raw=b""):
             "criteria": {"min_n": MIN_N, "min_agreement": MIN_AGREE, "min_advance_agreement": MIN_ADVANCE,
                          "synthetic_max_wrong": SYNTH_MAX_WRONG, "synthetic_max_wrong_high_risk": 0,
                          "high_risk": list(HIGH_RISK), "synthetic_planned": dict(sorted(SYNTH_PLANNED.items())),
-                         "synthetic_min_n": SYNTH_MIN_N, "synthetic_only_when_replay_short": True,
+                         "synthetic_min_n": SYNTH_MIN_N, "synthetic_only_when_never_replayed": True,
                          "synthetic_unplanned": "replay only", "row_id_required": True,
                          "replay_id": "issue/D-id", "split_unit": "issue", "one_group_per_id": True,
-                         "pass_counted": False,
+                         "pass_counted": False, "retired_set": "replayed, not counted, blocks its Issues",
                          "copies_of_an_id": "worst verdict", "tuning_rows_required": True,
                          "sheet_only": sorted(sheet_only())},
             "input_sha256": hashlib.sha256(raw).hexdigest() if raw else None}

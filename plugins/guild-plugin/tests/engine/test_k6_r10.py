@@ -73,8 +73,9 @@ M1_TABLE = [
     # still verifies — nothing about `pass` makes a good set fail
     ("one pass, 20/20", "DIRECTIVE", [rep(100 + i, True, 1) for i in range(20)], True),
     ("two passes both 20/20", "DIRECTIVE", [rep(100 + i, True, k) for k in (1, 2) for i in range(20)], True),
+    # review-k6-r11 M1: a group with any replay row is verified by replay only — a short replay closes synthetic
     ("short replay + planned synthetic", "DIRECTIVE", [rep(100 + i, True, 1) for i in range(5)] + [syn(0), syn(1)],
-     True),
+     False),
     # a fresh held-out set: the old held-out rows go in as tuning, new Issues are held out
     ("fresh held-out set, old rows as tuning", "DIRECTIVE",
      [rep(100 + i, i >= 10, set_="tuning") for i in range(20)] + [rep(200 + i, True) for i in range(20)], True),
@@ -95,7 +96,7 @@ class M1OneHeldOutSet(unittest.TestCase):
     def test_failed_replay_says_why(self):
         d = decide(FAILED20 + [rep(100, True, 2), syn(0), syn(1)])["DIRECTIVE"]
         self.assertEqual((d["replay_n"], d["replay_agree"], d["by"]), (20, 10, None))
-        self.assertIn("not covered by synthetic", d["why"])
+        self.assertIn("verified by replay only", d["why"])          # r11 M1
         self.assertEqual(d["passes"], {"replay": [1, 2]})                   # reported only
 
     def test_no_latest_pass_keys(self):

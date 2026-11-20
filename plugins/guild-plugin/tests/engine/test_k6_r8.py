@@ -112,7 +112,7 @@ TABLE = [
     ("e: replay fails by advance, perfect synthetic", "DE-ARB",
      rep("DE-ARB", 20, 20, 18) + syn("DE-ARB", [False] * 6), False),
     ("e: replay short (n 19), synthetic passes", "DE-ARB",
-     rep("DE-ARB", 19, 0, 0) + syn("DE-ARB", [False] * 3), True),
+     rep("DE-ARB", 19, 0, 0) + syn("DE-ARB", [False] * 3), False),          # r11 M1: replayed → replay only
     ("e: replay passes", "DE-ARB", rep("DE-ARB", 20, 17, 19), True),
 ]
 
@@ -149,8 +149,8 @@ class M1GateReportRows(unittest.TestCase):
         per = decide(rep("HANDOFF", 20, 20, 20, "tuning") + rep("HANDOFF", 20, 20, 20))
         self.assertEqual(len(per["HANDOFF"]["contaminated"]), 20)
         self.assertIn("train = test", per["HANDOFF"]["why"])
-        per = decide(rep("HANDOFF", 30, 15, 30) + syn("HANDOFF", [False] * 3))
-        self.assertIn("user decision 1", per["HANDOFF"]["why"])
+        per = decide(rep("DIRECTIVE", 30, 15, 30) + syn("DIRECTIVE", [False] * 3))   # r11: HANDOFF says "replay only"
+        self.assertIn("user decision 1", per["DIRECTIVE"]["why"])
         per = decide(syn("SPLIT", [False] * 3))
         self.assertIn("< planned 4", per["SPLIT"]["why"])
         per = decide(syn("EX-ARB", [False] * 2))
@@ -166,12 +166,13 @@ class M1GateReportRows(unittest.TestCase):
 
 
 class UserDecision1(unittest.TestCase):
-    def test_synthetic_only_for_a_short_replay(self):
+    def test_synthetic_only_for_a_group_never_replayed(self):
         for n in (0, 5, 19):
             with self.subTest(replay_n=n):
-                # K6 r9 M1(a): DIRECTIVE (a planned synthetic set) — HANDOFF has none, replay only
-                self.assertTrue(decide(rep("DIRECTIVE", n, 0, 0) + syn("DIRECTIVE", [False] * 2))["DIRECTIVE"]
-                                ["verified"])
+                # K6 r9 M1(a): DIRECTIVE (a planned synthetic set) — HANDOFF has none, replay only.
+                # review-k6-r11 M1: synthetic only for a group with NO replay row at all — n 5 / 19 is replay only
+                self.assertEqual(decide(rep("DIRECTIVE", n, 0, 0) + syn("DIRECTIVE", [False] * 2))["DIRECTIVE"]
+                                 ["verified"], n == 0)
         for agree, adv in ((16, 20), (20, 18), (0, 0)):
             with self.subTest(agree=agree, adv=adv):
                 v = decide(rep("DIRECTIVE", 20, agree, adv) + syn("DIRECTIVE", [False] * 5))["DIRECTIVE"]

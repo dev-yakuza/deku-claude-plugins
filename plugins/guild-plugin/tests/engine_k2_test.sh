@@ -44,9 +44,9 @@ fi
 # thread's traceback) no longer drops a test from the count, and a test turned into a skip lowers it.
 RAN=$(sed -nE 's/^Ran ([0-9]+) tests? in .*/\1/p' "$OUT" | tail -1); RAN=${RAN:-0}
 SUMMARY=$(grep -E '^(OK|FAILED)( \(.*\))?$' "$OUT" | tail -1)
-SKIPPED=$(printf '%s' "$SUMMARY" | sed -nE 's/.*[(, ]skipped=([0-9]+).*/\1/p'); SKIPPED=${SKIPPED:-0}
-FAILURES=$(printf '%s' "$SUMMARY" | sed -nE 's/.*[(, ]failures=([0-9]+).*/\1/p'); FAILURES=${FAILURES:-0}
-ERRORS=$(printf '%s' "$SUMMARY" | sed -nE 's/.*[(, ]errors=([0-9]+).*/\1/p'); ERRORS=${ERRORS:-0}
+SKIPPED=$(printf '%s' "$SUMMARY" | sed -nE 's/.*(\(|, )skipped=([0-9]+).*/\2/p'); SKIPPED=${SKIPPED:-0}
+FAILURES=$(printf '%s' "$SUMMARY" | sed -nE 's/.*(\(|, )failures=([0-9]+).*/\2/p'); FAILURES=${FAILURES:-0}
+ERRORS=$(printf '%s' "$SUMMARY" | sed -nE 's/.*(\(|, )errors=([0-9]+).*/\2/p'); ERRORS=${ERRORS:-0}
 COUNTED=$((RAN - SKIPPED))
 FAIL=$((FAILURES + ERRORS))
 PASS=$((COUNTED - FAIL))

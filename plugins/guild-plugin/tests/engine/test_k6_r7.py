@@ -454,7 +454,7 @@ class m4GateReport(unittest.TestCase):
                 "ESCALATE": False,       # advance 28/30 < 95 %
                 "SPLIT": True,           # synthetic n 4 = planned, wrong 0
                 "EX-ARB-dismiss": False,  # high risk: the dispute row is wrong 1 > 0
-                "DIRECTIVE": True,       # replay n 19 < 20 → synthetic: n 3 ≥ planned 2, wrong 1 ≤ 1
+                "DIRECTIVE": False,      # replay n 19 < 20 — but replayed, so replay only (r11 M1)
                 "EX-ARB-accept": False,  # tuning never gates; synthetic rows without a verdict
                 "QA": False,             # INHERENT — sheet only (r8 2), recorded as would_pass
                 "KICKOFF": False}        # nothing — "no synthetic = not passed"
