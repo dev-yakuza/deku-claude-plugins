@@ -9,8 +9,9 @@ M1  `replay/gate_report.decide` checks its rows before they count: a row needs a
     (`would_pass`) but never verified — released only by sheet verdicts; `unverified()` ignores them in `verified`.
 M2  a sentence-final full stop is a word boundary for the rating list (`_WORD` / `_UI_VERDICT`): "(all safe.)",
     "Split in two. Safe." refused; `foo.safe` / `safe.dart` stay identifiers.
-m1  a list word heading a known compound noun ("safe area insets", "risk register", "dangerous goods", "HIGH / LOW
-    contrast", 위험 물품) is descriptive — shown; the r7 refusals stay.
+m1  (reverted by review-k6-r10 M2) a list word heading a compound noun ("safe area insets", "risk register",
+    "dangerous goods", "HIGH / LOW contrast", 위험 물품) was shown; it is refused again (the r7 rule, the safe side) —
+    `M1_SHOWN` is now a refusal table; the r7 refusals stay.
 m2  a `-` / `/`-joined rating piece beside a scope word outside a span ("(low-risk only)", "(safe-only)") is refused.
 m3  a standing human drop a `dev grade` could not re-check is reported (`human_drops_unchecked`, `dev health`) and
     its `last_check` recorded; every `dev grade` still re-reads it (revocation unchanged), each Issue once per run.
@@ -245,6 +246,7 @@ class M2SentenceFinalStop(unittest.TestCase):
                 self.assertEqual(PF.blind_labels([a, b]), [a, b])
 
 
+# review-k6-r10 M2: these were shown under r8 m1 — refused again (r7 rule)
 M1_SHOWN = [("Use the safe area insets on iOS", "Use fixed padding"), ("Add a risk register doc", "Skip the doc"),
             ("Show HIGH / LOW contrast toggle", "No toggle"), ("Dangerous goods label on items", "Plain label"),
             ("위험 물품 목록 화면 추가", "목록 화면 그대로"), ("Enable safe mode on crash", "Restart"),
@@ -257,10 +259,10 @@ M1_REFUSED = [("Split in two (safe only)", "Single PR (risky only)"), ("Split in
 
 
 class m1CompoundNouns(unittest.TestCase):
-    def test_descriptive_compounds_are_shown(self):
+    def test_descriptive_compounds_are_refused_again(self):
         for a, b in M1_SHOWN:
             with self.subTest(pair=(a, b)):
-                self.assertEqual(PF.blind_labels([a, b]), [a, b])
+                self.assertTrue(any(x is None for x in PF.blind_labels([a, b])))
 
     def test_ratings_stay_refused(self):
         for a, b in M1_REFUSED:

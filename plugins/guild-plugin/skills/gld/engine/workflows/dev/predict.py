@@ -519,39 +519,10 @@ _UI_VERDICT = re.compile(r"(?<![\w/\-#@])(?<!\w\.)(?:ok|okay|ng)(?![\w/\-#@(]|\.
                          r"dialogs?|responses?|status|codes?|texts?|messages?|screens?|toasts?|버튼|키|탭|클릭|라벨|대화상자|"
                          r"다이얼로그|응답|상태|코드|문구|메시지|표시|표기|화면|토스트|ボタン|キー|タップ|ラベル|ダイアログ|"
                          r"レスポンス|応答|ステータス|コード|メッセージ|表示|画面|トースト))", re.I)
-_CJK_RATING = re.compile(r"안전(?!망)(?!\s?(?:장치|관리|구역|지대|모드))|위험(?!\s?(?:물품|물질|물건|물|구역|지역|관리))|"
-                         r"安全(?!網|装置|管理|地帯|区域)|危険(?!物|区域|地帯)")
-# 안전망 / 安全網 = a safety net (a domain noun). K6 r8 m1: so are the compound nouns a stem heads — 위험 물품 / 危険物
-# (dangerous goods), 안전 장치 / 安全装置 (a safety device), 위험 관리 / 安全管理 (risk / safety management), 구역 / 区域
-# (a zone) — the stem names a product thing there, it rates nothing
-# K6 r8 m1: an English list word that heads a known compound noun names a product thing, not a rating — "safe area
-# insets", "a risk register", "dangerous goods", "HIGH / LOW contrast" (a `/`-joined run of list words before the
-# head counts as one compound). Only these heads, only after these words: "(safe only)", "Safe." still rate.
-_CJK_STEMS = frozenset(("안전", "위험", "安全", "危険"))     # read through `_CJK_RATING` (its compound-noun exceptions)
-_COMPOUND_HEADS = {
-    "safe": ("area", "areas", "inset", "insets", "mode", "zone", "zones", "harbor", "harbour", "search"),
-    "unsafe": ("area", "areas", "mode", "zone", "zones"),
-    "risk": ("register", "registers", "registry", "management", "assessment", "assessments", "matrix", "log"),
-    "risks": ("register", "registers", "registry", "log"),
-    "dangerous": ("goods", "materials", "substances", "zone", "zones", "area", "areas"),
-    "hazardous": ("goods", "materials", "substances", "waste", "zone", "zones", "area", "areas"),
-    "high": ("contrast",),
-    "low": ("contrast",),
-}
-_COMPOUND_TAIL = re.compile(r"((?:\s*/\s*[^\W\d_]+)*)\s+([^\W\d_]+)(?![\w/\-#@(]|\.\w)")
-
-
-def _compound_noun(t, m):
-    """K6 r8 m1: is the list word `m` (a `_WORD` match in `t`) the modifier of a known compound noun
-    (`_COMPOUND_HEADS`) — directly ("risk register") or through a `/`-joined run of list words ("HIGH / LOW
-    contrast")?"""
-    f = m.group(0).casefold()
-    tail = _COMPOUND_TAIL.match(t, m.end())
-    if not tail:
-        return False
-    head = tail.group(2).casefold()
-    run = [f] + [x.strip().casefold() for x in tail.group(1).split("/") if x.strip()]
-    return all(head in _COMPOUND_HEADS.get(w, ()) for w in run)
+# 안전망 / 安全網 = a safety net (a domain noun). K6 r10 M2: the r8 m1 compound-noun exceptions ("safe area insets",
+# "risk register", 위험 물품, 安全装置 …) and r9 M3's contrast check over them are gone — a rating word / stem refuses the
+# label whatever noun follows it (the r7 rule; a descriptive label is refused — the safe side)
+_CJK_RATING = re.compile(r"안전(?!망)|위험|安全(?!網)|危険")
 
 
 def rating_word(text):
@@ -562,12 +533,10 @@ def rating_word(text):
     `FAIL` — a test verdict a descriptive AC line states: "스크립트가 PASS 한다") are read only inside an aside / a
     dropped tail (`clause_kind` via `_literal` / `_rating_caps`), never in a whole label."""
     t = _CODE_SPAN.sub(" ", str(text or ""))
-    for m in _WORD.finditer(t):
-        w = m.group(0)
+    for w in _WORD.findall(t):
         f = w.casefold()
         if f in RATING_WORDS and f not in RATING_UI_NOUNS or len(w) > 1 and w.isupper() and f in RATING_WEAK:
-            if f in _CJK_STEMS and _CJK_RATING.match(t, m.start()) or f not in _CJK_STEMS and not _compound_noun(t, m):
-                return True
+            return True
     if _glued_rates(t):
         return True
     return bool(_CJK_RATING.search(t))
@@ -773,8 +742,6 @@ def blind_labels(labels):
         return nl
     if any(x is None for x in nl):
         return nl
-    if _compound_contrast(labels):                       # K6 r9 M3: "safe mode" / "unsafe mode" — a rating contrast
-        return [None] * len(nl)
     parts = [_HEAD_SPLIT.split(_mask(x), 1) for x in nl]
     heads = [pp[0].strip() for pp in parts]
     keys = [re.sub(r"\s+", " ", h).strip().lower() for h in heads]
@@ -788,28 +755,6 @@ def blind_labels(labels):
             out.append(None if bad else _unmask(h + (", " + ", ".join(kept) if kept else "")))
         return [_unmask(x) if x is not None else None for x in out]
     return nl
-
-
-# K6 r9 M3: a CJK rating stem directly before one of the compound nouns `_CJK_RATING` excepts (r8 m1)
-_CJK_COMPOUND = re.compile(r"(안전|위험|安全|危険)\s?(장치|관리|구역|지대|모드|물품|물질|물건|지역|망|물|装置|管理|地帯|区域|網|物)")
-
-
-def _compound_contrast(labels):
-    """K6 r9 M3: do the options name the SAME compound head (r8 m1's exception — `_compound_noun`, the `_CJK_RATING`
-    look-aheads) with DIFFERENT list words before it ("safe mode" / "unsafe mode", "안전 구역" / "위험 구역")? The
-    modifier is then the only thing that tells them apart — a rating contrast: the whole blind question is refused.
-    One option alone naming a compound noun ("Use the safe area insets") or the options naming it alike stays shown."""
-    by = {}
-    for i, x in enumerate(labels):
-        t = _CODE_SPAN.sub(" ", str(x or ""))
-        for m in _WORD.finditer(t):
-            f = m.group(0).casefold()
-            if f in _COMPOUND_HEADS and _compound_noun(t, m):
-                head = _COMPOUND_TAIL.match(t, m.end()).group(2).casefold()
-                by.setdefault(head, {}).setdefault(i, set()).add(f)
-        for m in _CJK_COMPOUND.finditer(t):
-            by.setdefault(m.group(2), {}).setdefault(i, set()).add(m.group(1))
-    return any(len(v) > 1 and len(set(frozenset(x) for x in v.values())) > 1 for v in by.values())
 
 
 def neutral_label(label):

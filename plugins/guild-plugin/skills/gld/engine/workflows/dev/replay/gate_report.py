@@ -36,11 +36,16 @@ K6 r9 M1 / m2 / m3 — and checked against each other:
   of them (`_conflicting_groups`);
 * an explicit group and a `kind` that disagree (`EX-ARB:dismiss` with kind `accept`, a kind on a non-EX-ARB group)
   reject the row (`_rows_rejected`);
-* when every held-out row of a group names its `pass` (an integer ≥ 1 — design §10.2-3: a failed group is re-tuned,
-  then re-graded in a held-out final pass), only the LATEST pass counts — the whole group, not per id, so a final
-  pass is a full pass; without `pass` on every row the copies of one id count once, their worst verdict;
 * no tuning rows of a source in the input → train = test is unchecked for it: a group that would pass by that source
   is not verified (`_no_tuning_rows`) — feed the tuning rows too.
+K6 r10 M1 / m1 — r9 m2's "latest pass" is gone:
+* the copies of one held-out id always count ONCE, their worst verdict — a `pass` field is reported (`passes`), never
+  used to drop rows: one held-out set, graded once. A group the replay measured (n ≥ 20) and failed stays failed
+  whatever later rows say, so synthetic never covers it (K6 r8 user decision 1). Re-grading a re-tuned group needs a
+  FRESH held-out set (new Issues): the old held-out rows go in as tuning rows (checklist F), so the split check keeps
+  them out;
+* the tuning Issues are read from EVERY tuning row with an `issue/D-id` id — an unknown group, a kind conflict or a
+  missing source does not hide its Issue from the split check.
 K6 r8 user decision 2 — the OPEN groups (KICKOFF · STAKES, `predict.OPEN_GROUPS`) and the INHERENT groups
 (`conservative.INHERENT`) are released ONLY by the person's grading-sheet verdicts: their replay / synthetic results
 are recorded (`would_pass`) but never put under `verified` (`sheet_only`); `unverified()` ignores them in a shipped
@@ -51,7 +56,6 @@ Input rows (JSON list, or {"rows": [...]}) — one per graded decision:
     {"id": "syn-split-07", "group": "SPLIT", "set": "held-out", "source": "synthetic", "wrong": false}
     {"id": "syn-exarb-03", "group": "EX-ARB", "kind": "dismiss", "set": "held-out", "source": "synthetic", "wrong": false}
     {"id": "#3/D1", "group": "SPLIT", "set": "tuning", "source": "replay", "agree": true, "advance_agree": true}
-    {"id": "#41/D2", "group": "SPLIT", "set": "held-out", "source": "replay", "pass": 2, "agree": true, ...}
 
     gate_report.py --rows <graded.json> --out <verification.json> [--replay "<what was run>"]
 
@@ -153,7 +157,7 @@ def _canonical_id(row, src):
 
 
 def _pass_of(row):
-    """K6 r9 m2: the replay pass a row was graded in (`pass` — an integer ≥ 1), or None."""
+    """The `pass` a row names (an integer ≥ 1), or None — reported only (K6 r10 M1: never used for counting)."""
     p = row.get("pass")
     if isinstance(p, bool):
         return None
@@ -193,7 +197,20 @@ def decide(rows, groups=None):
     unknown = {}
     acc = dict((g, {"replay_n": 0, "replay_agree": 0, "replay_advance": 0, "synthetic_n": 0, "synthetic_wrong": 0,
                     "ignored": 0, "duplicates": 0}) for g in groups)
-    # pass 1 — every row checked and canonicalised: (row, group, set, source, id, issue)
+    # K6 r10 m1: the split unit is the Issue whatever the row's group — read the tuning Issues (and tuning ids) from
+    # EVERY tuning row before any group / kind / source check can drop it
+    tuning_issues = set()
+    tuning_ids = set()
+    for r in rows:
+        if str(r.get("set") or "").strip().lower() == "held-out" or _row_id(r) is None:
+            continue
+        m = _REPLAY_ID.match(_row_id(r))
+        if m:
+            tuning_issues.add(int(m.group(1)))
+            tuning_ids.add(("replay", "#%d/%s" % (int(m.group(1)), m.group(2))))
+        if str(r.get("source") or "").strip().lower() != "replay":
+            tuning_ids.add(("synthetic", _row_id(r)))
+    # every row checked and canonicalised: (row, group, set, source, id, issue)
     kept = []
     for r in rows:
         if _row_id(r) is None:
@@ -218,9 +235,6 @@ def decide(rows, groups=None):
         kept.append((r, g, st, src, cid, issue))
     # K6 r9 m3: the train = test checks need the tuning rows beside the held-out ones — per source
     tuning_src = set(src for _r, _g, st, src, _c, _i in kept if st == "tuning")
-    tuning_ids = set((src, cid) for _r, _g, st, src, cid, _i in kept if st == "tuning")
-    # K6 r9 M1(b): the replay split unit is the Issue (design §10.2-3: the first 30 Issues tune, the last 30 gate)
-    tuning_issues = set(i for _r, _g, st, src, _c, i in kept if st == "tuning" and src == "replay")
     # K6 r9 M1(d): one held-out decision / scenario belongs to ONE group — an id held out under two or more groups is
     # dropped from all of them and reported
     groups_of = {}
@@ -230,6 +244,7 @@ def decide(rows, groups=None):
     conflicting = dict(("%s %s" % k, sorted(v)) for k, v in groups_of.items() if len(v) > 1)
     held = dict((g, {"replay": {}, "synthetic": {}}) for g in groups)
     contaminated = dict((g, set()) for g in groups)
+    passes_of = dict((g, {}) for g in groups)
     overlap = set()
     for r, g, st, src, cid, issue in kept:
         a = acc[g]
@@ -247,30 +262,19 @@ def decide(rows, groups=None):
             v = (r.get("agree") is True, r.get("advance_agree") is True)
         else:
             v = (r.get("wrong") is False,)               # a synthetic row without a verdict is no pass (wrong)
-        held[g][src].setdefault(cid, []).append((_pass_of(r), v))
+        held[g][src].setdefault(cid, []).append(v)
+        if _pass_of(r) is not None:
+            passes_of[g].setdefault(src, set()).add(_pass_of(r))
     out = {}
     for g in groups:
         a = acc[g]
-        passes = {}
+        passes = dict((src, sorted(p)) for src, p in passes_of[g].items())
         counted = {}
         for src in ("replay", "synthetic"):
-            # K6 r9 m2: the LATEST pass of the group's held-out rows when every row names its pass (design §10.2-3:
-            # a failed group is re-tuned, then re-graded in a held-out final pass) — the earlier pass's rows are
-            # history; without a `pass` on every row the copies of one id count once, their worst verdict
-            copies = held[g][src]
-            allp = [p for c in copies.values() for p, _v in c]
-            if allp and all(p is not None for p in allp):
-                last = max(allp)
-                passes[src] = last
-                a[src + "_earlier_pass_rows"] = sum(1 for p in allp if p != last)
-                copies = dict((cid, [x for x in c if x[0] == last]) for cid, c in copies.items())
-                copies = dict((cid, c) for cid, c in copies.items() if c)
-            elif allp and any(p is not None for p in allp):
-                a[src + "_pass_mixed"] = True            # some rows name a pass, some do not — worst of all
+            # K6 r8 M1(b) / r10 M1: the copies of one id count once, their worst verdict — whatever `pass` they name
             res = {}
-            for cid, c in copies.items():
-                a["duplicates"] += len(c) - 1            # K6 r8 M1(b): counted once, its worst verdict
-                vs = [v for _p, v in c]
+            for cid, vs in held[g][src].items():
+                a["duplicates"] += len(vs) - 1
                 res[cid] = tuple(all(x) for x in zip(*vs))
             counted[src] = res
         rep, syn = counted["replay"], counted["synthetic"]
@@ -311,7 +315,7 @@ def decide(rows, groups=None):
                 parts.append("held-out synthetic wrong %d > %d" % (sw, lim) if sw > lim else
                              "held-out synthetic all wrong (%d/%d)" % (sw, sn))
         if passes:
-            a["pass"] = passes
+            a["passes"] = passes                         # reported only (K6 r10 M1)
         passed = ok_replay or ok_synth
         by = ("replay" if ok_replay else "synthetic") if passed else None
         unchecked = by is not None and by not in tuning_src
@@ -361,7 +365,8 @@ def report(rows, replay="", raw=b""):
                          "synthetic_min_n": SYNTH_MIN_N, "synthetic_only_when_replay_short": True,
                          "synthetic_unplanned": "replay only", "row_id_required": True,
                          "replay_id": "issue/D-id", "split_unit": "issue", "one_group_per_id": True,
-                         "latest_pass_only": True, "tuning_rows_required": True,
+                         "pass_counted": False,
+                         "copies_of_an_id": "worst verdict", "tuning_rows_required": True,
                          "sheet_only": sorted(sheet_only())},
             "input_sha256": hashlib.sha256(raw).hexdigest() if raw else None}
 

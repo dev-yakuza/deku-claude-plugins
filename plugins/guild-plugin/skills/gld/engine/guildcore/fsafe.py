@@ -18,7 +18,6 @@ import itertools
 import os
 import shutil
 import stat
-import threading
 
 FLAGS = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
 
@@ -30,12 +29,14 @@ class UnsafePath(Exception):
 _SEQ = itertools.count()
 
 
-def _tmp_name(target, tag):
-    """review-k6-r9 m1: the temp name beside `target` — unique per CALL, not per process: pid + thread id + a process
-    counter + random bytes. A pid-only name collided when two threads of one engine wrote the same leaf (`FileExistsError`
-    from `os.symlink` / `O_EXCL`); the write itself stays atomic (`os.replace`, the last writer wins)."""
-    return os.path.join(os.path.dirname(target), ".%s.engine%s-%d-%d-%d-%s" % (
-        os.path.basename(target), tag, os.getpid(), threading.get_ident(), next(_SEQ), os.urandom(4).hex()))
+def tmp_name(target, tag=""):
+    """The temp name beside `target` — unique per CALL (review-k6-r9 m1: a pid-only name collided when two threads of
+    one engine wrote the same leaf) and SHORT, whatever the leaf (review-k6-r10 m2: a name carrying the leaf hit
+    ENAMETOOLONG for a ~210-byte leaf): `.engine<tag>-<pid>-<process counter>-<6 hex>.tmp`, ≤ ~50 bytes. Same
+    directory, so `os.replace` stays atomic (the last writer wins). The one helper for every engine temp name
+    (`journal.atomic_write`, the read-only exports of `roles/settings` — review-k6-r10 m5)."""
+    return os.path.join(os.path.dirname(target), ".engine%s-%d-%d-%s.tmp" % (
+        tag, os.getpid(), next(_SEQ), os.urandom(3).hex()))
 
 
 def _parts(rel):
@@ -93,7 +94,7 @@ def write_bytes(root, rel, data, mode=0o644, replace_link=False):
     d = os.path.dirname(rel)
     if d:
         makedirs(root, d)
-    tmp = _tmp_name(target, "")
+    tmp = tmp_name(target, "")
     fd = os.open(tmp, FLAGS, mode)                       # O_EXCL: a name already there is never reused
     try:
         with os.fdopen(fd, "wb") as fh:
@@ -178,7 +179,7 @@ def symlink(root, rel, dest):
     target = resolve(root, rel, leaf_link_ok=True)
     if os.path.isdir(target) and not os.path.islink(target):
         shutil.rmtree(target, True)
-    tmp = _tmp_name(target, "-link")
+    tmp = tmp_name(target, "-link")
     os.symlink(dest, tmp)                                # fails on an existing name — never follows or reuses one
     try:
         os.replace(tmp, target)

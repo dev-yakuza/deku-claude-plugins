@@ -6,13 +6,13 @@ M1  `replay/gate_report.decide` checks its rows against each other before they c
     (c) a replay id is `issue/D-id` — `12/D2` ≡ `#12/D2`, any other spelling is rejected and reported;
     (d) one held-out decision / scenario counts for one group — an id under two groups is dropped from both, reported;
     (e) an explicit group and a `kind` that disagree reject the row.
-m2  when every held-out row of a group names its `pass`, only the latest pass counts (the whole group).
+m2  (reverted by review-k6-r10 M1) the "latest pass" is gone: the copies of one id count once, their worst verdict,
+    whatever `pass` they name — the m2 rows of `TABLE` now expect the worst-of result.
 m3  no tuning rows of a source → train = test unchecked → a group passing by that source is not verified (reported).
 M2  a `-` / `/`-joined rating compound (`low-risk`, `high-risk`, `risk-free`, `unsafe-only`) rates in a whole label;
     `fail-safe`, `thread-safe`, `read-only` stay descriptive.
-M3  the same compound head across options with different list-word modifiers ("safe mode" / "unsafe mode",
-    "안전 구역" / "위험 구역", "安全地帯" / "危険地帯") refuses the whole blind question; r8 m1's descriptive compound
-    nouns stay shown when the modifiers do not differ.
+M3  (superseded by review-k6-r10 M2) the compound-noun exception is gone — every label with a rating word / stem is
+    refused whatever the head noun; `M3_TABLE` now expects a refusal for every row.
 m1  `fsafe.symlink` / `fsafe.write_bytes` take a temp name unique per call — threads of one process writing the same
     leaf never collide (the K3 187 / 188 flake: a swallowed `FileExistsError` traceback split a `... ok` line).
 """
@@ -103,20 +103,20 @@ TABLE = [
      False),
     ("e: a kind on a non-EX-ARB group", "SPLIT", syn("SPLIT", [False] * 4, kind="accept"), False),
     ("e: bare EX-ARB still by kind", "EX-ARB-dismiss", syn("EX-ARB", [False] * 2, kind="dismiss"), True),
-    # m2 — the latest pass
+    # m2 → review-k6-r10 M1: `pass` never counts — the copies of an id, their worst verdict
     ("m2: first pass 6/20 off, final pass 20/20", "SPLIT",
      rep("SPLIT", issues(700, 14), agree=True, **{"pass": 1}) + rep("SPLIT", issues(714, 6), agree=False, **{"pass": 1})
-     + rep("SPLIT", issues(700, 20), **{"pass": 2}), True),
+     + rep("SPLIT", issues(700, 20), **{"pass": 2}), False),
     ("m2: first pass fine, final pass 6/20 off", "SPLIT",
      rep("SPLIT", issues(700, 20), **{"pass": 1})
      + rep("SPLIT", issues(700, 14), **{"pass": 2}) + rep("SPLIT", issues(714, 6), agree=False, **{"pass": 2}),
      False),
     ("m2: a final pass of the 6 failures only", "SPLIT",
      rep("SPLIT", issues(700, 14), **{"pass": 1}) + rep("SPLIT", issues(714, 6), agree=False, **{"pass": 1})
-     + rep("SPLIT", issues(714, 6), **{"pass": 2}), False),                                   # n 6 in the last pass
+     + rep("SPLIT", issues(714, 6), **{"pass": 2}), False),
     ("m2: pass as a string", "SPLIT",
      rep("SPLIT", issues(700, 20), agree=False, **{"pass": "1"}) + rep("SPLIT", issues(700, 20), **{"pass": "2"}),
-     True),
+     False),
     ("m2: some rows without a pass — worst of all", "SPLIT",
      rep("SPLIT", issues(700, 20), agree=False) + rep("SPLIT", issues(700, 20), **{"pass": 2}), False),
     ("m2: no pass anywhere — worst of copies", "SPLIT",
@@ -163,13 +163,14 @@ class M1GateRows(unittest.TestCase):
         self.assertEqual(per["EX-ARB-dismiss"]["synthetic_n"], 0)
 
     def test_latest_pass_reported(self):
+        # review-k6-r10 M1: the passes are reported, never counted — worst verdict of the copies
         per = decide(rep("SPLIT", issues(700, 20), agree=False, **{"pass": 1})
                      + rep("SPLIT", issues(700, 20), **{"pass": 2}))["SPLIT"]
-        self.assertEqual(per["pass"], {"replay": 2})
-        self.assertEqual(per["replay_earlier_pass_rows"], 20)
-        self.assertEqual((per["replay_n"], per["replay_agree"]), (20, 20))
+        self.assertEqual(per["passes"], {"replay": [1, 2]})
+        self.assertEqual((per["replay_n"], per["replay_agree"], per["duplicates"]), (20, 0, 20))
         per = decide(rep("SPLIT", issues(700, 20), agree=False) + rep("SPLIT", issues(700, 20), **{"pass": 2}))
-        self.assertTrue(per["SPLIT"]["replay_pass_mixed"])
+        self.assertEqual(per["SPLIT"]["passes"], {"replay": [2]})
+        self.assertEqual(per["SPLIT"]["replay_agree"], 0)
 
     def test_no_tuning_rows_cannot_verify(self):
         held = rep("HANDOFF", issues(100, 20)) + syn("DIRECTIVE", [False, False])
@@ -197,7 +198,8 @@ class M1GateRows(unittest.TestCase):
         c = doc["criteria"]
         self.assertEqual(c["synthetic_unplanned"], "replay only")
         self.assertEqual((c["replay_id"], c["split_unit"]), ("issue/D-id", "issue"))
-        self.assertTrue(c["one_group_per_id"] and c["latest_pass_only"] and c["tuning_rows_required"])
+        self.assertTrue(c["one_group_per_id"] and c["tuning_rows_required"])
+        self.assertFalse(c["pass_counted"])                                    # review-k6-r10 M1
         self.assertNotIn("HANDOFF", GR.SYNTH_PLANNED)
 
 
@@ -248,14 +250,14 @@ M3_TABLE = [
     (("Show HIGH / LOW contrast toggle", "Show HIGH contrast toggle"), True),
     (("분할 (위험 관리만)", "단일 PR (안전 관리만)"), True),
     (("分割（危険区域のみ）", "単一PR（安全区域のみ）"), True),
-    # r8 m1 kept: one option names the compound, or the options name it alike
-    (("Use the safe area insets on iOS", "Use fixed padding"), False),
-    (("Add a risk register doc", "Add a README section"), False),
-    (("Show HIGH / LOW contrast toggle", "Show a theme picker"), False),
-    (("Split in two (safe mode only)", "Single PR (safe mode only)"), False),
-    (("분할 (안전 장치 포함)", "단일 PR (안전 장치 포함)"), False),
-    (("위험 구역 정리", "위험 구역 유지"), False),
-    (("分割（安全装置のみ）", "単一PR（安全装置のみ）"), False),
+    # r8 m1 kept these shown — review-k6-r10 M2: refused (a rating word refuses whatever the head)
+    (("Use the safe area insets on iOS", "Use fixed padding"), True),
+    (("Add a risk register doc", "Add a README section"), True),
+    (("Show HIGH / LOW contrast toggle", "Show a theme picker"), True),
+    (("Split in two (safe mode only)", "Single PR (safe mode only)"), True),
+    (("분할 (안전 장치 포함)", "단일 PR (안전 장치 포함)"), True),
+    (("위험 구역 정리", "위험 구역 유지"), True),
+    (("分割（安全装置のみ）", "単一PR（安全装置のみ）"), True),
 ]
 
 
@@ -265,14 +267,14 @@ class M3CompoundHeadContrast(unittest.TestCase):
             with self.subTest(labels=labels):
                 out = PF.blind_labels(list(labels))
                 if refused:
-                    self.assertEqual(out, [None] * len(labels))
+                    self.assertIn(None, out)
                 else:
                     self.assertEqual(out, list(labels))
 
     def test_three_options(self):
-        self.assertEqual(PF.blind_labels(["A (safe mode only)", "B", "C (unsafe mode only)"]), [None] * 3)
-        self.assertEqual(PF.blind_labels(["A (safe mode only)", "B", "C (safe mode only)"]),
-                         ["A (safe mode only)", "B", "C (safe mode only)"])
+        self.assertEqual(PF.blind_labels(["A (safe mode only)", "B", "C (unsafe mode only)"]), [None, "B", None])
+        # review-k6-r10 M2: alike modifiers no longer shown either
+        self.assertEqual(PF.blind_labels(["A (safe mode only)", "B", "C (safe mode only)"]), [None, "B", None])
 
 
 class m1FsafeTempNames(unittest.TestCase):
@@ -306,10 +308,11 @@ class m1FsafeTempNames(unittest.TestCase):
 
     def test_temp_names_differ_per_call(self):
         t = os.path.join(tmpdir(self), "x")
-        names = set(fsafe._tmp_name(t, "-link") for _ in range(50))
+        names = set(fsafe.tmp_name(t, "-link") for _ in range(50))
         self.assertEqual(len(names), 50)
         self.assertTrue(all(os.path.dirname(n) == os.path.dirname(t) for n in names))   # same directory: atomic
-        self.assertTrue(all(os.path.basename(n).startswith(".x.engine-link-%d-" % os.getpid()) for n in names))
+        # review-k6-r10 m2: short, the leaf not in it
+        self.assertTrue(all(os.path.basename(n).startswith(".engine-link-%d-" % os.getpid()) for n in names))
 
     def test_a_link_leaf_on_the_way_is_still_refused(self):
         root = tmpdir(self)

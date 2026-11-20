@@ -134,12 +134,20 @@ def fsync_append(path, line):
 
 def atomic_write(path, text):
     os.makedirs(os.path.dirname(path), exist_ok=True)  # fs-ok: engine journal under <git-common-dir>/guild/engine (no role can write there)
-    tmp = "%s.tmp.%d" % (path, os.getpid())
-    with open(tmp, "w", encoding="utf-8") as fh:  # fs-ok: engine-owned journal
-        fh.write(text)
-        fh.flush()
-        os.fsync(fh.fileno())
-    os.replace(tmp, path)  # fs-ok: engine-owned journal
+    from guildcore.fsafe import tmp_name
+    tmp = tmp_name(path)        # review-k6-r10 m5: unique per call (two threads never share it), short
+    try:
+        with open(tmp, "x", encoding="utf-8") as fh:  # fs-ok: engine-owned journal
+            fh.write(text)
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.replace(tmp, path)  # fs-ok: engine-owned journal
+    except BaseException:
+        try:
+            os.unlink(tmp)  # fs-ok: engine-owned journal (our own temp file)
+        except OSError:
+            pass
+        raise
 
 
 def cache_key(point, inputs, tier, system_schema_sha, valves, plugin):

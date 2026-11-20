@@ -27,6 +27,7 @@ import os
 import re
 import subprocess
 
+from guildcore.fsafe import tmp_name
 from guildcore.roles import permissions
 from guildcore.roles import scope as SC
 
@@ -439,26 +440,18 @@ def export_tree_readonly(worktree, base_sha, rel_dir, dest):
     rc, _ = _git(worktree, "cat-file", "-e", "%s:%s" % (base_sha, rel_dir if rel_dir != "." else ""))
     if rc != 0:
         return None, None
-    tmp = dest + ".tmp%d" % os.getpid()
-    os.makedirs(tmp, exist_ok=True)  # fs-ok: engine export dir (base content) or the run dir in/ — engine-owned destination
+    os.makedirs(os.path.dirname(dest), exist_ok=True)  # fs-ok: engine export dir (base content) or the run dir in/ — engine-owned destination
+    tmp = tmp_name(dest)          # review-k6-r10 m5 / m6: unique per call, so two engines never share it
+    os.mkdir(tmp)  # fs-ok: engine export dir (base content) or the run dir in/ — engine-owned destination
     tree = "%s:%s" % (base_sha, rel_dir) if rel_dir != "." else base_sha
     arch = subprocess.Popen(["git", "archive", "--format=tar", tree], cwd=worktree,
                             stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
     tar = subprocess.run(["tar", "-x", "-C", tmp], stdin=arch.stdout, stderr=subprocess.PIPE)  # fs-ok: engine export dir (base content) or the run dir in/ — engine-owned destination
     arch.stdout.close()
     if arch.wait() != 0 or tar.returncode != 0:
+        _drop_tree(tmp)
         return None, None
-    digest = tree_digest(tmp)
-    for base, _dirs, fs in os.walk(tmp, topdown=False):
-        for f in fs:
-            fp = os.path.join(base, f)
-            os.chmod(fp, 0o555 if os.access(fp, os.X_OK) else 0o444)  # fs-ok: engine export dir (base content) or the run dir in/ — engine-owned destination
-        os.chmod(base, 0o555)  # fs-ok: engine export dir (base content) or the run dir in/ — engine-owned destination
-    os.makedirs(os.path.dirname(dest), exist_ok=True)  # fs-ok: engine export dir (base content) or the run dir in/ — engine-owned destination
-    os.replace(tmp, dest)  # fs-ok: engine home export / run dir in/ (roles denyWrite)
-    with open(stamp, "w") as fh:  # fs-ok: engine home export / run dir in/ (roles denyWrite)
-        fh.write(digest + "\n")
-    return dest, digest
+    return _publish_readonly(tmp, dest)
 
 
 SAFE_GIT_KEYS = re.compile(r"^(init\.defaultbranch|core\.autocrlf|core\.symlinks|core\.ignorecase|"
@@ -599,18 +592,50 @@ def export_gates_readonly(worktree, base_sha):
         for base, dirs, files in os.walk(dest):
             os.chmod(base, 0o755)  # fs-ok: engine export dir (base content) or the run dir in/ — engine-owned destination
         shutil.rmtree(dest)  # fs-ok: engine export dir (base content) or the run dir in/ — engine-owned destination
-    tmp = dest + ".tmp%d" % os.getpid()
-    if not export_gates(worktree, base_sha, tmp):
-        return None, None
-    digest = tree_digest(tmp)
-    for base, dirs, files in os.walk(tmp, topdown=False):
-        for f in files:
-            os.chmod(os.path.join(base, f), 0o444 if not os.access(os.path.join(base, f), os.X_OK) else 0o555)  # fs-ok: engine export dir (base content) or the run dir in/ — engine-owned destination
-        os.chmod(base, 0o555)  # fs-ok: engine export dir (base content) or the run dir in/ — engine-owned destination
     os.makedirs(os.path.dirname(dest), exist_ok=True)  # fs-ok: engine export dir (base content) or the run dir in/ — engine-owned destination
-    os.replace(tmp, dest)  # fs-ok: engine home export / run dir in/ (roles denyWrite)
-    with open(stamp, "w") as fh:  # fs-ok: engine home export / run dir in/ (roles denyWrite)
+    tmp = tmp_name(dest)          # review-k6-r10 m5 / m6: unique per call, so two engines never share it
+    if not export_gates(worktree, base_sha, tmp):
+        _drop_tree(tmp)
+        return None, None
+    return _publish_readonly(tmp, dest)
+
+
+def _drop_tree(path):
+    """Remove an engine-owned temp export (read-only after `_publish_readonly`'s chmod) — quietly."""
+    if not os.path.lexists(path):
+        return
+    for base, _d, _f in os.walk(path):
+        try:
+            os.chmod(base, 0o755)  # fs-ok: engine export dir (our own temp tree) — engine-owned destination
+        except OSError:
+            pass
+    import shutil
+    shutil.rmtree(path, ignore_errors=True)  # fs-ok: engine export dir (our own temp tree) — engine-owned destination
+
+
+def _publish_readonly(tmp, dest):
+    """Make the extracted `tmp` read-only and rename it to `dest`, then stamp its digest — (dest, digest).
+    review-k6-r10 m6: two engines (two Issues of one sprint, same base) may export the same `dest` at once. The
+    directory rename fails for the later one (`dest` already there, non-empty): when `dest` holds the SAME tree (its
+    digest equals ours) the later engine uses it and drops its own temp tree; a different tree raises as before. The
+    stamp is written through a temp file + `os.replace`, so a reader never sees it half written."""
+    digest = tree_digest(tmp)
+    for base, _dirs, fs in os.walk(tmp, topdown=False):
+        for f in fs:
+            fp = os.path.join(base, f)
+            os.chmod(fp, 0o555 if os.access(fp, os.X_OK) else 0o444)  # fs-ok: engine export dir (base content) or the run dir in/ — engine-owned destination
+        os.chmod(base, 0o555)  # fs-ok: engine export dir (base content) or the run dir in/ — engine-owned destination
+    try:
+        os.replace(tmp, dest)  # fs-ok: engine home export / run dir in/ (roles denyWrite)
+    except OSError:
+        if not (os.path.isdir(dest) and not os.path.islink(dest) and tree_digest(dest) == digest):
+            _drop_tree(tmp)
+            raise
+        _drop_tree(tmp)        # the other engine's export of the same base — identical; use it
+    stamp_tmp = tmp_name(dest + ".sha256")
+    with open(stamp_tmp, "x") as fh:  # fs-ok: engine home export / run dir in/ (roles denyWrite)
         fh.write(digest + "\n")
+    os.replace(stamp_tmp, dest + ".sha256")  # fs-ok: engine home export / run dir in/ (roles denyWrite)
     return dest, digest
 
 
