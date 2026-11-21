@@ -733,6 +733,8 @@ nothing.
 
 - **A human directive** = words in an Issue's body, or in a comment **without** a `<!-- guild:` marker, that tell Guild to
   change one of its judgments (never judged by author — same account).
+  ⚠ A line that starts with `guild-answer:` is a human's answer to a question a newer Guild version (0.102+) asked on
+  this Issue — **not a directive**; skip that line (the rest of the comment is read as usual).
 - **Read before stopping** (each its own Bash call — run these reads **exactly as given**: no `.body[0:N]`, `head` or filter, the bodies-contract's rule; measured #620 `.body[0:600]`, #621 #623 not run — a directive's scope exclusion sits after its first sentence (measured #244: cut at 300, the line `잡이 실행된 뒤 실패한 red는 이 지시의 대상이 아니다` was gone); the commit gate refuses that cut read (`directive-slice` — `_invariants.md`)): this Issue's comments
   `gh api repos/<owner>/<repo>/issues/<n>/comments --paginate --jq '.[] | select((.body // "") | contains("<!-- guild:") | not) | {id, html_url, body}'`
   and its body (already read); for **each** `Sprint: #<t>` line in the body whose tracker is `OPEN`

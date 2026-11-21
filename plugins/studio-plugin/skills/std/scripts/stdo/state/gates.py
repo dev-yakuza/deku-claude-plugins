@@ -13,7 +13,8 @@ from . import backup, commands, evidence, labels, schema, store
 from .collect import CollectError
 from .hashes import hash_of
 from .router import decide, precheck
-from .shown import GATES, ONE, frames_index, frames_stamp, hash12, scopes, shown_hash, tuple_of
+from .shown import GATES, ONE, captures as shown_captures, frames_index, frames_stamp, hash12, scopes, \
+    shown_hash, tuple_of
 from .tuples import tuple_for
 
 C = commands
@@ -64,7 +65,6 @@ def shown(vdir, state, lang, ctx, o, providers, hooks):
         box["lines"] = gate4b.lines(vdir, lang, scope, _write_text)
     if gate == "1":  # 0.1.2: one line per teaching note of verify.json (not from the source: approving ① approves it)
         box["lines"] = note_lines(vdir, lang)
-
     def check(s):
         first = precheck(s, lang)
         if first:
@@ -78,6 +78,9 @@ def shown(vdir, state, lang, ctx, o, providers, hooks):
                 _refuse("the stills of %s were not written again after --begin" % scope, C.FAIL)
             if pend["tuple"] != hash_of(tuple_of(s, lang, cur, "3", scope)):
                 box["changed"] = True
+            # 0.2.5: one line per board capture the script uses (address, bytes, floor, warnings), read under the
+            # state lock, next to the shown hash that binds the same values
+            box["lines"] = [c["line"] for _p, c in sorted(shown_captures(ctx, s, cur).items())]
 
     def change(s):
         L = s["langs"][lang]
@@ -92,13 +95,15 @@ def shown(vdir, state, lang, ctx, o, providers, hooks):
             return
         L["shown"].setdefault(gate, {})[scope] = {"hash": shown_hash(ctx, s, lang, cur, gate, scope),
                                                   "at": schema.now()}
-        if gate in ("2", "4b") or (gate == "1" and box["lines"]):  # ①: only with notes (shown.json stays as it was)
+        if gate in ("2", "4b") or (gate in ("1", "3") and box.get("lines")):  # ①/③: only with notes or captures
             L["shown"][gate][scope]["lines"] = list(box["lines"])
         if gate == "3":
             L["shown_pending"].pop(scope, None)
         box["hash12"] = hash12(s, lang, gate)
         if gate == "4b" and box["hash12"]:  # the guard checks the union over the current platforms (pilot-1 P4)
             box["union"] = labels.gate4b_lines(s, lang)
+        if gate == "3" and box["hash12"]:  # approve checks the union over the current outputs (0.2.5)
+            box["union"] = gate3_lines(s, lang)
 
     def after(s):
         _mirror_shown(vdir, s, lang)
@@ -114,8 +119,8 @@ def shown(vdir, state, lang, ctx, o, providers, hooks):
         _out("begin %s" % scope)
     else:
         _out("hash12 %s" % box["hash12"] if box.get("hash12") else "shown %s (other scopes not shown yet)" % scope)
-    if gate in ("2", "4b") and not begin:  # the question shows each of these lines (the guard checks them — V1, Y2)
-        for line in box["lines"]:
+    if gate in ("2", "4b", "3") and not begin and box.get("lines"):  # the question shows each of these lines (V1,
+        for line in box["lines"]:  # Y2; ③'s captures: approve checks them)
             _out("in the question: %s" % line)
     if gate == "1":  # ①: each commit to the source after begin (M1e review S5), as record-source printed them, then
         for line in labels.source_commit_lines(state) + box["lines"]:  # the teaching notes (0.1.2)
@@ -123,10 +128,23 @@ def shown(vdir, state, lang, ctx, o, providers, hooks):
     if box.get("hash12") and gate in ("1", "2", "3", "4a", "4b"):
         for line in _question(ctx, state, lang, gate, scope, box):
             _out(line)
+    if gate == "source-diff":  # 0.2.4: a URL source's promotion wrote the diff the person reads (its sha is shown)
+        p = os.path.join(vdir, "work", "source-diff.txt")
+        if os.path.isfile(p):
+            _out("read: %s" % os.path.relpath(p, ctx["repo"]).replace(os.sep, "/"))
     if gate == "1" and box.get("hash12"):  # 0.0.26: the images the script does not show, and why (not hashed)
         for line in unused_lines(vdir, lang):
             _out(line)
     return C.OK
+
+
+def gate3_lines(state, lang):
+    """The capture lines a ③ question must show: the union, in the outputs' order, of what `shown 3 --end` recorded for
+    every current output (raises ValueError on a malformed record — approve refuses then)."""
+    out = []
+    for o in scopes(state, lang, "3"):
+        out += [l for l in labels.gate2_lines(state, lang, "3", o) if l not in out]
+    return out
 
 
 NOTE_LINE = "원문 밖 설명: \"%s\" — 근거: %s"
@@ -181,9 +199,10 @@ def _question(ctx, state, lang, gate, scope, box):
     elif gate == "2":
         header = "[%s] ② 오디션 — %s/narrator.wav" % (v, _rel(vpaths.audition_dir("", sr, state, lang)))
         lines, after = box["lines"], "the length warning when there is one"
-    elif gate in ("3", "4a"):  # 0.0.28 Q17: printed, so the model writes less (no guard comparison for these yet)
+    elif gate in ("3", "4a"):  # 0.0.28 Q17: printed, so the model writes less (③'s capture lines: approve checks)
         return labels.question_block("%s · hash %s" % (_header34(ctx, state, lang, gate, scope), box["hash12"]),
-                                     _lines34(ctx, state, lang, gate, scope), "the auditor's findings")
+                                     _lines34(ctx, state, lang, gate, scope) + list(box.get("union") or []),
+                                     "the auditor's findings")
     else:
         header = "[%s] ④b 배포용 글 — %s" % (v, _rel(vpaths.copy_file("", sr, state, lang, scope)))
         lines, after = box["union"], "the auditor's findings"
@@ -360,20 +379,30 @@ def approve(repo, vdir, state, lang, ctx, o, providers, hooks, argv):
 
     def check_state(s):
         _gate_checks(s, lang, cur, gate)
+        if gate == "3":  # 0.2.5: ③ binds every used board capture's bytes and floor (capture.py runs unprompted)
+            caps = {p: {k: c[k] for k in ("png_sha", "floor")} for p, c in shown_captures(ctx, s, cur).items()}
         _shown_checks(ctx, s, lang, cur, gate, expect)
+        if gate == "3":  # read again after the shown hash's check: what is recorded is what that check saw
+            again = {p: {k: c[k] for k in ("png_sha", "floor")} for p, c in shown_captures(ctx, s, cur).items()}
+            if again != caps:
+                _refuse("a board capture changed while approving: show 3 again", C.FAIL)
+            box["captures"] = caps
         if gate in ("1", "4b"):
             box["excerpts"], box["copy"] = _excerpts(vdir, lang, gate, scopes(s, lang, gate))
         box["state"] = s
 
     def ev_check(ev):
         """①: the recorded question shows every source-commit line and every note line `shown 1` recorded — the
-        script checks it itself (after a `source` the 0.0.26 guard checks only the label and the source lines)."""
-        if gate != "1" or ev.get("mode") == "proxy":
+        script checks it itself (after a `source` the 0.0.26 guard checks only the label and the source lines).
+        ③: every capture line `shown 3` recorded (0.2.5)."""
+        if gate not in ("1", "3") or ev.get("mode") == "proxy":
             return  # the proxy mode asks no one (credit.py does the same)
         try:
-            lines = labels.source_commit_lines(box["state"]) + labels.gate2_lines(box["state"], lang, "1")
+            lines = labels.source_commit_lines(box["state"]) + labels.gate2_lines(box["state"], lang, "1") \
+                if gate == "1" else gate3_lines(box["state"], lang)
         except ValueError as e:
-            _refuse("gate-lines-unknown: the lines ① must show cannot be read (%s)" % e, C.NO_EVIDENCE)
+            _refuse("gate-lines-unknown: the lines %s must show cannot be read (%s)" % ("①" if gate == "1" else "③", e),
+                    C.NO_EVIDENCE)
         from ..commit.summary import first_missing, missing_text
         q = ev.get("question")
         miss = first_missing(lines, q if isinstance(q, str) else "")  # a missing or odd question shows nothing
@@ -401,6 +430,8 @@ def approve(repo, vdir, state, lang, ctx, o, providers, hooks, argv):
                 rec["excerpts"] = list(box["excerpts"])
             if gate == "4b":
                 rec["excerpts"] = list(box["copy"].get(sc, []))
+            if gate == "3" and box.get("captures"):
+                rec["captures"] = dict(box["captures"])
             if gate == "2":
                 rec["sentences"] = dict(box["sentences"])
                 rec[schema.PRONOUNCE_SHA] = hash_sha(box["pronounce"])

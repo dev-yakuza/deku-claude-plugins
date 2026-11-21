@@ -93,6 +93,8 @@ def check(top, vdir, state, cfg, copy_sha, overlay_state, overlay_data, fp):
         raise ScopeError(1, "work/assets.json is missing or unreadable — run resolve_assets.py first")
     if data.get("source_copy_sha") != copy_sha:
         raise ScopeError(1, "work/assets.json was made from another copy of the source — run resolve_assets.py again")
+    if state["source"].get("kind") == "url":
+        return _check_url(vdir, state, cfg, copy_sha, overlay_data, fp, data)
     source_rel = state["source"]["path"]
     if state.get("scope") == "public":
         if not assets.is_public(source_rel, cfg):
@@ -103,6 +105,10 @@ def check(top, vdir, state, cfg, copy_sha, overlay_state, overlay_data, fp):
         if hit:
             raise ScopeError(1, "the source %s is an internal source of the overlay (%s) — not for a public video"
                              % (source_rel, hit))
+    return _judge_images(vdir, state, copy_sha, overlay_data, fp, data)
+
+
+def _judge_images(vdir, state, copy_sha, overlay_data, fp, data, internal_host=None):
     classes, note = analyst_classes(vdir)
     for img in data["images"]:
         if img.get("reason") == "internal":  # this check's own mark from an earlier run: judged again below
@@ -114,10 +120,43 @@ def check(top, vdir, state, cfg, copy_sha, overlay_state, overlay_data, fp):
         img["analyst_reason"] = c.get("reason") if isinstance(c.get("reason"), str) else None
         img["scope"] = assets.stricter(img.get("floor") or "unknown", mapped)
         res = img.get("resolved")
-        img["internal"] = cls == "internal" or bool(isinstance(res, str) and internal_source(res, overlay_data))
+        img["internal"] = cls == "internal" or bool(isinstance(res, str) and internal_source(res, overlay_data)) or \
+            bool(internal_host and any(internal_host("https://%s/" % r["host"] if r.get("host") else r.get("src"))
+                                       for r in img.get("refs") or [] if isinstance(r, dict)))
         if img["internal"] and state.get("scope") != "internal" and img.get("status") == "ok":
             img["status"], img["reason"] = "unusable", "internal"
     data["scope_check"] = {"result": "pass", "source_copy_sha": copy_sha, "scripts_version": SCRIPTS_VERSION,
                            "video_scope": state.get("scope"), "note": note}
     data["scope_check"].update(fp)
     return data
+
+
+def _check_url(vdir, state, cfg, copy_sha, overlay_data, fp, data):
+    """A URL source (m2-plan §6.2 6): public when its host is one of public_domains, not a host of the overlay (an
+    exact public domain excepted, as capture.py) and not an overlay source; a page picture from an overlay host is
+    internal."""
+    from urllib.parse import urlsplit
+    from ..capture import rules
+    url = state["source"].get("url")
+    st, hosts, terms = rules.items_of(overlay_data or {})
+    pub = rules.public_domains(cfg)
+
+    def internal_host(u):
+        try:
+            h = (urlsplit(u).hostname or "").lower() if isinstance(u, str) else ""
+        except ValueError:
+            h = ""
+        return bool(h) and rules.host_hit(h, hosts) and h not in pub
+
+    if state.get("scope") == "public":
+        # the asked address and the page's final one (a redirect on the same host): both public, neither internal
+        from ..capture import files
+        cap = state["source"].get("capture") if isinstance(state["source"].get("capture"), dict) else {}
+        rec, _why = files.read(os.path.join(vdir, "work", "source"))
+        finals = [u for u in (cap.get("url"), (rec or {}).get("final")) if isinstance(u, str)]
+        internal_urls = rules.urls_of(overlay_data or {})
+        for u, what in [(url, "the source page %s" % url)] + [(u, "the captured page %s" % u) for u in finals]:
+            why = rules.final_problem(u, cfg, (st, hosts, terms), internal_urls, what)
+            if why:
+                raise ScopeError(1, why + " — not for a public video")
+    return _judge_images(vdir, state, copy_sha, overlay_data, fp, data, internal_host=internal_host)

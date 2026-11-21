@@ -207,6 +207,9 @@ The classes the supervisor writes — **this list is the code's, verbatim**:
 가장 가까운 class 로 접어 `class` 에 쓰고(`create-settle-wait`·`gh-service-wait` → `busy`, `create-unsettled`·`gh-unavailable` →
 `busy-skipped`) 정확한 class 를 `class_exact` 에 남긴다 — 롤백한 0.101.3 도 실패로 오독하지 않게. 렌더는 `class_exact` 로.
 
+이 목록 밖의 class 두 개는 더 새 Guild(0.102+)의 감독기가 쓴다 — 버전을 내린 레포의 로그에 남아 있을 수 있다:
+`busy`·`busy-skipped` = **미처리**(그 이슈를 다른 실행이 잡고 있어 건너뜀). 실패로 렌더하지 말 것 — 다음 실행에서 이어진다.
+
 ⚠ `base-decision-failed`와 `base-unresolved`는 **다른 일**이다. 앞은 base 결정 자체가 실패한
 것(입력이 깨졌거나 출력을 파싱할 수 없다 — 의존에 대해 아는 것이 없으므로 하류가 추측 위에
 쌓이면 안 된다), 뒤는 base 이름은 알지만 그 ref가 로컬에도 원격에도 없는 것(의존이 아직 랜딩되지

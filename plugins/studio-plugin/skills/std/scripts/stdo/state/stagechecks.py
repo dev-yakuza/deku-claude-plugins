@@ -73,6 +73,22 @@ def _file(inp, p):
     return [(inp.rel(p), hashes.file_sha(p))]
 
 
+def _captures(inp):
+    """work/captures.json (board captures, 0.2.5) when there is one — nothing otherwise, so a video without captures
+    keeps the input sha it had: a new shot, one taken again or a changed public_domains makes the script and board checks
+    run again."""
+    p = os.path.join(inp.vdir, "work", "captures.json")
+    if not os.path.lexists(p):
+        return []
+    try:  # a capture's floor reads public_domains (the overlay is an input of its own)
+        with open(os.path.join(inp.repo, ".claude", "studio", "config.json"), encoding="utf-8") as f:
+            cfg = json.load(f)
+    except (OSError, ValueError):
+        cfg = None
+    cfg = cfg if isinstance(cfg, dict) else {}
+    return _file(inp, p) + [("config:public_domains", hashes.hash_of(cfg.get("public_domains")))]
+
+
 def _script(inp):
     return _file(inp, inp.ctx["script"])
 
@@ -191,7 +207,7 @@ RESOLVERS = {
     "script": _script,
     "claims_map": lambda i: _file(i, i.work("claims-map.json")),
     "format": lambda i: _file(i, os.path.join(i.repo, ".claude", "studio", "formats", "%s.md" % i.state.get("kind"))),
-    "assets_json": lambda i: _file(i, os.path.join(i.vdir, "work", "assets.json")),
+    "assets_json": lambda i: _file(i, os.path.join(i.vdir, "work", "assets.json")) + _captures(i),
     "script_files": _script_files,
     "verify_draft": lambda i: _file(i, i.work("verify.draft.json")),
     "source_copy": lambda i: _file(i, frozen_copy_path(i.vdir, i.state["source"])),

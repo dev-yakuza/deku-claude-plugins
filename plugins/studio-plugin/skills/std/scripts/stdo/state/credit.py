@@ -25,14 +25,37 @@ def _entry(repo, vdir, path):
     if item is None:
         raise store.Refused("%s has no entry for %s" % (credits.DRAFT, path), C.FAIL)
     from .. import look
+    from ..capture import shots
     bl = look.brand_logo(repo, vdir)
     asset = credits.assets_by_src(assets_mod.read(vdir), bl).get(path)
     if asset is None and look.logo_reason(bl, path):  # the brand logo, not usable: say why (0.0.26)
         raise store.Refused("%s: %s" % (path, look.logo_reason(bl, path)), C.FAIL)
+    cap = shots.for_repo(repo, vdir, store.read_state(vdir)).get(path) if asset is None else None
+    if cap is not None:  # a board capture: its floor judged now, its source and time from its record
+        if cap["status"] != "ok":
+            raise store.Refused("%s: the board capture %s is not usable (%s) — run capture.py shot again"
+                                % (path, cap["capture"], cap["reason"]), C.FAIL)
+        asset = cap
     try:
-        return credits.normalize(item, os.path.normpath(os.path.join(vdir, path)), asset)
+        e = credits.normalize(item, os.path.normpath(os.path.join(vdir, path)), asset)
     except credits.CreditError as e:
         raise store.Refused(str(e), C.FAIL)
+    if cap is not None:
+        for k, v in sorted(shots.credit_fields(cap).items()):
+            if k in item and item[k] != v:
+                raise store.Refused("%s: %s is the capture's own (%s) — copy it exactly or leave it out of the draft"
+                                    % (path, k, v), C.FAIL)
+            e[k] = v
+        if e["sha256"] != cap["sha256"]:
+            raise store.Refused("%s is not the picture capture.py recorded — run capture.py shot again" % path, C.FAIL)
+    return e
+
+
+def entry_lines(e):
+    """The `key=value` lines the question shows: the eight fields, then a capture's source and captured_at."""
+    from ..capture import shots
+    from .hashes import canonical
+    return credits.lines(e) + ["%s=%s" % (k, canonical(e[k]).decode("utf-8")) for k in shots.CREDIT_KEYS if k in e]
 
 
 def _others(repo, root, video, hashv):
@@ -57,14 +80,14 @@ def preview(repo, root, vdir, state, o):
         raise store.Refused("credit-preview <video> <path> (the image's script_src)", C.USAGE)
     e = _entry(repo, vdir, o["_"][1])
     h = credits.h12(e)
-    for line in credits.lines(e):
+    for line in entry_lines(e):
         sys.stdout.write("%s\n" % line)
     for v in _others(repo, root, state["video"], credits.entry_hash(e)):
         sys.stdout.write("이전 승인 %s (ask again: every video records its own)\n" % v)
     if credits.unsupported(e):
         sys.stdout.write("warning: %s — check_assets will refuse it\n" % credits.unsupported(e))
     sys.stdout.write("label 출처 %s %s\n" % (state["video"], h))
-    for line in labels.question_block("[%s] 출처 — %s · hash %s" % (state["video"], o["_"][1], h), credits.lines(e)):
+    for line in labels.question_block("[%s] 출처 — %s · hash %s" % (state["video"], o["_"][1], h), entry_lines(e)):
         sys.stdout.write("%s\n" % line)  # the block to paste unchanged (pilot-1 P4)
     return C.OK
 
@@ -90,7 +113,7 @@ def credit(repo, vdir, state, o, hooks, argv, with_evidence):
     def ev_check(ev):
         if ev.get("mode") == "proxy":
             return  # the proxy mode asks no one (as at the gates); the video commit waits for a person's credit (J131)
-        miss = first_missing(credits.lines(e), ev.get("question") or "")
+        miss = first_missing(entry_lines(e), ev.get("question") or "")
         if miss:
             raise store.Refused("%s: %s" % (FIELDS_NOT_SHOWN, missing_text(miss, "credit-preview")), C.NO_EVIDENCE)
 

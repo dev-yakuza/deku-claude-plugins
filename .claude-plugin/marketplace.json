@@ -20,7 +20,7 @@
       "name": "guild-plugin",
       "source": "./plugins/guild-plugin",
       "description": "Guild - self-evolving agent organization: builds a harness, develops via a spec-driven flow, and co-evolves codebase and agent team",
-      "version": "0.101.0"
+      "version": "0.102.0"
     },
     {
       "name": "herald-plugin",
@@ -32,7 +32,7 @@
       "name": "studio-plugin",
       "source": "./plugins/studio-plugin",
       "description": "Studio - a per-repo video production organization: turns writing that already exists in a repository into narrated videos with script2video, with fact checks against the source, four human review gates and platform copy",
-      "version": "0.2.3"
+      "version": "0.2.5"
     }
   ]
 }

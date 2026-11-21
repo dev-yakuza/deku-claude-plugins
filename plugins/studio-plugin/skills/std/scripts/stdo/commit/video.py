@@ -7,9 +7,11 @@ files are staged.
 
 Before staging (s2v runs here, never in the hook): the light check (approvals, held, proxy approvals and proxy credits
 — J131), the router's full check per active language (nothing to redo: a ② rework stales the render, J116), the source
-stage's check again (assets.json and the scope check still the recorded ones), check_assets and validate_copy again
-(J142), the files the script refers to present, no machine-only path, no orphan base voice, no committed picture whose
-CREDITS entry forbids redistribution (every remote counts as public: Studio cannot ask it — J150), no home path or
+stage's check again (assets.json and the scope check still the recorded ones; a URL source's latest recheck read the
+page at most 24 hours before staging and found the approved copy — urlsource.recheck_problem), every board capture the
+script uses still the bytes its ③ approval bound (capture.py takes a shot again without a prompt), check_assets and
+validate_copy again (J142), the files the script refers to present, no machine-only path, no orphan base voice, no
+committed picture whose CREDITS entry forbids redistribution (every remote counts as public: Studio cannot ask it — J150), no home path or
 in-house term in the committed text.
 
 The pronounce merge: HEAD's object in its own order and format, the video's approved readings (the valid
@@ -230,6 +232,11 @@ class VideoKind(object):
         problems += self._content_problems(ctx, vdir, paths, root, target)
         if problems:
             return Collected([], problems=problems)
+        # 0.2.5: the bytes each picture must have once staged (its approved CREDITS entry's; for a board capture also
+        # the ones ③ bound) — capture.py may run between these checks and `git add` (staged_problems, --stage only)
+        cred, _why = credits_mod.read(os.path.join(vdir, credits_mod.FILE))
+        self._want_pictures = {p: (cred or {}).get(os.path.relpath(os.path.join(ctx.top, p), vdir).replace(
+            os.sep, "/"), {}).get("sha256") for p in paths if p.startswith("%s/videos/%s/assets/" % (root, target))}
         extra = ("발음 사전: 충돌 %d개 건너뜀 (%s)" % (len(skipped), " ".join(skipped))) if skipped else None
         col = Collected(paths, states={target: {"last_seq": approvals.state_seq(vdir)}},
                         warnings=["pronounce.json: %d reading(s) of this video skipped (another value is in the "
@@ -240,6 +247,7 @@ class VideoKind(object):
     def _full(self, ctx, vdir, state, langs, video):
         """The router, the source check, check_assets and validate_copy again (J142)."""
         from .. import board
+        from ..capture import shots
         from ..distribute import check as copy_check
         from ..source import scope
         from ..state import cli as scli, flow, schema
@@ -254,6 +262,11 @@ class VideoKind(object):
         if note or state["source"].get("assets_sha") is None:
             out.append(Problem(1, "video %s: the source's images are not checked as recorded (%s) — run the source "
                                   "stage again" % (video, note or "no assets_sha")))
+        if state["source"].get("kind") == "url":  # 0.2.4: the page read again, at most 24 hours ago, as approved
+            from ..state import urlsource
+            why = urlsource.recheck_problem(state)
+            if why:
+                out.append(Problem(1, "video %s: %s" % (video, why)))
         for lang in langs:
             sctx = scli._ctx(ctx.top, cfg, vdir, lang)
             try:
@@ -269,7 +282,12 @@ class VideoKind(object):
                 out.append(Problem(1, "video %s [%s]: files the script refers to are missing: %s"
                                       % (video, lang, ", ".join(missing[:5]))))
             self._files += [f.get("path") for f in ins.get("files") or [] if isinstance(f, dict)]
+            caps = shots.bound(shots.for_repo(ctx.top, vdir, state, ctx.env), ins.get("files"))
             for o in schema.current_outputs(state, lang):
+                rec3 = (state["langs"][lang]["approved"].get("3") or {}).get(o)
+                if isinstance(rec3, dict) and (rec3.get("captures") or {}) != caps:  # 0.2.5: ③ bound the bytes
+                    out.append(Problem(1, "video %s [%s] %s: a board capture is not the picture ③ approved (taken "
+                                          "again, added or removed since) — board and ③ again" % (video, lang, o)))
                 res, details, _cur = board.check(ctx.top, vdir, state, lang, sctx, o, providers, ctx.env,
                                                  self.runner)
                 out += [Problem(1, "video %s [%s] %s: check_assets: %s" % (video, lang, o, p))
@@ -327,19 +345,45 @@ class VideoKind(object):
         return out
 
     # ---- the hook ----
+    def _staged_pictures(self, ctx, studio_paths):
+        """--stage only (the hook has no `_want_pictures`): every staged picture is the bytes the checks approved.
+        The work tree's file is read once: its sha256 must be the wanted one, and git's object id of those bytes as
+        `git add` makes it (`hash-object --path`: a clean filter such as git-lfs stores a pointer) the index's."""
+        import hashlib
+        want = getattr(self, "_want_pictures", None)
+        paths = sorted(set(studio_paths) & set(want or {}))
+        index = ctx.git.index_blobs(paths) if paths else {}
+        out = []
+        for p in paths:
+            try:
+                with open(os.path.join(ctx.top, p), "rb") as f:
+                    body = f.read()
+            except OSError:
+                body = None
+            ok = body is not None and hashlib.sha256(body).hexdigest() == want[p]
+            if ok:
+                oid = ctx.git.text("hash-object", "--path=" + p, "--stdin", input=body).strip()
+                ok = oid == index.get(p)
+            if not ok:
+                out.append(Problem(1, "%s changed while it was staged (not the picture its credit and ③ approved) "
+                                      "— stage again" % p, p))
+        return out
+
     def staged_problems(self, ctx, studio_paths):
-        """The staged pronounce.json is exactly HEAD's with the video's approved readings merged (v5.1 T4)."""
+        """The staged pronounce.json is exactly HEAD's with the video's approved readings merged (v5.1 T4); at
+        --stage, also every staged picture's bytes (0.2.5)."""
+        pics = self._staged_pictures(ctx, studio_paths)
         if PRONOUNCE not in studio_paths:
-            return []
+            return pics
         from ..state import schema, store
         vids = sorted(set(v[1] for v in (ctx.cls.video_of(p) for p in studio_paths) if v))
         if len(vids) != 1:
-            return [Problem(1, "pronounce.json is committed with exactly one video's commit", PRONOUNCE)]
+            return pics + [Problem(1, "pronounce.json is committed with exactly one video's commit", PRONOUNCE)]
         vdir = approvals.video_dir(ctx.top, ctx.roots[0], vids[0])
         try:
             state = store.read_state(vdir)
         except schema.SchemaError as e:
-            return [Problem(1, "video %s: %s" % (vids[0], e), PRONOUNCE)]
+            return pics + [Problem(1, "video %s: %s" % (vids[0], e), PRONOUNCE)]
         head = ctx.git.show("%s:%s" % (ctx.head, PRONOUNCE)) if ctx.head else None
         head = head.decode("utf-8") if isinstance(head, bytes) else head
         staged = ctx.git.show(":" + PRONOUNCE)
@@ -347,8 +391,8 @@ class VideoKind(object):
         try:
             want, _skipped = merge(head, approved_readings(vdir, state))
         except ValueError as e:
-            return [Problem(1, str(e), PRONOUNCE)]
+            return pics + [Problem(1, str(e), PRONOUNCE)]
         if want is None or staged != want:
-            return [Problem(1, "the staged pronounce.json is not HEAD's with video %s's approved readings merged — "
-                               "stage again with check_commit.py --stage video" % vids[0], PRONOUNCE)]
-        return []
+            return pics + [Problem(1, "the staged pronounce.json is not HEAD's with video %s's approved readings "
+                                      "merged — stage again with check_commit.py --stage video" % vids[0], PRONOUNCE)]
+        return pics

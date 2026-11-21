@@ -1068,9 +1068,10 @@ function render(script, values) {
 // ---------- capture (no network, no browser) ----------
 // SCENARIO.capture = { "<url>": result | [result per attempt], "*": the default }; a result is
 // { url (the final address), status, title, lang, idle, text: [{kind, text, ruby}], images: [{src, kind, alt, inCapture,
-// bytes (the file's text; written to --assets-dir as <sha>.<ext>), ext}], opaque, notShown, blocked: [{url, reason}],
-// websockets, contentHash (null allowed; absent: computed), exit, signal, stderr }. Unknown result keys are ignored.
-// A 67-byte PNG (1×1, grey) is the picture.
+// bytes (the file's text; or hex: the bytes in hex; written to --assets-dir as <sha>.<ext>), ext}], opaque, notShown,
+// blocked: [{url, reason}],
+// websockets, contentHash (null allowed; absent: computed), exit, signal, stderr, png_hex (the picture's bytes in hex) }.
+// Unknown result keys are ignored. A 67-byte PNG (1×1, grey) is the picture unless png_hex is given.
 const TINY_PNG = Buffer.from(
   '89504e470d0a1a0a0000000d4948445200000001000000010800000000' + '3a7e9b550000000a4944415478da6368000000820081da45083b0000000049454e44ae426082',
   'hex',
@@ -1123,7 +1124,7 @@ function capture(positionals, values) {
   if (r.signal) process.kill(process.pid, r.signal);
   const images = [];
   for (const im of r.images || []) {
-    const bytes = im.bytes === undefined ? null : Buffer.from(String(im.bytes));
+    const bytes = im.hex !== undefined ? Buffer.from(String(im.hex), 'hex') : im.bytes === undefined ? null : Buffer.from(String(im.bytes));
     const sha = bytes ? sha256(bytes) : null;
     if (bytes && values['assets-dir']) {
       fs.mkdirSync(values['assets-dir'], { recursive: true });
@@ -1154,7 +1155,7 @@ function capture(positionals, values) {
   const code = r.exit === undefined ? 0 : Number(r.exit);
   if (code !== 0) process.exit(code);
   fs.mkdirSync(path.dirname(out), { recursive: true });
-  writeAtomicFile(out, TINY_PNG);
+  writeAtomicFile(out, r.png_hex !== undefined ? Buffer.from(String(r.png_hex), 'hex') : TINY_PNG);
 }
 
 // ---------- main ----------

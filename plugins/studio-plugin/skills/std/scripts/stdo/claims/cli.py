@@ -135,7 +135,8 @@ def script_check(repo, vdir, state, lang, ctx, providers, env, runner):
     except criteria.Missing as e:
         problems.append("the format's criteria cannot be read (%s)" % e)
     assets_data = assets_mod.read(vdir)
-    problems += check.picture_problems(ins, assets_data)
+    from ..capture import shots
+    problems += check.picture_problems(ins, assets_data, shots.usable(vdir))
     # 0.0.26 (pilot-2 P16 · P17): the post's images, the title scene, no presenter layout without character art
     problems += check.unused_problems(ins, assets_data, cm)
     problems += check.title_scene_problems(text)
@@ -320,6 +321,10 @@ def source_check(repo, vdir, fill, state=None):
     if not claims:
         problems += 1
         out.append("no claims (`- C-00000000: <claim>` with `  > <excerpt>` on the next line)")
+    if state is not None and (state.get("source") or {}).get("kind") == "url":
+        bad = ruby_problems(vdir, text)
+        problems += len(bad)
+        out += bad
     if fill and fixes:
         lines = text.split("\n")
         for line, (written, right) in fixes.items():
@@ -334,6 +339,48 @@ def source_check(repo, vdir, fill, state=None):
         return C.FAIL
     sys.stdout.write("source: %s → %s\n" % ("filled %d id(s)" % len(fixes) if fixes else "pass", rel))
     return C.OK
+
+
+RUBY_PAIR = re.compile(r"^\s*[-*]\s+(.+?)\s*(?:→|->)\s*(.+?)\s*$")
+
+
+def ruby_section(text):
+    """[(line number, line)] of the `## Ruby pairs` section (empty without one)."""
+    lines = list(enumerate((text or "").replace("\r\n", "\n").replace("\r", "\n").split("\n"), 1))
+    start = next((i for i, (_n, l) in enumerate(lines) if re.match(r"^#+\s*Ruby pairs\s*$", l, re.I)), None)
+    out = []
+    for n, l in lines[start + 1:] if start is not None else []:
+        if l.startswith("#"):
+            break
+        out.append((n, l))
+    return out
+
+
+def ruby_problems(vdir, text):
+    """A URL source's ruby pairs must be readings the page gives (work/source/page-ruby.json, m2-plan §6.2 2): every
+    line of the section that is not blank is one `- a → b` pair of the page."""
+    from ..source import page
+    try:
+        with open(os.path.join(vdir, "work", "source", "page-ruby.json"), encoding="utf-8") as f:
+            given = page.ruby_pairs(f.read())
+    except OSError:
+        given = set()
+    out = []
+    heads = [n for n, l in enumerate((text or "").replace("\r\n", "\n").replace("\r", "\n").split("\n"), 1)
+             if re.match(r"^#+\s*Ruby pairs\s*$", l, re.I)]
+    if len(heads) > 1:
+        out.append("line %d  a second Ruby pairs heading (lines %s): write one section"
+                   % (heads[1], ", ".join(map(str, heads))))
+    for n, l in ruby_section(text):
+        if not l.strip():
+            continue
+        m = RUBY_PAIR.match(l)
+        if not m:
+            out.append("line %d  not a ruby pair line (`- <written form> → <reading>`): %s" % (n, l.strip()[:80]))
+        elif (m.group(1), m.group(2)) not in given:
+            out.append("line %d  ruby pair %s → %s is not a reading the page gives (work/source/page-ruby.json)"
+                       % (n, m.group(1), m.group(2)))
+    return out
 
 
 # ---------- --skeleton (0.0.25 P13) ----------

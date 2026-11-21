@@ -133,6 +133,10 @@ ALLOWED = (
     S + "capture.py recheck w",
     S + "capture.py shot v hero --url https://example.com/a",
     S + "capture.py shot w hero-2 --url https://example.com/a --selector main --width 1080 --height 1920",
+    # m2-plan §5.2 last row, §6.3 (0.2.4): a recheck's record and a promotion, evidence-free like record-source
+    S + "state.py record-recheck v 2",
+    S + "state.py record-source v --from-recheck 2",
+    S + "state.py begin newvid --url https://example.com/a --kind sns",
 )
 
 

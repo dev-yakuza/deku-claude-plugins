@@ -59,7 +59,7 @@ def _semver(text):
 
 
 def begin(repo, cfg, root, o, providers, ctx_of, env=None):
-    """`begin <video> --source <path> --kind <kind> [--lang l] [--ask-before tts,render]`."""
+    """`begin <video> --source <path> | --url <https url> --kind <kind> [--lang l] [--ask-before tts,render]`."""
     if len(o["_"]) != 1:
         raise Usage("begin needs one video id: begin <video> --source <path> --kind %s [--lang l]" % "|".join(KINDS))
     video = o["_"][0]
@@ -69,8 +69,13 @@ def begin(repo, cfg, root, o, providers, ctx_of, env=None):
     if kind not in KINDS:
         raise Usage("--kind must be one of %s (got %r)" % (", ".join(KINDS), kind))
     src = o.get("--source")
-    if not src:
-        raise Usage("begin needs --source <the Markdown file in this repository>")
+    page = o.get("--url")
+    if src is not None and page is not None:
+        raise Usage("begin takes --source <path> or --url <https url>, not both")
+    if not src and not page:
+        raise Usage("begin needs --source <the Markdown file in this repository> or --url <a public page>")
+    if page is not None:
+        page, host = begin_url(repo, cfg, kind, page, env)
     lang = o.get("--lang") or cfg.get("language")
     if not isinstance(lang, str) or not re.match(r"^[a-z]{2,3}(-[A-Za-z0-9]+)?$", lang):
         raise Usage("cannot tell the video's language (--lang, or language in config.json): %r" % (lang,))
@@ -81,15 +86,7 @@ def begin(repo, cfg, root, o, providers, ctx_of, env=None):
     for d in vpaths.leftovers(repo, root, video):  # a folder, or an abandoned video's renders or copy
         if os.path.lexists(d):
             raise store.Refused("a video %s exists already (%s)" % (video, os.path.relpath(d, repo)), C.REFUSED)
-    real_repo = os.path.realpath(repo)
-    absrc = os.path.realpath(src if os.path.isabs(src) else os.path.join(repo, src))
-    if not absrc.startswith(real_repo + os.sep):
-        raise Usage("the source must be a file in this repository: %s" % src)
-    rel = os.path.relpath(absrc, real_repo)
-    if rel.split(os.sep)[0] in (".git", ".claude") or rel.startswith(root.strip("/") + os.sep):
-        raise Usage("the source must be the repository's own writing, not Studio's or git's files: %s" % rel)
-    if not os.path.isfile(absrc) or not rel.lower().endswith((".md", ".mdx", ".markdown")):
-        raise Usage("the source must be a Markdown file (.md): %s" % rel)
+    rel = _source_file(repo, root, src) if page is None else None
     s2v_path = machine.s2v_path(repo)
     if s2v_path is None:
         raise Usage(machine.HINT)
@@ -111,22 +108,68 @@ def begin(repo, cfg, root, o, providers, ctx_of, env=None):
     elif ver.get("dirty"):
         _warn("s2v has uncommitted changes: going back to this exact version later is not possible")
     s2v = {k: ver.get(k) for k in ("id", "version", "commit", "dirty")}
-    st = schema.create_state(video, schema.location_of(kind), kind, schema.KINDS[kind], lang, s2v,
-                             {"kind": "repo-md", "path": rel.replace(os.sep, "/"), "images": [], "frozen_hash": None,
-                              # the source's last commit at begin: later commits to it are shown at ① (S5)
-                              "begin_commit": last_commit(repo, [rel.replace(os.sep, "/")])})
+    if page is not None:  # a public page (m2-plan §6.1): capture.py source makes the copy, record-source records it
+        source = {"kind": "url", "url": page, "host": host, "images": [], "frozen_hash": None, "capture": None,
+                  "rechecks": []}
+    else:
+        source = {"kind": "repo-md", "path": rel.replace(os.sep, "/"), "images": [], "frozen_hash": None,
+                  # the source's last commit at begin: later commits to it are shown at ① (S5)
+                  "begin_commit": last_commit(repo, [rel.replace(os.sep, "/")])}
+    st = schema.create_state(video, schema.location_of(kind), kind, schema.KINDS[kind], lang, s2v, source)
     st["ask_before"] = ask
     vdir = vpaths.video_dir(repo, root, st)
     voices = os.path.join(repo, root, "voices")
     if not os.path.isdir(voices):
         os.makedirs(voices, exist_ok=True)  # S7: the first tts must not make voices/ at the repository root
     store.create(vdir, st)
-    _out("begun %s (%s, %s, %s) from %s" % (video, kind, st["scope"], lang, st["source"]["path"]))
+    _out("begun %s (%s, %s, %s) from %s" % (video, kind, st["scope"], lang, page or st["source"]["path"]))
+    if page is not None:
+        _out("next: python3 .claude/studio/scripts/capture.py source %s" % video)
     if st["location"] == "local":
         _out("an internal video: its files stay under %s/local/ on this machine (backed up, never committed)" % root)
     if ask:
         _out("ask before: %s" % ", ".join(ask))
     return C.OK
+
+
+def _source_file(repo, root, src):
+    real_repo = os.path.realpath(repo)
+    absrc = os.path.realpath(src if os.path.isabs(src) else os.path.join(repo, src))
+    if not absrc.startswith(real_repo + os.sep):
+        raise Usage("the source must be a file in this repository: %s" % src)
+    rel = os.path.relpath(absrc, real_repo)
+    if rel.split(os.sep)[0] in (".git", ".claude") or rel.startswith(root.strip("/") + os.sep):
+        raise Usage("the source must be the repository's own writing, not Studio's or git's files: %s" % rel)
+    if not os.path.isfile(absrc) or not rel.lower().endswith((".md", ".mdx", ".markdown")):
+        raise Usage("the source must be a Markdown file (.md): %s" % rel)
+    return rel
+
+
+def begin_url(repo, cfg, kind, value, env=None):
+    """(url, host) of `begin --url`: a public video's page on one of public_domains (source_url's rules), no host or
+    term of the internal overlay (capture/rules.page_host — exit 4 while the overlay is missing)."""
+    from ..capture import rules
+    if schema.KINDS[kind] != "public":
+        raise Usage("an internal video (%s) begins from repository Markdown only (--source): URL sources are public "
+                    "pages" % kind)
+    url = source_url(value, cfg)
+    if url is None:
+        raise Usage("--url needs the page's address")
+    items = rules.overlay_items(repo, cfg, dict(os.environ if env is None else env))
+    try:
+        problem = rules.overlay_problem(items[0], "the source page")
+        if problem:
+            raise problem
+        host = rules.page_host(url, cfg, items, "--url")
+    except rules.CaptureError as e:
+        if e.code == rules.WAIT:
+            raise store.Refused(str(e), C.WAIT)
+        raise Usage(str(e))
+    why = rules.final_problem(url, cfg, items, rules.source_urls(repo, cfg, dict(os.environ if env is None else env)),
+                              "--url")
+    if why:  # the overlay's internal source pages (and pages under them): refused before any capture
+        raise Usage(why)
+    return url, host
 
 
 # ---------- ask-before (0.0.28 Q15) ----------
@@ -345,8 +388,14 @@ def source_url(value, cfg):
     return v
 
 
-def record_source(repo, vdir, state, cfg, hooks=None, env=None, url=False):
-    """`url`: the --url value (False: not given — a stored URL stays; `none` removes it)."""
+def record_source(repo, vdir, state, cfg, hooks=None, env=None, url=False, from_recheck=None):
+    """`url`: the --url value (False: not given — a stored URL stays; `none` removes it). A URL source has its own
+    branch (urlsource.py; `from_recheck`: the recheck to promote)."""
+    if state["source"].get("kind") == "url":
+        from . import urlsource
+        return urlsource.record_source(repo, vdir, state, cfg, hooks, env, url, from_recheck)
+    if from_recheck is not None:
+        raise Usage("--from-recheck is for a URL source (a page begun with begin --url)")
     url_rec = {} if url is False or url is None else {"url": source_url(url, cfg)}
     src = state["source"]
     if src.get("kind") != "repo-md":

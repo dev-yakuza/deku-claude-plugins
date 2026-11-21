@@ -33,7 +33,15 @@ def tuple_of(state, lang, cur, gate, scope):
                          platform=scope if gate == "4b" else None)
 
 
-def artifacts(ctx, state, lang, gate, scope):
+def captures(ctx, state, cur):
+    """{script_src: {png_sha, floor, line}} of the board captures the script uses (stdo/capture/shots.py), {} for
+    none: ③ binds each picture's bytes, its floor and the line its question shows (the warnings)."""
+    from ..capture import shots
+    pics = shots.for_repo(ctx["repo"], ctx["vdir"], state)
+    return {p: dict(b, line=shots.line(pics[p])) for p, b in shots.bound(pics, (cur or {}).get("files")).items()}
+
+
+def artifacts(ctx, state, lang, gate, scope, cur=None):
     w = os.path.join(ctx["vdir"], "work", lang)
     if gate == "1":
         # what the person reads and what it was made from (check_claims.py writes both, m1-plan §7.4)
@@ -46,7 +54,11 @@ def artifacts(ctx, state, lang, gate, scope):
                 "audition_wav": file_sha(os.path.join(a, "narrator.wav")),
                 "audition_md": file_sha(os.path.join(a, "audition.md"))}
     if gate == "3":
-        return {"frames": file_sha(frames_index(ctx, state, lang, scope))}
+        out = {"frames": file_sha(frames_index(ctx, state, lang, scope))}
+        caps = captures(ctx, state, cur)
+        if caps:  # 0.2.5: only with captures (a video without them keeps its shown hash)
+            out["captures"] = caps
+        return out
     if gate == "4b":  # the fact-checker's judgement of the copy is what the question's 근거 lines come from (M1h NIT)
         from .schema import platform_ok
         return {"copy_verify": file_sha(os.path.join(w, "copy-verify.%s.json" % scope)) if platform_ok(scope)
@@ -58,7 +70,7 @@ def artifacts(ctx, state, lang, gate, scope):
 
 def shown_hash(ctx, state, lang, cur, gate, scope):
     return hash_of({"tuple": tuple_of(state, lang, cur, gate, scope),
-                    "artifacts": artifacts(ctx, state, lang, gate, scope)})
+                    "artifacts": artifacts(ctx, state, lang, gate, scope, cur)})
 
 
 def hash12(state, lang, gate, recorded=None):

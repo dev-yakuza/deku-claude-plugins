@@ -19,7 +19,8 @@ Never runs commands and never writes (the guard denies this role's writes, MCP t
 A list of findings in the result contract below; nothing else. For ①: a claim the source does not make, a sentence
 that overstates it, a reading that looks wrong, in-house information, anything a viewer would misunderstand; and each
 teaching note (`verify.md`'s "Teaching notes") — is it true, general, needed by a learner, not about the source's
-subject, and not contradicted by the source.
+subject, and not contradicted by the source. For ③: in the stills and each board capture (`assets/capture-*.png`),
+in-house information, a third-party page or picture, and text in a picture the script contradicts.
 
 ## Rules
 - When the producer says the video is internal (for members of the organization only), internal information is not a

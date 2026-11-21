@@ -19,7 +19,10 @@ files to the person with `open <path>` only (never `code`, `vim` or another edit
 short `setup.py doc <stage>` below; never open it with Read) and do exactly what it says:
 
 1. `python3 .claude/studio/scripts/state.py begin <video> --source <path> --kind <kind>` — the writing must be
-   committed (exit 3 otherwise: ask the person to commit it). When the request asks to stop before steps ("tts 전에
+   committed (exit 3 otherwise: ask the person to commit it). From a public web page (a `youtube` or `sns` video
+   only): `state.py begin <video> --url <https url> --kind <kind>` — the address must be on one of `public_domains`,
+   with no `#` part and no in-house name (exit 2 says why; exit 4: the internal overlay is missing — ask the person);
+   the source stage then starts with `capture.py source` (`setup.py doc source`). When the request asks to stop before steps ("tts 전에
    멈추고 물어봐", "stop before render"), add `--ask-before <steps>` with those of `tts`, `render`, `copy`, `commit`
    (comma-separated), and show the parsed list in your first reply. A later request changes it:
    `python3 .claude/studio/scripts/state.py ask-before <video> <steps|none>`.
@@ -122,6 +125,14 @@ The render (the `out:` folder) and the copy (the `copy:` folder) are ignored by 
 holds only what `check_commit.py` stages. An internal video (`scope: internal`) is never committed: see "An internal
 video's end" below.
 
+0. A video from a web page (`--url`): read the page again first —
+   `python3 .claude/studio/scripts/capture.py recheck <video>`, then the `state.py record-recheck <video> <n>` line it
+   prints (run it even when capture.py exits 1: an unreadable page is recorded too, and holds the commit until a
+   later recheck reads it — tell the person and try again later). When record-recheck says the page changed, run the
+   `state.py record-source <video> --from-recheck <n>` line it prints: the changed page becomes the copy and
+   `next` holds the video at the source diff — do `setup.py doc resume` (show `work/source-diff.txt`, the person
+   approves or rejects); after an approval, come back here without another recheck. The commit needs a recheck that
+   read the page at most 24 hours before `check_commit.py --stage` (the hook does not count again).
 1. `python3 .claude/studio/scripts/check_commit.py --stage video <video>` — it checks everything again (the router,
    the source stage, check_assets, validate_copy, a person's approvals and credits), merges the video's approved
    readings into `.claude/studio/pronounce.json`, stages the allow-list and prints the summary line

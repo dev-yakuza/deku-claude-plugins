@@ -36,16 +36,24 @@ def _video(argv, cwd):
         state = store.read_state(vdir)
     except schema.SchemaError as e:
         raise assets.AssetError(e.code or 2, str(e))
-    if state["source"].get("kind") != "repo-md":
+    if state["source"].get("kind") not in ("repo-md", "url"):
         raise assets.AssetError(2, "source kind %r is not supported yet" % state["source"].get("kind"))
     return repo, cfg, vdir, state
+
+
+def source_label(state):
+    src = state["source"]
+    return src.get("url") if src.get("kind") == "url" else src.get("path")
 
 
 def resolve_main(argv, cwd=None):
     try:
         repo, cfg, vdir, state = _video(argv, cwd or os.getcwd())
-        copy = frozen_copy_path(vdir, state["source"])
-        data = assets.build(repo, vdir, state["video"], state["source"]["path"], copy, cfg)
+        if state["source"].get("kind") == "url":
+            data = assets.build_url(repo, vdir, state, cfg)
+        else:
+            copy = frozen_copy_path(vdir, state["source"])
+            data = assets.build(repo, vdir, state["video"], state["source"]["path"], copy, cfg)
         assets.write(vdir, data)
     except assets.AssetError as e:
         _err("resolve_assets", e)
@@ -64,8 +72,9 @@ def resolve_main(argv, cwd=None):
                                               ": lines " + ", ".join(map(str, hidden["lines"])) if hidden["lines"]
                                               else ""))
     for i in data["images"]:
-        sys.stdout.write("  %s line %d %s: %s%s (floor %s)\n" % (
-            i["id"], i["line"], i["ref"] or "(none)", i["status"], " — " + i["reason"] if i["reason"] else "",
+        where = "line %d" % i["line"] if isinstance(i.get("line"), int) else "%d reference(s)" % len(i.get("refs") or [])
+        sys.stdout.write("  %s %s %s: %s%s (floor %s)\n" % (
+            i["id"], where, i["ref"] or "(none)", i["status"], " — " + i["reason"] if i["reason"] else "",
             i["floor"]))
     return 0
 
@@ -100,7 +109,7 @@ def scope_main(argv, cwd=None, env=None):
     for i in out["images"]:
         counts[i["scope"]] = counts.get(i["scope"], 0) + 1
     sys.stdout.write("source %s: may be used (%s video); images by scope: %s\n" % (
-        state["source"]["path"], state.get("scope"), ", ".join("%s %d" % kv for kv in sorted(counts.items()))
+        source_label(state), state.get("scope"), ", ".join("%s %d" % kv for kv in sorted(counts.items()))
         or "none"))
     if out["scope_check"].get("note"):
         sys.stdout.write("note: %s\n" % out["scope_check"]["note"])
