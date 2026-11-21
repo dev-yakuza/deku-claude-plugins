@@ -447,7 +447,8 @@ class m4GateReport(unittest.TestCase):
                 + _syn("DIRECTIVE", [True, False, False])
                 + _syn("EX-ARB", [None] * 3, kind="accept")
                 + _rows("QA", 20, 20, 20)
-                + [{"id": "x", "group": "NOPE", "set": "held-out", "source": "replay", "agree": True}])
+                # K6 r12 M1: an unknown group on a REPLAY row closes every synthetic path — here a synthetic one
+                + [{"id": "x", "group": "NOPE", "set": "held-out", "source": "synthetic", "wrong": False}])
         per = GR.decide(rows + _TUNE)
         want = {"HANDOFF": True,         # 17/20 = 85 %, 19/20 = 95 %
                 "DE-ARB": False,         # 16/20 = 80 % — and a failed replay is not covered by synthetic (r8 1)

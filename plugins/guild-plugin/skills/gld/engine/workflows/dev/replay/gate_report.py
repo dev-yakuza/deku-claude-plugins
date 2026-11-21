@@ -51,6 +51,10 @@ K6 r11 M1 — a replayed group is verified by replay only (K6 r8 user decision 1
 * re-measuring a re-tuned group needs a FRESH held-out set (new Issues); the old held-out rows go in as
   `set: "retired"` (checklist F) — they keep the group "replayed", are not counted for verification, and block their
   Issues and ids like tuning rows do (a fresh held-out decision of a retired Issue is contaminated).
+K6 r12 M1 — group names are matched case-insensitively (`canonical`), and ONE more rule: when any non-synthetic row
+names a group that is not a known group (a typo like `DIRECTVE`, an empty group), the input cannot say which groups
+were replayed — so NO group of that input is verified by synthetic (the names under `_unknown_groups`, the reason in
+each group's `why`). Fix the rows and run it again.
 K6 r8 user decision 2 — the OPEN groups (KICKOFF · STAKES, `predict.OPEN_GROUPS`) and the INHERENT groups
 (`conservative.INHERENT`) are released ONLY by the person's grading-sheet verdicts: their replay / synthetic results
 are recorded (`would_pass`) but never put under `verified` (`sheet_only`); `unverified()` ignores them in a shipped
@@ -100,9 +104,11 @@ ABOUT = ("design §10.2-6 — the groups the held-out judgment replay verified. 
 
 
 def canonical(group):
-    """`EX-ARB:dismiss` → `EX-ARB-dismiss` (the valve spelling)."""
+    """`EX-ARB:dismiss` → `EX-ARB-dismiss` (the valve spelling). K6 r12 M1: case-insensitive — `directive`,
+    `EX-ARB:Dismiss` → `DIRECTIVE`, `EX-ARB-dismiss` (a §9.5 group or the bare `EX-ARB`); any other name as written."""
     g = str(group or "").strip().replace(":", "-")
-    return g
+    from guildcore import valves as VALVES
+    return next((x for x in VALVES.GROUPS + ("EX-ARB",) if x.casefold() == g.casefold()), g)
 
 
 _EXARB_KIND = {"dismiss": "EX-ARB-dismiss", "dispute": "EX-ARB-dismiss", "accept": "EX-ARB-accept"}
@@ -222,6 +228,10 @@ def decide(rows, groups=None):
     # K6 r10 m1: the split unit is the Issue whatever the row's group — read the tuning Issues (and tuning ids) from
     # EVERY tuning row before any group / kind / source check can drop it
     replayed = _replayed_groups(rows)
+    # K6 r12 M1: a non-synthetic row naming an unknown group might be a replay of any group — no synthetic path at all
+    known = set(groups) | set(("EX-ARB",))
+    stray = [canonical(r.get("group")) for r in rows if str(r.get("source") or "").strip().lower() != "synthetic"]
+    stray = [x for x in stray if x not in known]
     tuning_issues = set()
     tuning_ids = set()
     for r in rows:
@@ -311,7 +321,8 @@ def decide(rows, groups=None):
         planned = SYNTH_PLANNED.get(g)                   # K6 r9 M1(a): no plan in §10.2-3 → no synthetic path
         ok_replay = n >= MIN_N and a["replay_agree"] >= MIN_AGREE * n and a["replay_advance"] >= MIN_ADVANCE * n
         was_replayed = g in replayed                     # K6 r11 M1: replay only, whatever the counts
-        ok_synth = (planned is not None and not was_replayed and sn >= planned and sw < sn and sw <= lim)
+        ok_synth = (planned is not None and not was_replayed and not stray and sn >= planned and sw < sn
+                    and sw <= lim)
         parts = []
         if ok_replay:
             parts.append("held-out replay n=%d, agreement %d/%d, advance %d/%d" % (n, a["replay_agree"], n,
@@ -331,6 +342,10 @@ def decide(rows, groups=None):
             elif was_replayed:
                 parts.append("the input has replay rows for this group — verified by replay only, never by synthetic "
                              "(K6 r8 user decision 1, r11 M1; re-measure with a fresh held-out set, old rows retired)")
+            elif stray:
+                parts.append("a non-synthetic row names an unknown group (%s) — it may be a replay of this group, so "
+                             "no group of this input is verified by synthetic (K6 r12 M1; fix the group names)"
+                             % ", ".join(repr(x) for x in sorted(set(stray))))
             elif not sn:
                 parts.append("no held-out synthetic")
             elif sn < planned:
@@ -361,6 +376,8 @@ def decide(rows, groups=None):
             out[g]["would_pass"] = passed and not contaminated[g] and not unchecked
         if contaminated[g]:
             out[g]["contaminated"] = sorted(contaminated[g])
+    for x in set(stray):
+        unknown.setdefault(x, stray.count(x))           # a row the checks dropped before naming it (no id …)
     if unknown:
         out["_unknown_groups"] = dict(sorted(unknown.items()))
     if no_id:
@@ -387,6 +404,7 @@ def report(rows, replay="", raw=b""):
                          "synthetic_max_wrong": SYNTH_MAX_WRONG, "synthetic_max_wrong_high_risk": 0,
                          "high_risk": list(HIGH_RISK), "synthetic_planned": dict(sorted(SYNTH_PLANNED.items())),
                          "synthetic_min_n": SYNTH_MIN_N, "synthetic_only_when_never_replayed": True,
+                         "synthetic_closed_by_unknown_group": True, "group_case_insensitive": True,
                          "synthetic_unplanned": "replay only", "row_id_required": True,
                          "replay_id": "issue/D-id", "split_unit": "issue", "one_group_per_id": True,
                          "pass_counted": False, "retired_set": "replayed, not counted, blocks its Issues",
@@ -411,7 +429,13 @@ def main(argv=None):
         json.dump(rep, fh, indent=2, sort_keys=True, ensure_ascii=False)
         fh.write("\n")
     os.replace(tmp, a.out)
-    print(json.dumps({"verified": rep["verified"], "out": a.out}, ensure_ascii=False))
+    # K6 r12 M1: the reports on stdout too — not only inside the file
+    shown = {"verified": rep["verified"], "out": a.out,
+             "replayed": sorted(g for g, v in rep["groups"].items() if isinstance(v, dict) and v.get("replayed"))}
+    for k in ("_unknown_groups", "_rows_rejected", "_conflicting_groups"):
+        if k in rep["groups"]:
+            shown[k] = rep["groups"][k]
+    print(json.dumps(shown, ensure_ascii=False, sort_keys=True))
     return 0
 
 

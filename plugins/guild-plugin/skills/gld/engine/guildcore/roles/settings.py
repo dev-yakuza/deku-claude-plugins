@@ -442,16 +442,21 @@ def export_tree_readonly(worktree, base_sha, rel_dir, dest):
         return None, None
     os.makedirs(os.path.dirname(dest), exist_ok=True)  # fs-ok: engine export dir (base content) or the run dir in/ — engine-owned destination
     tmp = tmp_name(dest)          # review-k6-r10 m5 / m6: unique per call, so two engines never share it
-    os.mkdir(tmp)  # fs-ok: engine export dir (base content) or the run dir in/ — engine-owned destination
     tree = "%s:%s" % (base_sha, rel_dir) if rel_dir != "." else base_sha
-    arch = subprocess.Popen(["git", "archive", "--format=tar", tree], cwd=worktree,
-                            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
-    tar = subprocess.run(["tar", "-x", "-C", tmp], stdin=arch.stdout, stderr=subprocess.PIPE)  # fs-ok: engine export dir (base content) or the run dir in/ — engine-owned destination
-    arch.stdout.close()
-    if arch.wait() != 0 or tar.returncode != 0:
-        _drop_tree(tmp)
-        return None, None
-    return _publish_readonly(tmp, dest)
+    try:
+        os.mkdir(tmp)  # fs-ok: engine export dir (base content) or the run dir in/ — engine-owned destination
+        arch = subprocess.Popen(["git", "archive", "--format=tar", tree], cwd=worktree,
+                                stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+        try:
+            tar = subprocess.run(["tar", "-x", "-C", tmp], stdin=arch.stdout, stderr=subprocess.PIPE)  # fs-ok: engine export dir (base content) or the run dir in/ — engine-owned destination
+        finally:
+            arch.stdout.close()
+            arch.wait()
+        if arch.returncode != 0 or tar.returncode != 0:
+            return None, None
+        return _publish_readonly(tmp, dest)
+    finally:
+        _drop_tree(tmp)           # review-k6-r12 m3: the extraction too — whatever failed, no litter
 
 
 SAFE_GIT_KEYS = re.compile(r"^(init\.defaultbranch|core\.autocrlf|core\.symlinks|core\.ignorecase|"
