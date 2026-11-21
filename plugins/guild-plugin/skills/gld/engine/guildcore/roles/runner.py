@@ -368,7 +368,7 @@ class Runner(object):
         base = self._get_baseline(worktree, issue)
         if base is None:
             return []
-        return SC.drift(base, SC.snapshot(worktree, watch_files=self._watch(worktree)))
+        return SC.drift(base, SC.snapshot(worktree, watch_files=self._watch(worktree)), worktree)
 
     def run_group(self, specs):
         """A parallel group sharing one worktree (design: tech-lead · tester-cases · specialists;
@@ -510,7 +510,7 @@ class Runner(object):
             raise BaselineContract("a role ran without the scope check — call run_group or "
                                    "rebaseline before the next role")
         base = None if in_group else self._get_baseline(spec.worktree, spec.issue)
-        late = SC.drift(base, before) if (base is not None and before is not None) else []
+        late = SC.drift(base, before, spec.worktree) if (base is not None and before is not None) else []
         gates_ok = (rendered.meta.get("gates_dir") is None or S.verify_gates(
             rendered.meta["gates_dir"], rendered.meta.get("gates_digest"))) and all(
             S.verify_gates(d, h) for d, h in rendered.meta.get("hook_files") or [])

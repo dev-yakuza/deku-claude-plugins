@@ -204,6 +204,20 @@ def _reachable_from_local(worktree, sha, after):
     return False
 
 
+def _human_ref_move(worktree, ref, rb, ra, head):
+    """0.102.3: another local ref (main, a sibling branch, a tag) that moved or vanished away from this
+    worktree's work is a person's ordinary activity on the shared repo (a merge, `/gld update`, a deleted merged
+    branch) — not this issue's role. A move counts only when its new tip is this worktree's own history
+    (reachable from HEAD): that is what a role here could have made."""
+    if ref.startswith("refs/remotes/"):
+        return False
+    new = ra.get(ref)
+    if not new:
+        return True
+    return subprocess.run(["git", "merge-base", "--is-ancestor", new, head], cwd=worktree,
+                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode != 0
+
+
 def _match(path, globs):
     for g in globs:
         if g == "**" or fnmatch.fnmatchcase(path, g):
@@ -254,6 +268,8 @@ def check(worktree, before, after, roles, issue=None, branch=None, extra_globs=N
                          .decode("utf-8", "replace").split("\0") if x]
             paths = sorted(set(paths) | set(committed))
             continue
+        if ref != branch_ref and _human_ref_move(worktree, ref, rb, ra, after["head"]):
+            continue
         viol.append("ref %s %s" % (ref, "created" if ref not in rb else "deleted" if ref not in ra else "moved"))
     # remote push tripwire (Q22): a remote head that moved to a commit this clone has — i.e. a
     # push from here; a human's concurrent push to another branch is not in local objects
@@ -299,7 +315,7 @@ def check(worktree, before, after, roles, issue=None, branch=None, extra_globs=N
     return viol
 
 
-def drift(baseline, now):
+def drift(baseline, now, worktree=None):
     """Changes between the end of the previous role (its after-snapshot, or the engine's own
     re-baseline) and now — what an escaped orphan wrote late (K1r2-B3). Remote-tracking refs
     are ignored (the engine fetches); everything else is compared."""
@@ -308,8 +324,11 @@ def drift(baseline, now):
         out.append("path %s" % p)
     rb = {k: v for k, v in baseline["refs"].items() if not k.startswith("refs/remotes/")}
     ra = {k: v for k, v in now["refs"].items() if not k.startswith("refs/remotes/")}
+    own = baseline.get("symref") or now.get("symref")
     for ref in sorted(set(rb) | set(ra)):
         if rb.get(ref) != ra.get(ref):
+            if worktree and ref != own and _human_ref_move(worktree, ref, rb, ra, now["head"]):
+                continue
             out.append("ref %s" % ref)
     if baseline["head"] != now["head"] or baseline.get("symref") != now.get("symref"):
         out.append("HEAD")

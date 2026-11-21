@@ -43,7 +43,7 @@ PASS=$((COUNTED - FAIL))
 [ -n "$SUMMARY" ] || { FAIL=$((FAIL + 1)); echo "FAIL  unittest 요약 줄(OK / FAILED)이 없습니다."; }
 echo "engine K6: $PASS passed, $FAIL failed (ran $RAN, skipped $SKIPPED)"
 # ⚠ Keep equal to the measured count (ran − skipped); raise it only when tests are added on purpose.
-ENGINE_K6_MIN_TESTS=322
+ENGINE_K6_MIN_TESTS=325
 if [ "$COUNTED" -lt "$ENGINE_K6_MIN_TESTS" ]; then
   echo "FAIL  실행된 검사가 ${COUNTED}건뿐입니다 (스킵 제외, 최소 ${ENGINE_K6_MIN_TESTS}건)."
   exit 1
