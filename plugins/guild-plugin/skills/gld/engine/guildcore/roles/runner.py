@@ -200,15 +200,24 @@ def new_run_dir(root, stage, who):
 
 
 def stage_inputs(run_dir, inputs):
-    """inputs = {name: path | {"text": …}} → copies under <run>/in/; returns {name: abs path}."""
+    """inputs = {name: text | {"text": …} | {"path": …}} → files under <run>/in/; returns {name: abs path}.
+
+    A bare string is the input's TEXT (0.102.1: execute/test/qa pass their inputs as strings; reading a string as a
+    path made every such role call fail). Copying a file or tree needs an explicit {"path": …}.
+    """
     out = {}
     for name, src in (inputs or {}).items():
         dst = os.path.join(run_dir, "in", name)
         os.makedirs(os.path.dirname(dst), exist_ok=True)  # fs-ok: engine-owned run dir (created by the engine; roles denyWrite in/)
-        if isinstance(src, dict):
+        if isinstance(src, dict) and "path" in src:
+            src = src["path"]
+        elif isinstance(src, (dict, str)):
+            text = src.get("text") if isinstance(src, dict) else src
             with open(dst, "w", encoding="utf-8") as fh:  # fs-ok: engine-owned run dir in/ (roles denyWrite) or engine home
-                fh.write(src.get("text") or "")
-        elif os.path.isdir(src):
+                fh.write(text or "")
+            out[name] = dst
+            continue
+        if os.path.isdir(src):
             shutil.copytree(src, dst)  # fs-ok: engine-owned run dir in/ (roles denyWrite) or engine home
         else:
             shutil.copyfile(src, dst)  # fs-ok: engine-owned run dir in/ (roles denyWrite) or engine home

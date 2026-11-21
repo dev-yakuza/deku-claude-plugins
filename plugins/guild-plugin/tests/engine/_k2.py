@@ -11,7 +11,7 @@ from guildcore.checks import CheckResult
 from guildcore.decisions import DecisionWriter
 from guildcore.judges.runner import Decision
 from guildcore.records.write import GhWriter
-from guildcore.roles.runner import RoleResult
+from guildcore.roles.runner import RoleResult, stage_inputs
 from workflows.dev.stages.base import Ports
 
 # K5r4: the K2–K4 fixtures test the steady state — first-sprint mode (§10.4: auto = on until a recorded go) changes
@@ -89,6 +89,11 @@ class Harness(object):
 
     def _role(self, call):
         self.calls["roles"].append(call)
+        # 0.102.1: every role call's inputs go through the real runner's staging, so an input the live runner cannot
+        # stage (a text read as a path) fails here instead of only in a real repo
+        import tempfile
+        with tempfile.TemporaryDirectory() as td:
+            stage_inputs(td, getattr(call, "inputs", None))
         if not self.roles:
             raise AssertionError("unexpected role call %s-%s" % (call.role, call.task))
         r = self.roles.pop(0)
