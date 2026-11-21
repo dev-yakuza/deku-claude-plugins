@@ -149,6 +149,22 @@ def go_no_go(m, trips, cmp, watched, cons, n_issues, cost_rows):
     return lines
 
 
+def posthoc_counts(by_issue, gstate):
+    """0.102.5: {group: {"ran_unasked": n, "open": k}} — the decisions an unverified group ran without a person (their
+    blocks carry `post_hoc`) in these Issues, and how many sheet rows of that group still wait for a verdict."""
+    from workflows.dev import grade as G
+    out = {}
+    for _n, blocks in sorted(by_issue.items()):
+        for b in blocks:
+            if b.get("post_hoc"):
+                g = G.group_of(b).replace(":", "-")
+                out.setdefault(g, {"ran_unasked": 0, "open": 0})["ran_unasked"] += 1
+    for g, u in sorted((gstate.get("unverified") or {}).items()):
+        if g in out:
+            out[g]["open"] = len(u.get("open") or ())
+    return out
+
+
 def downgrade_advice(trips, cmp, gstate, cons_groups):
     """§10.5(c) — the computable conditions only; returns [reason]."""
     out = []
@@ -208,6 +224,9 @@ def main(d, a):
            "review_within_1_day": bool(trips), "watch": sorted(gstate.get("watch", {})), "conservative": cons,
            "downgrade_recommended": downgrade_advice(trips, cmp, gstate, cons),
            "unverified": UV.report(common),                # K6 item 4: §10.2-6 groups and their release count
+           # 0.102.5 (user decision 2026-11-22): unverified groups do not stop — their decisions that ran unasked,
+           # per group, still waiting for the person's sheet verdict (`dev grade` lists them, `--import` grades them)
+           "post_hoc": posthoc_counts(by_issue, gstate),
            "grader_quality": G.grader_quality(common, gh.owner_repo() if hasattr(gh, "owner_repo") else "")}
     if getattr(a, "first_sprint", False):
         rep["go_no_go_draft"] = go_no_go(m, trips, cmp, rep["watch"], cons, len(issues), COST.rows(common))

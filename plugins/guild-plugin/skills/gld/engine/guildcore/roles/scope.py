@@ -204,6 +204,20 @@ def _reachable_from_local(worktree, sha, after):
     return False
 
 
+def _from_this_clone(worktree, sha, before, after):
+    """0.102.5: a remote ref that moved to `sha` was moved FROM HERE (a push past the deny rules) only when `sha` is this
+    clone's own work — reachable from a local branch / HEAD after the role AND on no remote-tracking ref before it. A
+    commit some remote already had (a fetched base, another person's merge brought in) is not this clone's push."""
+    if not _reachable_from_local(worktree, sha, after):
+        return False
+    for r, v in (before.get("refs") or {}).items():
+        if r.startswith("refs/remotes/") and subprocess.run(
+                ["git", "merge-base", "--is-ancestor", sha, v], cwd=worktree,
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0:
+            return False
+    return True
+
+
 def _human_ref_move(worktree, ref, rb, ra, head):
     """0.102.3: another local ref (main, a sibling branch, a tag) that moved or vanished away from this
     worktree's work is a person's ordinary activity on the shared repo (a merge, `/gld update`, a deleted merged
@@ -252,11 +266,10 @@ def check(worktree, before, after, roles, issue=None, branch=None, extra_globs=N
             continue
         if ref.startswith("refs/remotes/"):
             # a remote-tracking ref only moves on fetch or PUSH; fetch is allowed, so only a
-            # move to a commit that exists solely because of this session (= was a local
-            # head/HEAD after the role) is reported — a push that got past the deny rules (Q22)
-            if ra.get(ref) and _reachable_from_local(worktree, ra[ref], after) and ref in rb:
-                viol.append("%s moved to a local commit (push?)" % ref)
-            elif ra.get(ref) and ref not in rb and _reachable_from_local(worktree, ra[ref], after):
+            # move to a commit that exists solely because of this session (= this clone's own
+            # work, on no remote before the role) is reported — a push that got past the deny
+            # rules (Q22). 0.102.5: a deletion (`fetch --prune` of a merged branch) is never one
+            if ra.get(ref) and _from_this_clone(worktree, ra[ref], before, after):
                 viol.append("%s moved to a local commit (push?)" % ref)
             continue
         if ref == branch_ref and movers and ref in rb and ref in ra:
@@ -282,8 +295,12 @@ def check(worktree, before, after, roles, issue=None, branch=None, extra_globs=N
                 if rmb.get(ref) == rma.get(ref):
                     continue
                 if ref not in rma:
-                    viol.append("remote %s deleted during the role" % ref)
-                elif _reachable_from_local(worktree, rma[ref], after):
+                    # 0.102.5 (#1945): GitHub deletes a merged PR's branch and its `refs/pull/N/merge` on its own — a
+                    # remote ref vanishing elsewhere is no violation (logged by `remote_warnings`); only THIS Issue's
+                    # own branch vanishing during a role is (no merge of it can be in flight while its role runs)
+                    if branch_ref and ref == branch_ref:
+                        viol.append("remote %s deleted during the role" % ref)
+                elif _from_this_clone(worktree, rma[ref], before, after):
                     viol.append("remote %s moved to a local commit during the role (push)" % ref)
     ib, ia = before.get("integrity") or {}, after.get("integrity") or {}
     for k in sorted(set(ib) | set(ia)):
@@ -337,6 +354,85 @@ def drift(baseline, now, worktree=None):
         if ib.get(k) != ia.get(k) and not k.startswith("file "):
             out.append(k)
     return out
+
+
+def _ok(worktree, *args):
+    return subprocess.run(["git"] + list(args), cwd=worktree, stdout=subprocess.DEVNULL,
+                          stderr=subprocess.DEVNULL).returncode == 0
+
+
+def _out(worktree, *args):
+    p = subprocess.run(["git"] + list(args), cwd=worktree, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+    return p.stdout.decode("utf-8", "replace").strip() if p.returncode == 0 else None
+
+
+def base_refs(worktree, base):
+    """The refs that hold the base branch: `base` itself, its local name and every remote's copy (`origin/main` →
+    `origin/main`, `main`, `refs/remotes/*/main`) — the ones that resolve."""
+    if not base:
+        return []
+    name = base.split("/", 1)[1] if base.startswith("origin/") else base
+    cands = [base, name, "refs/heads/%s" % name]
+    for ln in (_out(worktree, "for-each-ref", "--format=%(refname)", "refs/remotes") or "").splitlines():
+        if ln.endswith("/" + name):
+            cands.append(ln)
+    return [c for c in dict.fromkeys(cands) if _ok(worktree, "rev-parse", "--verify", "-q", c + "^{commit}")]
+
+
+def _blob(worktree, rev, path):
+    return _out(worktree, "rev-parse", "-q", "--verify", "%s:%s" % (rev, path))
+
+
+def base_merges(worktree, old, new, refs):
+    """0.102.5: the commits `old..new` when they are ONLY merges of the base branch into this branch — every commit on
+    the first-parent line is a two-parent merge whose first parent is the previous tip (the chain starts at `old`),
+    whose second parent the base already holds (`refs`), and which brings only base content (every path it changes
+    against its first parent is byte-equal to the base parent's: no hand edit rides in the merge); every other commit
+    of the range is the base's. Returns [merge sha, …] (oldest first) or None."""
+    if not old or not new or old == new or not refs or not _ok(worktree, "merge-base", "--is-ancestor", old, new):
+        return None
+    line = (_out(worktree, "rev-list", "--first-parent", "%s..%s" % (old, new)) or "").split()
+    if not line:
+        return None
+    rest = (_out(worktree, "rev-list", "%s..%s" % (old, new), "--not", *refs) or "").split()
+    if set(rest) - set(line):
+        return None                                  # a commit that is neither a merge on the line nor the base's
+    prev = old
+    for c in reversed(line):
+        parents = (_out(worktree, "rev-list", "--parents", "-n", "1", c) or "").split()[1:]
+        if len(parents) != 2 or parents[0] != prev:
+            return None
+        other = parents[1]
+        if not any(_ok(worktree, "merge-base", "--is-ancestor", other, r) for r in refs):
+            return None
+        changed = (_out(worktree, "diff", "--name-only", "--no-renames", parents[0], c) or "").split("\n")
+        for f in [x for x in changed if x]:
+            if _blob(worktree, c, f) != _blob(worktree, other, f):
+                return None
+        prev = c
+    return list(reversed(line))
+
+
+def accept_base_merge(worktree, baseline, now, branch, base):
+    """The drift since `baseline` when it is nothing but base merges on this Issue's own branch (a person ran
+    `git merge origin/main` in the worktree) → [merge sha, …] to accept (the caller rebaselines and notes it); any
+    other drift → None (a person decides)."""
+    if not branch or baseline is None or now is None:
+        return None
+    own = "refs/heads/%s" % branch
+    late = drift(baseline, now, worktree)
+    refs = base_refs(worktree, base)
+    name = base.split("/", 1)[1] if base and base.startswith("origin/") else base
+    # the local base branch itself may have moved too (the person updated `main`, then merged it here)
+    if not late or set(late) - {"ref %s" % own, "HEAD", "ref refs/heads/%s" % name}:
+        return None
+    if now.get("symref") != own or baseline.get("symref") not in (own, None):
+        return None
+    old = (baseline.get("refs") or {}).get(own) or baseline.get("head")
+    new = (now.get("refs") or {}).get(own)
+    if not new or now.get("head") != new:
+        return None
+    return base_merges(worktree, old, new, refs)
 
 
 def watch_warnings(before, after):

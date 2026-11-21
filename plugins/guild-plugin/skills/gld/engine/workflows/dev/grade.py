@@ -162,8 +162,8 @@ def select(blocks_by_issue, repo, first_sprint, rate, later, grader=None, watch=
     for issue in sorted(blocks_by_issue):
         human_resolved = _human_decided(blocks_by_issue[issue])
         for b in blocks_by_issue[issue]:
-            if not _engine_made(b) or b.id in human_resolved or b.get("shadow") == "true":
-                continue
+            if not _engine_made(b) or b.id in human_resolved or b.get("shadow") == "true" or b.get("post_hoc"):
+                continue                                         # 0.102.5: a post-hoc decision is its own row
             g = group_of(b)
             gr = grader.get((issue, b.id))
             why = triggered(b, later(issue, b))
@@ -345,6 +345,31 @@ def inherent_row(q, r, issue):
                         % ("inherent-gate" if g in CONS.INHERENT else "open-question", what)}
 
 
+POSTHOC_MODE = UV.POSTHOC_MODE
+
+
+def posthoc_rows(blocks, issue):
+    """0.102.5: every decision an unverified group ran WITHOUT a person (`post_hoc` on its block) → one grading-sheet
+    row (`mode: post-hoc`, `choice` = what ran), open — holding the group's §10.2-6 release — until the person imports
+    a verdict. A decision a person decided later anyway (`by: human` resolution) is no row."""
+    decided = _human_decided(blocks)
+    out = []
+    for b in blocks:
+        if not b.get("post_hoc") or not _engine_made(b) or b.id in decided:
+            continue
+        g = group_of(b)
+        out.append({"decision_id": b.id, "issue": issue, "stage": b.get("stage") or "", "group": g,
+                    "mode": POSTHOC_MODE, "choice": b.get("choice") or "", "coerced": b.get("coerced") or "false",
+                    "coerced_by": b.get("coerced_by") or "", "unsure": b.get("unsure") or "false",
+                    "irreversible": "true" if block_irreversible(b) else "", "outcome": "", "note": "",
+                    "reason": "post-hoc: %s — the engine ran the judge's %s without a person" % (
+                        b.get("post_hoc"), " ".join(str(b.get("choice") or "").split())[:160]),
+                    "given_info": "",
+                    "evidence": "post-hoc verdict — grade the engine's decision on the evidence (ok = it was right, "
+                                "wrong = it was not; a wrong puts %s back on the asking path)" % g})
+    return out
+
+
 def sheet_rows(selected, mode, evidence):
     rows = []
     for issue, b, why in selected:
@@ -489,6 +514,13 @@ def verify_rows(rows, blocks_of):
                 if fixed.get("mode") == INHERENT_MODE:
                     fixed["mode"] = ""
                 fixed.pop("point_key", None)
+        if b.get("post_hoc") and _engine_made(b):
+            # 0.102.5: the row of a decision that ran unasked — its mode and choice from the log (one verdict per D-id)
+            fixed["mode"] = POSTHOC_MODE
+            fixed["choice"] = b.get("choice") or ""
+            fixed["point_key"] = "%s/%s" % (n, b.id)
+        elif fixed.get("mode") == POSTHOC_MODE:
+            fixed["mode"] = ""
         # K5r7-m5: a release forgives by DECISION time — K5r8-m4: the log's time only; none in the log = unknown
         # (no forgiveness), never the sheet's `decided_at` column
         fixed["decided_at"] = b.get("at") or ""
@@ -601,11 +633,14 @@ def apply_judgments(common, rows, repo, version, irreversible=lambda row: False,
             continue
         if gi == "wrong":
             st["streak"][g] = 0
-            if g in st["watch"] or g in IRREVERSIBLE or irreversible(row):
+            ph = (row.get("mode") or "") == POSTHOC_MODE
+            if g in st["watch"] or g in IRREVERSIBLE or irreversible(row) or ph:
+                # 0.102.5: a confirmed wrong on a decision that ran unasked (post-hoc) puts the group back on the
+                # asking path at once (user decision 2026-11-22)
                 if VALVES.auto_set(common, "group.%s.conservative" % g.replace(":", "-"), True,
                                    "count rule: confirmed wrong %s (%s)" % (row.get("decision_id"), "irreversible"
                                                                             if g in IRREVERSIBLE or irreversible(row)
-                                                                            else "while watched")):
+                                                                            else "post-hoc" if ph else "while watched")):
                     cons.append(g)
                 else:
                     blocked.append(g)
@@ -887,7 +922,7 @@ def main(d, a):
                                        facts["review_rejections"])
         ok_rows, cands = predict_first_judgments(log.blocks, n)
         pf_rows += ok_rows
-        pf_cands += cands
+        pf_cands += cands + posthoc_rows(log.blocks, n)          # 0.102.5: decisions that ran unasked
         try:
             it = gh.issue(n)
             texts[n] = "%s\n\n%s" % (it.get("title") or "", (it.get("body") or "")[:8000])
@@ -915,6 +950,7 @@ def main(d, a):
                 checks[k], unchecked_why[k] = "no-engine-block", "the log shows no engine block"
             continue
         _ok, cands = predict_first_judgments(blocks, n)
+        cands = cands + posthoc_rows(blocks, n)
         back = [r for r in cands if "%s/%s" % (r.get("issue"), r.get("decision_id")) in keys]
         listed = set("%s/%s" % (r.get("issue"), r.get("decision_id")) for r in back)
         for k in keys:
@@ -957,7 +993,7 @@ def main(d, a):
     rows = sheet_rows(sel, "first-sprint" if first else "steady", lambda i: ev_sum.get(i) or "")
     for r in pf_cands:                                                    # K5r5-M2: a person confirms
         row = dict((c, r.get(c, "")) for c in COLUMNS)
-        if r.get("mode") == INHERENT_MODE:
+        if r.get("mode") in (INHERENT_MODE, POSTHOC_MODE):
             # K6 r3 m4: an inherent-gate verdict is made on the post-hoc evidence, like every pass-1 row
             row["evidence"] = "%s; %s" % (r.get("evidence") or "", ev_sum.get(r.get("issue")) or "")
         rows.append(row)

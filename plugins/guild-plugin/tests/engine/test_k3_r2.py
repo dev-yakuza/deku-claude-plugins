@@ -287,7 +287,7 @@ class EngineNet(unittest.TestCase):
         self.assertIn("unverified(net: env", h.body_with("test-evidence:step-1"))
 
     def test_name_only_claim_with_a_red_engine_run_is_not_green(self):
-        h = self.h(lambda rev, files: suite(FLUTTER_RED, passed=False, rc=1), roles_n=2)
+        h = self.h(lambda rev, files: suite(FLUTTER_RED, passed=False, rc=1), roles_n=3)   # 0.102.5: + the retry
         r = X.run(h.p, "refactor")
         self.assertNotEqual(r.kind, "ADVANCE")
         self.assertIn("red (or wrote a snapshot) on the unchanged code", h.body_with("auditor:execute"))

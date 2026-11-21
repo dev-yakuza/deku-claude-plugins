@@ -92,10 +92,22 @@ class ConservativePath(unittest.TestCase):
         self.assertTrue(PF.conservative(P(), "EX-ARB:dismiss"))
         self.assertFalse(PF.conservative(P(), "STAKES"))
 
-    def test_gate_asks_for_an_unverified_group_without_a_valve(self):
+    def test_an_unverified_group_without_a_valve_runs_post_hoc(self):
+        # 0.102.5 (user decision 2026-11-22): no question — the judge's decision runs, graded after on the sheet
         build, run, _f, _y, _e = R9.SCENARIOS["QA"]
         h = build(self, R9.runner_judge("QA", R10.shape_of("QA", "pass"), "pass"))
         h.p.valves = {}
+        h.p.unverified = frozenset(["QA"])
+        run(h)
+        self.assertEqual(R9._open_questions(h, "QA"), [])
+        from guildcore.decisions import DecisionLog
+        qa = [b for b in DecisionLog.load(h.gh.comments(7)).blocks if b.get("point") == "QA"]
+        self.assertEqual(qa[-1].get("post_hoc"), "unverified QA")
+
+    def test_a_valve_on_an_unverified_group_still_asks_blind(self):
+        build, run, _f, _y, _e = R9.SCENARIOS["QA"]
+        h = build(self, R9.runner_judge("QA", R10.shape_of("QA", "pass"), "pass"))
+        h.p.valves = {"group.QA.conservative": True}
         h.p.unverified = frozenset(["QA"])
         run(h)
         q = R9._open_questions(h, "QA")

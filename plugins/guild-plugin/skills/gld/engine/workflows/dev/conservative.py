@@ -36,7 +36,10 @@ EX-ARB is not gated here: its conservative side is the first-sprint coercion (`f
 `coerced_by: conservative`, BLOCKER/MAJOR dismiss → accept). KICKOFF: the interpretation is confirmed with a person
 (`analyze` — attended `firstsprint.confirm_interpretation`, unattended a pause; asked openly since K6 r4 — STAKES' gate
 question too: `predict.OPEN_GROUPS`). The §10.2-6 unverified groups
-(K6 replay output) join through `active`.
+(K6 replay output) join through `active` — 0.102.5 (user decision 2026-11-22): a group that is on this path ONLY for
+being unverified does not ask (`posthoc`): the judge's decision runs, its block carries `post_hoc` and becomes a
+grading-sheet row; a confirmed wrong there sets the valve, and from then on this gate asks as above. Irreversible (§3.2)
+and security decisions of an unverified group still ask.
 """
 
 from guildcore import ask as ASK
@@ -144,6 +147,9 @@ def options_of(spec):
 
 
 REPLAY_STAGES = ("analyze", "design", "test", "qa")   # execute/children: roles change the tree — their own re-entry
+# 0.102.5: the DEVELOPER is never replayed from a tape — its result is the work itself; a developer outcome that
+# caused a blocker (#1945: a stagnant loop-back) is re-called live on every resume (execute re-runs its attempts)
+NEVER_REPLAYED = ("developer",)
 _MEM = {}                                               # tapes when a port has no journal (tests, the procedure replay)
 
 
@@ -591,7 +597,7 @@ def role(p, call, raw):
     """`Ports.run_role` (K5r6-M1): the role calls a stage made before it asked are replayed — not run again — when the
     stage runs after the person's answer; every call is taped for a question this run may raise."""
     stage = getattr(call, "stage", None)
-    if stage not in REPLAY_STAGES or not any_active(p):
+    if stage not in REPLAY_STAGES or not any_active(p) or getattr(call, "role", None) in NEVER_REPLAYED:
         return raw(call)
     live = p.__dict__.setdefault("_cons_live", [])
     rp = _replay(p, stage)
@@ -741,6 +747,16 @@ def gate(p, spec, raw):
         return d
     if not opts or d.choice not in opts:
         return d
+    irr = any(n == "irreversible" and str(t).strip() not in ("", "none") for n, t in (spec.brief_parts or []))
+    if posthoc(p, g, spec, irr):
+        # 0.102.5 user decision (2026-11-22, k6-notes "사람 개입 최소화"): a §10.2-6 UNVERIFIED group (no valve set) does not
+        # stop for a person — the judge's decision runs and is graded AFTER (`post_hoc` on its decision block → a
+        # grading-sheet row, `dev grade`; a confirmed wrong sets `group.<G>.conservative` — this gate then asks again).
+        # No blind / predict-first question on this path. Irreversible (§3.2) and security decisions still ask
+        d.post_hoc = "unverified %s" % g.replace(":", "-")
+        if getattr(p, "journal", None) is not None:
+            p.journal.append("event", what="post-hoc", group=g, point=pt_name or g, choice=d.choice)
+        return d
     if getattr(p, "dual_rate", 0):
         # K6 r2 m2: the §9.4-7 dual judgment samples the NON-conservative picks too — before the question, into the
         # local tape only (never the pending block: `dual_choice` could show the recommendation); the decision the
@@ -757,7 +773,6 @@ def gate(p, spec, raw):
     p.__dict__.pop("_cons_seen", None)
     p.__dict__.pop("_cons_used", None)
     p.__dict__.pop("_cons_used_replay", None)
-    irr = any(n == "irreversible" and str(t).strip() not in ("", "none") for n, t in (spec.brief_parts or []))
     # stakes high always: a conservative group's answer is a gate answer (§2.5 — the answerer removes the label)
     line = "%s — %s %s 결정을 사람이 정함" % (source_label(p, g), g, spec.step or spec.point or "")
     q = ASK.Question(KIND, line, [{"token": o, "label": o} for o in opts] + [{"token": "stop", "label": "stop"}],
@@ -780,6 +795,28 @@ def gate(p, spec, raw):
         # without the local tape reuses those answers while the run's role calls match (no 2ⁿ−1 re-asks)
         q.extra = {"cons_run": run_id or "-", "cons_used": used_keys, "cons_brief": brief}
     raise Ask(q, line)
+
+
+SECURITY_PARTS = ("security", "security_findings", "secrets")
+
+
+def security(spec):
+    """A decision about a security concern (a security role's finding in the brief, or a `security` point) — never
+    post-hoc: a person decides it (0.102.5 user decision)."""
+    for n, t in (getattr(spec, "brief_parts", None) or []):
+        if str(n).lower() in SECURITY_PARTS and str(t).strip() not in ("", "none"):
+            return True
+    return "security" in str(getattr(spec, "point", "") or "").lower()
+
+
+def posthoc(p, group, spec=None, irreversible=False):
+    """0.102.5: is `group`'s non-conservative decision graded AFTER instead of asked? — only when the group is on the
+    conservative side for being §10.2-6 UNVERIFIED (not a valve: a valve = a person or the count rule wants it asked)
+    and the decision is neither on an irreversible path (§3.2) nor about security."""
+    from workflows.dev import predict as PF
+    if PF.conservative_source(p, group) != "unverified":
+        return False
+    return not irreversible and not (spec is not None and security(spec))
 
 
 def _neutral(p, spec):

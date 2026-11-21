@@ -303,6 +303,7 @@ class m2InherentOnce(unittest.TestCase):
     def test_applied_block_is_no_second_verdict(self):
         h = R1._h(self)
         h.p.unverified = frozenset(["QA"])
+        h.p.valves = {"group.QA.conservative": True}         # 0.102.5: only a valve asks (unverified alone is post-hoc)
         R1._ask(h, "QA", "v1", R1._Judge("QA", "pass"))
         pend = R1._pending(h)[-1]
         R1._answer(h, "pass")

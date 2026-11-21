@@ -631,7 +631,10 @@ class R2M1OfflineReruns(unittest.TestCase):
             self.assertFalse(os.path.exists(os.path.join(tt.path, "lib", "env", "env.dart")))
             self.assertFalse(os.path.exists(os.path.join(tt.path, ".env")))
             self.assertEqual(sorted(tt.skipped_ignored), [".env", "lib/env/"])
-        self.assertEqual(EFF._verdict_head("load_error", tt)[1][:15], "secret-required")
+        # 0.102.5 (#1945): only a skipped path the run's output names is blamed — never the first entries of the list
+        self.assertEqual(EFF._verdict_head("load_error", tt, "Error when reading 'lib/env/env.dart'")[1][:15],
+                         "secret-required")
+        self.assertNotIn("secret-required", EFF._verdict_head("load_error", tt, "Compilation failed")[1])
 
 
 class R2Minors(unittest.TestCase):

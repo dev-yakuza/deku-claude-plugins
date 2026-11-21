@@ -117,11 +117,20 @@ def deferred_cases(evidence_body):
     return out
 
 
+SUMMARY_LINE_RE = re.compile(r"^\d\d:\d\d \+\d+.*: (?:All tests passed!|Some tests failed\.)|^Tests:\s|^=+ .* in [\d.]+s|"
+                             r"^(?:ok|FAIL)\s+\S+|^Ran \d+ tests?|^\s*Tests\s+\d")
+
+
 def summary_line(raw, summ):
+    """The runner's OWN summary line (0.102.5: never any line with the word `failed` — #1945 showed the flutter tool's
+    `PathNotFoundException: Deletion failed` cleanup noise as the suite's cause), with the failing tests named."""
     if summ is not None:
         for ln in reversed((raw or "").split("\n")):
-            if re.search(r"All tests passed|Some tests failed|^Tests:|passed|failed|^ok |^FAIL|^Ran \d+", ln):
-                return " ".join(ln.split())[:200]
+            if SUMMARY_LINE_RE.search(ln):
+                out = " ".join(ln.split())[:200]
+                if summ.failed and summ.failed_names:
+                    out = "%s — failed: %s" % (out, ", ".join(summ.failed_names[:3]))[:300]
+                return out
         return "passed %d failed %d" % (summ.passed, summ.failed)
     tail = [l for l in (raw or "").split("\n") if l.strip()]
     return " ".join(tail[-1].split())[:200] if tail else ""
@@ -201,6 +210,13 @@ def run(p, only=None, config_present=True):
     else:
         raw_green = bool(r.passed and not r.timed_out and (summ is None or summ.green))
     s_line = r.red_line() or summary_line(r.raw, summ)
+    flake = getattr(r, "flake", None)
+    if flake and flake.get("green") and not raw_green and not r.timed_out:
+        # 0.102.5: ≤ 2 failing tests passed when re-run alone in the same tree (`flake`) — green, with a note
+        from workflows.dev import flake as FL
+        FL.record(p, STAGE, flake)
+        raw_green = True
+        s_line = FL.line(flake)
 
     t = _tester(p, cfg, tc_rel, r, s_line, deferred, visual_cases, vrun)
     if isinstance(t, B.StageResult):
@@ -231,6 +247,8 @@ def run(p, only=None, config_present=True):
     pending, env_suspect, images = False, None, []
     if raw_green:
         shown = structured_summary(r, summ, runner, cited_literals(p, covers)) if copy_list else r.raw
+        if flake and flake.get("green"):
+            shown = "%s\n[engine] %s" % (shown, s_line)
         out = _judge_coverage(p, cfg, test_cases, covers, shown, ledger, visual_cases, tc_rel, deferred)
         if isinstance(out, B.StageResult):
             return out
@@ -417,7 +435,11 @@ def _judge_coverage(p, cfg, test_cases, covers, raw, ledger, visual_cases, tc_re
         eff = [ac for ac, v in verdicts.items() if v == "effective"]
         outcomes, meta = EFF.run(p, cfg, eff, _covers_by_ac(covers), p.base, p.impl_files)
         for ac, oc in outcomes.items():
-            if oc.result in ("fail", "unsure"):
+            # 0.102.5 (#1945 D30): only the STATIC fact "the cited test has no reachable assertion" (`fail`) overrides
+            # the verdict. An `unsure` re-run (still passes / a non-assertion error after the revert) is evidence
+            # for the §9.5 grading, never a verdict of its own: it neither turns a person's answer nor the judge's
+            # `all_effective` into a gap — it is recorded (`checks`, `check_unsure`) and the decision is graded
+            if oc.result == "fail":
                 verdicts[ac] = "unsure"
         weak = [ac for ac, v in verdicts.items() if v in ("not_covering", "unsure")]
         _record_test(p, d, acs, verdicts, outcomes, meta, ac_source, attempt, tool_mode)
@@ -437,8 +459,10 @@ def _judge_coverage(p, cfg, test_cases, covers, raw, ledger, visual_cases, tc_re
     uncovered = sorted(ac for ac, v in verdicts.items() if v != "effective")
     rows_unc = [r_.get("row") for r_ in d.fields.get("visual_rows") or [] if r_.get("verdict") != "covered"] \
         if visual_cases else []
-    coverage = [(ac, verdicts[ac] if not (ac in outcomes and outcomes[ac].result in ("unverified", "n/a"))
-                 else ("effective (unverified)" if outcomes[ac].result == "unverified" else "effective (n/a: test-only)"),
+    coverage = [(ac, verdicts[ac] if not (ac in outcomes and outcomes[ac].result in ("unverified", "n/a", "unsure")
+                                          and verdicts[ac] == "effective")
+                 else {"unverified": "effective (unverified)", "unsure": "effective (check unsure — graded)"}.get(
+                     outcomes[ac].result, "effective (n/a: test-only)"),
                  [c.get("test") for c in _covers_by_ac(covers).get(ac, [])],
                  (outcomes[ac].why if ac in outcomes else (per.get(ac) or {}).get("why")))
                 for ac in acs]
@@ -459,7 +483,7 @@ def _record_test(p, d, acs, verdicts, outcomes, meta, ac_source, attempt, tool_m
     decision for the human sample (`grade: trigger` — K2-B3)."""
     eff = sorted(ac for ac, v in verdicts.items() if v == "effective")
     unc = sorted(ac for ac, v in verdicts.items() if v != "effective")
-    unver = [o for o in outcomes.values() if o.result == "unverified"]
+    unver = [o for o in outcomes.values() if o.result in ("unverified", "unsure")]
     detail = ";".join("%s|%s|%s|%s|%s" % (o.ac, o.test, o.line, o.cmd, o.kind) for o in outcomes.values())
     B.record_judgment(p, STAGE, "TEST" if attempt == 1 else "TEST:repair", "T-AC-COVER,T-VACUOUS,T-VISUAL-COV", d,
                       choice="effective:%s;uncovered:%s" % (",".join(eff) or "none", ",".join(unc) or "none"),
@@ -470,6 +494,11 @@ def _record_test(p, d, acs, verdicts, outcomes, meta, ac_source, attempt, tool_m
                              "base_source": meta.get("base_source"), "ac_source": ac_source,
                              "brief": "tool" if tool_mode else None,
                              "unsure_acs": ",".join(ac for ac, v in verdicts.items() if v == "unsure") or None,
+                             # 0.102.5: the code check could not confirm these effective verdicts — recorded and
+                             # graded after (`grade: trigger`), the verdict stands
+                             "check_unsure": ",".join(sorted(o.ac for o in outcomes.values()
+                                                             if o.result == "unsure" and verdicts.get(o.ac) == "effective"))
+                             or None,
                              "effective_check": "bypassed" if meta.get("bypassed") else
                              ("n/a(test-only)" if meta.get("test_only") else None),
                              "ignored_copied": ",".join(meta.get("ignored_copied") or []) or None,

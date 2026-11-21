@@ -99,6 +99,7 @@ class Ctx(object):
         self.local_job = None
         self.major_spent = False
         self.reinvoked = False
+        self.stagnant_retried = False     # 0.102.5: the one automatic re-invoke after a recurring blocker
         self.dwc = []                     # DONE_WITH_CONCERNS lines for the PR
         self.ledger = None
         self.withdrawn = []
@@ -344,6 +345,8 @@ def restore_invocation_state(p, cx):
     for blk in DecisionLog.load(B.records(p)).blocks:
         if blk.get("stage") == STAGE and blk.get("point") == "reinvoke" and blk.get("refs") == cx.stage_start:
             cx.reinvoked = True
+        if blk.get("stage") == STAGE and blk.get("point") == "stagnant-retry" and blk.get("refs") == cx.stage_start:
+            cx.stagnant_retried = True                           # 0.102.5: once per invocation, crash-safe
 
 
 # ---- X0 helpers -----------------------------------------------------------------------------------
@@ -608,9 +611,16 @@ def evidence_step(p, cx, dev, attempt):
                          "테스트 요약 형식을 읽지 못함", "X2.3")
     else:
         green = bool(r.passed and summ.green)
+        flake = getattr(r, "flake", None)
+        if not green and flake and flake.get("green"):
+            # 0.102.5: ≤ 2 failing tests passed when re-run alone in the same tree — green, with a flake note
+            from workflows.dev import flake as FL
+            FL.record(p, STAGE, flake)
+            green, cx.flake_line = True, FL.line(flake)
         if not green:
             reason = ("suite red — %d failed" % summ.failed) if copy_ignored_list(p) else \
-                "suite red — %s" % (r.red_line() or "failed")
+                "suite red — %s" % (r.red_line() or ("failed: %s" % ", ".join(summ.failed_names[:3])
+                                                      if summ.failed_names else "failed"))
     if dep_reason:
         green, reason = False, dep_reason
     claimed = dev.status in ("DONE", "DONE_WITH_CONCERNS")
@@ -623,6 +633,9 @@ def evidence_step(p, cx, dev, attempt):
         green = False
         reason = dev.line if TIMEOUT_RE.search(dev.line or "") else None
     rows, run, notes = [], False, []
+    if getattr(cx, "flake_line", None):
+        notes.append(cx.flake_line)
+        cx.flake_line = None
     if V.ledger_expected(cfg_dict(p)):
         ev = markers.find(B.records(p), EVIDENCE)
         prev = VC.parse_ledger(V.block_text(markers.body_of(ev))) if ev else []
@@ -1058,6 +1071,14 @@ def arbitrate_step(p, cx, attempt, scan, scan_ran, head, untracked, role_trigger
         q = ASK.Question("dismiss-blocker", "dismiss auditor BLOCKER %s at %s? (%s)" % (c.fid, c.location, why),
                          [{"token": "dismiss", "label": "dismiss"}, {"token": "fix", "label": "fix"}], refs=c.fid)
         return B.ask(p, STAGE, q, "dismiss auditor BLOCKER %s — %s" % (c.fid, why))
+    if arb.kind == "stagnant" and not getattr(cx, "stagnant_retried", False):
+        # 0.102.5 (#1945): before a person, the developer gets ONE more attempt (per invocation, durable in the log)
+        # with the exact blocker and how to clear it — #1945 asked a person twice over a bare-path `baselines` line
+        cx.stagnant_retried = True
+        B.record_code(p, STAGE, "stagnant-retry", "developer", refs=cx.stage_start,
+                      reason=B.one_line(arb.stagnant_reason, 300))
+        cx.reinvoke_addendum = stagnant_hint(arb.stagnant_reason, arb.reasons)
+        return "reinvoke"
     if arb.kind == "stagnant":
         p.capture("stagnation", STAGE, "auditor" if not role_triggers and not evidence_reason else
                   (role_triggers[0][0] if role_triggers else "developer"), "stagnant loop-back",
@@ -1082,6 +1103,30 @@ def arbitrate_step(p, cx, attempt, scan, scan_ran, head, untracked, role_trigger
     if local_pass and cx.local_job:
         _ld(p, ["note", "--issue", str(p.issue), "--event", "not-green: %s" % B.one_line("; ".join(arb.reasons), 200)])
     return "retry"
+
+
+def stagnant_hint(reason, details=()):
+    """0.102.5: the retry note of the automatic re-invoke after a recurring blocker — the exact cause (and this
+    attempt's blocking reasons) and a fix hint the engine can state (no judgment)."""
+    r = " ".join([reason or ""] + [d for d in details or () if d])
+    out = ["The same blocker came back after the previous attempt — the engine stopped it: %s" % B.one_line(reason, 600)]
+    for d in details or ():
+        if d and d != reason:
+            out.append("- %s" % B.one_line(d, 400))
+    if "undeclared visual change" in r:
+        out.append("Fix: declare EVERY visual baseline you changed or that must be regenerated in result.json "
+                   "`baselines`, one string each, exactly `<A|M|D|C|P|P-withdrawn> <path> — <reason>` (A added, M "
+                   "modified, D deleted, C config, P pending regeneration) — e.g. `M %s — <why it changed>`. A bare "
+                   "path is not read." % (re.search(r"undeclared visual change: ([^\s,;]+)", r).group(1)
+                                           if re.search(r"undeclared visual change: ([^\s,;]+)", r) else "<path>"))
+    elif TIMEOUT_RE.search(r):
+        out.append("Fix: the suite did not finish inside the ceiling — find the test that hangs (the last running test "
+                   "is named above) and make it finish; never weaken or skip it.")
+    elif "suite red" in r or "not green" in r:
+        out.append("Fix: make the failing test(s) named above pass with the implementation — never by editing or "
+                   "skipping the test.")
+    out.append("Fix exactly this first. If it cannot be fixed, end with `BLOCKED: <why>` instead of repeating it.")
+    return "\n".join(out)
 
 
 def write_audit(p, block):

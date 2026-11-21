@@ -2,7 +2,8 @@
 
 * `normal` = the engine's own rates; a lenient metric where the engine is more lenient than legacy takes legacy's;
 * `first_sprint` = the same decisions through the first-sprint forcing in code (EX-ARB dismiss → accept, excluded from
-  the coercion rate; HANDOFF assumption → pause; unverified groups → their question), no new call;
+  the coercion rate; HANDOFF assumption → pause; unverified groups → 0.102.5: graded after (`post_hoc`), only an
+  irreversible pick asks), no new call;
 * `dev health` picks the first-sprint centre with `--first-sprint`; an older flat file is the normal centre.
 """
 
@@ -48,10 +49,15 @@ class Centre(unittest.TestCase):
         self.assertEqual(fs["pause_issues"], 0.25)                   # the HANDOFF assumption Issue pauses
         self.assertEqual(fs["explained_pause_issues"], 0.25)
 
-    def test_unverified_groups_pause(self):
+    def test_unverified_groups_run_post_hoc_unless_irreversible(self):
+        # 0.102.5 (user decision 2026-11-22): an unverified group's decision runs and is graded after — no pause
         c = CE.compute(REPLAY, unverified=("STAKES", "QA"))
-        self.assertEqual(c["first_sprint"]["pause_issues"], 0.75)
-        self.assertEqual(c["first_sprint"]["explained_pause_issues"], 0.75)
+        self.assertEqual(c["first_sprint"]["pause_issues"], 0.25)            # the HANDOFF assumption Issue only
+        self.assertEqual(c["first_sprint"]["explained_pause_issues"], 0.25)
+        irr = dict(REPLAY)
+        irr[1] = [J("EX-ARB", "F1:dismiss"), J("STAKES", "low", "analyze", irreversible="true")]
+        c = CE.compute(irr, unverified=("STAKES", "QA"))
+        self.assertEqual(c["first_sprint"]["pause_issues"], 0.5)             # an irreversible path still asks
 
     def test_pick(self):
         c = CE.compute(REPLAY)

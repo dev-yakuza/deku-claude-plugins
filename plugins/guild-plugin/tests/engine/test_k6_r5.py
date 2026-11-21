@@ -186,9 +186,9 @@ def _cycle(case, unattended, valves=None, first=False, unverified=True):
 
 class m2ReaskNoRow(unittest.TestCase):
     def test_reask_questions_are_never_rows_in_the_shipped_state(self):
-        cases = (("attended, KICKOFF unverified", False, None, False),
-                 ("attended, first sprint", False, None, True),
-                 ("unattended, KICKOFF unverified", True, None, False),
+        # 0.102.5: KICKOFF unverified alone no longer asks (post-hoc) — those two cases moved to
+        # test_unverified_kickoff_alone_asks_nothing below
+        cases = (("attended, first sprint", False, None, True),
                  ("unattended, conservative valve on", True, {"group.KICKOFF.conservative": True}, False),
                  ("unattended, valve on + first sprint", True, {"group.KICKOFF.conservative": True}, True))
         for name, unattended, valves, first in cases:
@@ -202,6 +202,21 @@ class m2ReaskNoRow(unittest.TestCase):
                 fixed, _rej = G.verify_rows([dict(r, given_info="ok") for r in rows], lambda n: _blocks(h))
                 self.assertEqual(sorted(set(r["point_key"] for r in fixed if UV.counts(r, "human"))),
                                  ["7/%s" % q1.id])
+
+
+    def test_unverified_kickoff_alone_asks_nothing(self):
+        for unattended in (False, True):
+            with self.subTest(unattended=unattended):
+                h = K4(self, unattended=unattended, roles=[evidence(self, areas=WIDE)] * 4,
+                       judges={"KICKOFF": _kick("A")}, extra_files=EXTRA)
+                h.p._first_sprint = False
+                h.p.unverified = frozenset(["KICKOFF"])
+                h.p.valves = {}
+                h.p.journal = J.Journal(tempfile.mkdtemp(prefix="k6r5-"), 7, h.clock)
+                A.run(h.p)
+                self.assertEqual(_pending(h), [])
+                kb = [b for b in _blocks(h) if b.get("point") == "KICKOFF"][-1]
+                self.assertEqual(kb.get("post_hoc"), "unverified KICKOFF")
 
 
 class m3NothingLost(unittest.TestCase):

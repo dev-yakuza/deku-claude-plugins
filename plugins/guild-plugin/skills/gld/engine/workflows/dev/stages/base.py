@@ -157,6 +157,9 @@ class Ports(object):
 
         def ran(call):
             from workflows.dev import conservative as CONS
+            stopped = apply_drift_answer(self, getattr(call, "stage", None))
+            if stopped is not None:
+                return stopped
             return CONS.role(self, call, raw)
         ran.raw = raw
         return ran
@@ -355,6 +358,9 @@ def record_judgment(p, stage, point, refs, dec, choice=None, reason=None, extra=
         f["coerced_to"] = dec.coerced_to
         if getattr(dec, "grounds", None):
             f["grounds"] = dec.grounds                      # K6 (item 39 i): why it could not run, how to give grounds
+    if getattr(dec, "post_hoc", None):
+        # 0.102.5: an unverified group's decision that ran without a person — a grading-sheet row (`dev grade`)
+        f["post_hoc"] = dec.post_hoc
     if getattr(dec, "dual", None):
         # K6 item 11: the §9.4-7 dual judgment (monitoring) — a disagreement is a §9.5 grading trigger
         f["dual"], f["dual_choice"], f["dual_model"] = dec.dual, dec.dual_choice, dec.dual_model
@@ -515,9 +521,18 @@ def role_outcome(p, stage, role, res):
     if st == "DRIFT" and "not run" in (res.notes or []):
         # K4r3-m4(a): the role never started — the worktree was already wrong; the line names the
         # worktree, not the role (no scope violation in the role's ledger). An overlay left there is env.
+        if "stopped" in (res.notes or []):
+            return StageResult(StageResult.PAUSE, cause="stopped by the human (%s)" % (res.line or "drift"))
         paths = ", ".join(str(v) for v in res.violations[:5]) or (res.line or "")
         overlay = all(str(v).startswith("lefthook overlay ") for v in res.violations or [])
         line = "%s not started — the worktree needs a person first: %s" % (role, paths)
+        if res.violations and all(str(v).startswith(LATE) for v in res.violations):
+            # 0.102.5: a late change in the worktree (a person's edit, a commit — base merges are accepted by the
+            # runner itself) is never a dead end: the person accepts it (the worktree as it is becomes the baseline)
+            # or stops; attended a question, unattended a pause with the same options
+            q = ASK.Question(DRIFT_KIND, "%s — accept the worktree as it is and continue?" % line,
+                             [{"token": "accept", "label": "인정하고 계속"}, {"token": "stop", "label": "멈춤"}])
+            return ask(p, stage, q, q.text, {"cause_kind": "defect", "line": line, "token_cause": line})
         if overlay and res.violations:
             return pause(p, stage, "env", line, "env: other — %s" % line, env_key="other") if p.unattended else \
                 StageResult(StageResult.FAIL, line=line, fail_class="defect")
@@ -533,6 +548,39 @@ def role_outcome(p, stage, role, res):
         return pause(p, stage, "defect", line, line) if p.unattended else \
             StageResult(StageResult.FAIL, line=line, fail_class="defect")
     return None
+
+
+LATE = "late change after the previous step: "
+DRIFT_KIND = "drift"
+
+
+def apply_drift_answer(p, stage):
+    """0.102.5: a person's answer to this stage's drift question, applied once, right before the next role call:
+    `accept` → the worktree as it is now becomes the drift baseline (`p.accept_drift`) and the role runs; `stop` → the
+    role does not run (a `DRIFT` result the stage turns into a pause). None = nothing to apply (the role runs)."""
+    if not stage or getattr(p, "decisions", None) is None:
+        return None
+    seen = p.__dict__.setdefault("_drift_read", set())
+    if stage in seen:
+        return None                                    # read once per run and stage (an answer ends the run)
+    seen.add(stage)
+    try:
+        q, res = pending_answer(p, stage, DRIFT_KIND)
+    except Exception:                                  # noqa: BLE001 — an unreadable log applies nothing
+        return None
+    if res is None:
+        return None
+    from guildcore.roles.runner import RoleResult
+    if res.get("choice") == "accept":
+        acc = getattr(p, "accept_drift", None)
+        if acc is not None:
+            acc()
+        mark_applied(p, stage, res)
+        if getattr(p, "journal", None) is not None:
+            p.journal.append("event", what="drift-accepted", why="person (%s)" % res.id, stage=stage)
+        return None
+    mark_applied(p, stage, res)
+    return RoleResult("DRIFT", q.id, notes=["not run", "stopped"])
 
 
 def register_exact(p):

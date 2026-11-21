@@ -4,7 +4,12 @@
   §9.5 groups the replay VERIFIED (held-out n ≥ 20 at the gate's agreement, or a passing synthetic set — the criteria
   in code: `replay/gate_report.decide`, K6 r7 m4; run it on the paid replay's graded rows before a release). Every other
   group of `valves.GROUPS` is UNVERIFIED — "no synthetic = not passed" (R4J-m5).
-* An unverified group runs the conservative path (`predict.conservative` → the gate's blind question — STAKES' asked
+* 0.102.5 (user decision 2026-11-22, "사람 개입 최소화"): an unverified group no longer STOPS for a person — the gate
+  (`conservative.posthoc`) and KICKOFF run the judge's decision and mark its block `post_hoc`; every such decision is a
+  grading-sheet row (`grade.posthoc_rows`, `POSTHOC_MODE`, open until imported) whose verdict counts toward the
+  release, and a confirmed wrong sets `group.<G>.conservative` at once (the asking path below). Irreversible (§3.2)
+  and security decisions still ask. EX-ARB's dismiss → accept coercion is unchanged (it asks nothing).
+* (before 0.102.5) An unverified group runs the conservative path (`predict.conservative` → the gate's blind question — STAKES' asked
   openly —, KICKOFF's open confirmation, EX-ARB's dismiss → accept) until it is RELEASED: `release_after` (5) counted blind answers of that
   group judged by a person — the predict-first `ok`s and the person-confirmed candidates `dev grade` imports (§9.5
   "사람 판정") — with no confirmed wrong among them (§10.4 G1 group rule; R5J-M4: only predict-first answers count).
@@ -174,6 +179,10 @@ def note_candidates(st, cands, path=FILE, now=None):
 
 
 INHERENT_MODE = "inherent-gate"         # the sheet row of an INHERENT gate question (`grade.inherent_row`)
+# 0.102.5 (user decision 2026-11-22): an unverified group's decision that ran WITHOUT a person (`post_hoc` on its block)
+# is a grading-sheet row of its own; the person's verdict on it counts toward the group's release, and a confirmed wrong
+# sets `group.<G>.conservative` at once (`grade.apply_judgments`) — that group asks again from then on
+POSTHOC_MODE = "post-hoc"
 
 
 def point_of(refs):
@@ -323,6 +332,8 @@ def counts(row, source):
     M6) for a SHEET_RELEASED group the person's own sheet verdict (`source` = the import version `human`; K6 r2 M1:
     for an inherent gate group on its non-conservative choice only — never a predict-first `ok`)."""
     g = canonical(row.get("group"))
+    if (row.get("mode") or "") == POSTHOC_MODE:
+        return source == "human"                 # 0.102.5: the person's verdict on a decision that ran unasked
     if (row.get("mode") or "") == "predict-first":
         # K6 r2 M1 / K6 r4: an inherent gate group's — or an open group's — answer is never a counted blind one
         return g not in SHEET_CHOICE and g not in OPEN_ASKED
@@ -417,5 +428,9 @@ def report(common, path=FILE):
                                 "log is gone for good: dev grade --drop-candidate <issue/D-id> --reason <why>")
                     if any(k in (u.get("open") or ()) for k in (u.get("unread") or {})) else None,
                     "wrong_after_release": int(u.get("wrong_after_release") or 0),
-                    "release_by": "sheet verdicts" if g in SHEET_RELEASED else "blind answers"})
+                    # 0.102.5: no group of this list stops for a person any more (irreversible / security decisions
+                    # excepted) — every decision is graded after; the release counts those sheet verdicts too
+                    "release_by": "sheet verdicts" if g in SHEET_RELEASED else "sheet verdicts (post-hoc) + blind answers",
+                    "path": "post-hoc: runs the judge's decision, graded on the sheet; a confirmed wrong → "
+                            "group.%s.conservative (asks)" % g})
     return out

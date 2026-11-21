@@ -450,12 +450,15 @@ class M6ReleasePaths(unittest.TestCase):
         self.assertIn("grading-sheet", PF.conservative_label(P(), "KICKOFF"))     # K6 r4: released by the sheet
 
     def test_gate_line_names_the_unverified_source(self):
+        # 0.102.5: an unverified group no longer asks (post-hoc); its source is still named where it acts (the EX-ARB
+        # would-dismiss reason, `dev health`), never as a valve that is not set
         h = _h(self)
         h.p.valves = {}
         h.p.unverified = frozenset(["QA"])
-        q = _ask(h, "QA", "v1", _Judge("QA", "pass"))
-        self.assertIn("unverified QA", q.original or q.text)
-        self.assertNotIn("group.QA.conservative", q.original or q.text)
+        d = _run(h, "QA", "v1", _Judge("QA", "pass"))
+        self.assertEqual(getattr(d, "post_hoc", None), "unverified QA")
+        self.assertIn("unverified QA", PF.conservative_label(h.p, "QA"))
+        self.assertNotIn("group.QA.conservative", PF.conservative_label(h.p, "QA"))
 
 
 class M1ReleaseCandidates(unittest.TestCase):
@@ -524,7 +527,10 @@ class M5Centre(unittest.TestCase):
     def test_conservative_choice_and_release_after(self):
         replay = dict((i, [self.J("QA", "block")]) for i in range(1, 4))
         self.assertEqual(CE.compute(replay, unverified=("QA",))["first_sprint"]["pause_issues"], 0.0)
+        # 0.102.5: a non-conservative pick of an unverified group runs (graded after) — only an irreversible one asks
         replay = dict((i, [self.J("QA", "pass")]) for i in range(1, 11))
+        self.assertEqual(CE.compute(replay, unverified=("QA",))["first_sprint"]["pause_issues"], 0.0)
+        replay = dict((i, [dict(self.J("QA", "pass"), irreversible="true")]) for i in range(1, 11))
         fs = CE.compute(replay, unverified=("QA",))["first_sprint"]
         self.assertEqual(fs["pause_issues"], 0.5)                        # the first 5 of 10 only
 

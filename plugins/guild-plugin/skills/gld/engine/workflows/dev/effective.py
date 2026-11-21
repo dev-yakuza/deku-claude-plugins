@@ -58,6 +58,17 @@ TEST_PATH_RE = re.compile(r"(^|/)(test|tests|__tests__|spec|integration_test|tes
                           r"\.(test|spec)\.[jt]sx?$|(^|/)test_[^/]*\.py$")
 EXCERPT_CAP = 200
 FRESH_DIRS = ("build", "coverage", ".gradle", "target", ".pytest_cache", "__pycache__")
+# 0.102.5 (#1945): git-ignored WORKING files of the coding agents and editors (`.claude/.cc-writes/`, `.claude/guild/memory/`,
+# `docs/specs/N/.claude/` …) are no app input and no secret a test could need — never copied, never named as
+# "secret-required"/`ignored-missing` (they were blamed for a test that failed for its own reason)
+TOOL_DIRS = (".claude", ".cc-writes", ".cursor", ".idea", ".vscode", ".aider", ".continue", ".codex", ".gemini",
+             ".windsurf", ".zed", ".fleet")
+
+
+def tool_path(rel):
+    """Is `rel` (a repo-relative path) under an agent's / editor's working dir (`TOOL_DIRS`, any depth)?"""
+    parts = [x for x in os.path.normpath(rel or "").split(os.sep) if x]
+    return any(x in TOOL_DIRS or x.startswith(".claude") or x.startswith(".aider") for x in parts)
 LITERAL_WORDS = {"true", "false", "null", "none", "nil", "and", "or", "not", "is", "in", "istrue",
                  "isfalse", "isnull", "isnotnull", "equals", "undefined", "tobe", "toequal", "tobetruthy",
                  "tobedefined", "tobefalsy"}
@@ -408,6 +419,61 @@ def loop_site(text, name):
     return False
 
 
+# 0.102.5 (#1945 AC #6): `matchesGoldenFile` is an assertion — its failure prints `Golden "<file>": Pixel test failed`
+# (or a size mismatch), never `Expected:`/`Actual:`; a missing master image is NOT a reaction (it fails with any code)
+GOLDEN_FAIL_RE = re.compile(r'(?m)^Golden "[^"]+": (?:Pixel test failed|Image sizes do not match)')
+
+
+def flutter_assertion(raw):
+    """The flutter/dart ASSERTION-failure signature of a (re-)run's output: `Expected:` + `Actual:` (expect), or a
+    golden comparison that ran and differed (`matchesGoldenFile`)."""
+    raw = raw or ""
+    return bool((re.search(r"(?m)^\s*Expected: ", raw) and re.search(r"(?m)^\s*Actual: ", raw)) or
+                GOLDEN_FAIL_RE.search(raw))
+
+
+def _name_rx(name):
+    short = (name or "").split(" › ")[-1]
+    return re.compile(r"^\d\d:\d\d \+\d+(?: ~\d+)?(?: -\d+)?: (?:.*[ :] ?)?%s( \[E\])?\s*$" % re.escape(short))
+
+
+def file_kind(raw, runner, name, passed):
+    """0.102.5 (#1945 AC #2): the cited test's own outcome inside a run of its WHOLE FILE (flutter/dart compact
+    reporter) — for a test that cannot run alone (it leans on state an earlier test of its file set up: a `late`
+    local initialised by another test → `LateInitializationError` under `--name`). passed | assertion | runtime |
+    load_error | none_ran. The failure block is the test's own: from its start line to its `[E]` line."""
+    raw = raw or ""
+    for rx in CH.LOAD_ERROR_RES.get(runner, ()):
+        if re.search(rx, raw, re.M):
+            return "load_error"
+    rx = _name_rx(name)
+    lines = raw.split("\n")
+    start, fail = None, None
+    for i, ln in enumerate(lines):
+        m = rx.match(ln)
+        if not m:
+            continue
+        if m.group(1):
+            fail = i
+            break
+        start = i
+    if fail is None:
+        if start is None:
+            return "none_ran"
+        # a run that ended red with no `[E]` line at all crashed — the cited test's own outcome is unknown
+        return "passed" if (passed or re.search(r"(?m) \[E\]\s*$", raw)) else "unknown"
+    block = "\n".join(lines[(start if start is not None else 0):fail + 1])
+    return "assertion" if flutter_assertion(block) else "runtime"
+
+
+def file_command(cfg, runner, path):
+    """The cited test's whole FILE, offline (flutter/dart only — the compact reporter names every test)."""
+    if runner not in ("flutter", "dart") or (cfg.get("commands") or {}).get("test_one"):
+        return None
+    q = shlex.quote
+    return "%s test %s%s" % ("flutter" if runner == "flutter" else "dart", q(path), " --no-pub" if runner == "flutter" else "")
+
+
 def rerun_kind(raw, runner, name, passed, family=True):
     """assertion | passed | runtime | load_error | none_ran | ambiguous | unknown (K2-B1, r2-B1)."""
     raw = raw or ""
@@ -434,7 +500,7 @@ def rerun_kind(raw, runner, name, passed, family=True):
     if runner in ("flutter", "dart"):
         if not re.search(r"(?m)^\d\d:\d\d \+\d+(?: ~\d+)? -\d+: .*%s.* \[E\]\s*$" % re.escape(short), raw):
             return "unknown"
-        return "assertion" if re.search(r"(?m)^\s*Expected: ", raw) and re.search(r"(?m)^\s*Actual: ", raw) else "runtime"
+        return "assertion" if flutter_assertion(raw) else "runtime"
     if runner in ("jest", "vitest"):
         if not re.search(r"●.*%s" % re.escape(short), raw) and not re.search(r"(×|FAIL).*%s" % re.escape(short), raw):
             return "unknown"
@@ -723,6 +789,7 @@ class TempTree(object):
         self.defer_ignored = defer_ignored
         self.path = None
         self.skipped_ignored = []
+        self.tool_skipped = []
         self.copied = []
         self.refused = []
         self.linked = []
@@ -866,6 +933,9 @@ class TempTree(object):
         for e in [x for x in lines if x]:
             rel = os.path.normpath(e.rstrip("/"))
             if rel.startswith("..") or os.path.isabs(rel):
+                continue
+            if tool_path(rel):
+                self.tool_skipped.append(rel)            # 0.102.5: agent/editor working files — not the app's
                 continue
             src = os.path.join(self.root, rel)
             base = os.path.basename(rel)
@@ -1014,11 +1084,24 @@ def _verdict_head(kind, tree, raw=""):
         return ("unverified", "filter ran more than one test")
     if (getattr(tree, "warm", None) or "").startswith("failed") and kind in ("load_error", "runtime", "unknown"):
         return ("unverified", "warm-up failed: %s" % tree.warm[len("failed("):-1])     # K2r5-m3
-    if tree.skipped_ignored and kind in ("load_error", "runtime", "unknown"):
-        named = [x for x in tree.skipped_ignored if x.rstrip("/") and x.rstrip("/") in (raw or "")]
+    named = [x for x in (tree.skipped_ignored or ()) if x.rstrip("/") and x.rstrip("/") in (raw or "")]
+    if named and kind in ("load_error", "runtime", "unknown"):
+        # 0.102.5 (#1945): only a skipped path the run's output NAMES — never the first entries of the skipped list
         return ("unverified", "secret-required: the test needs git-ignored files the engine does not copy (%s)"
-                % ", ".join((named or tree.skipped_ignored)[:3]))
-    return ("unverified", "the cited test does not pass at HEAD in the temp tree (%s)" % kind)
+                % ", ".join(named[:3]))
+    err = error_line(raw)
+    return ("unverified", "the cited test does not pass at HEAD in the temp tree (%s%s)" % (kind, (": " + err) if err else ""))
+
+
+ERR_LINE_RE = re.compile(r"^\s*([A-Z]\w*(?:Error|Exception)\b.*)$", re.M)
+
+
+def error_line(raw):
+    """The first error line of a failed run (redacted, one line, ≤ 160) — the cause on the record (0.102.5)."""
+    m = ERR_LINE_RE.search(raw or "")
+    if not m:
+        return ""
+    return CH.redact_lines(" ".join(m.group(1).split()))[:160]
 
 
 def run(p, cfg, effective_acs, covers_by_ac, base, given_impl=None, timeout_s=900):
@@ -1033,6 +1116,10 @@ def run(p, cfg, effective_acs, covers_by_ac, base, given_impl=None, timeout_s=90
         base = default_base(p.root)
         meta.update(base=base, base_source="merge-base" if base else None)
     runner = runner_of(cfg)
+    try:
+        p._eff_cfg = cfg                  # 0.102.5: the file-level fallback reads `commands.test_one`
+    except AttributeError:
+        pass
     pending = {}                      # ac → [(cv, path, name, line, cmd)]
     for ac in effective_acs:
         o, items = static_check(p, cfg, ac, covers_by_ac.get(ac, []))
@@ -1091,18 +1178,41 @@ def run(p, cfg, effective_acs, covers_by_ac, base, given_impl=None, timeout_s=90
     return out, meta
 
 
+def _classify(p, runner, r, path, name, cmd, files):
+    if r.timed_out:
+        return "timeout"
+    if cmd in files:
+        return file_kind(r.raw, runner, name, r.passed)
+    return rerun_kind(r.raw, runner, name, r.passed, loop_site(p.read_file(path), name))
+
+
 def _phases(p, runner, pending, tt, base, impl, out, timeout_s):
     live = {}
-    for ac, rows in pending.items():                 # HEAD run (r2-B1)
+    files = getattr(tt, "file_cmds", None)
+    if files is None:
+        files = tt.file_cmds = set()
+    cfg = getattr(p, "_eff_cfg", None) or {}
+    for ac, rows in list(pending.items()):           # HEAD run (r2-B1)
+        fixed = []
         for cv, path, name, line, cmd in rows:
             r = p.check(cmd, tt.path, "tester", timeout_s, [tt.path])
-            kind = "timeout" if r.timed_out else rerun_kind(r.raw, runner, name, r.passed,
-                                                             loop_site(p.read_file(path), name))
+            kind = _classify(p, runner, r, path, name, cmd, files)
+            fcmd = file_command(cfg, runner, path) if kind in ("runtime", "unknown") else None
+            if fcmd:
+                # 0.102.5 (#1945 AC #2): the test fails ALONE but may pass inside its file (order-dependent setup)
+                # — run its whole file and read the cited test's own line; the revert re-run then runs the file too
+                r2 = p.check(fcmd, tt.path, "tester", timeout_s, [tt.path])
+                k2 = "timeout" if r2.timed_out else file_kind(r2.raw, runner, name, r2.passed)
+                if k2 == "passed":
+                    files.add(fcmd)
+                    kind, cmd, r = k2, fcmd, r2
             v = _verdict_head(kind, tt, r.raw)
             if v:
                 out[ac] = CheckOutcome(ac, cv.get("test"), v[0], v[1], "head:" + kind, line, cmd)
                 break
+            fixed.append((cv, path, name, line, cmd))
         else:
+            rows = pending[ac] = fixed
             news = [x for x in rows if x[0].get("kind") == "new"]
             if not news:
                 out[ac] = CheckOutcome(ac, rows[0][0].get("test"), "pass", "assertion present; runs and passes at HEAD",
@@ -1133,13 +1243,23 @@ def _phases(p, runner, pending, tt, base, impl, out, timeout_s):
 
 
 def _rerun(p, runner, tt, rows, timeout_s):
+    """0.102.5 (#1945 AC #1/#3): the AC's cited tests react TOGETHER — the reverted impl is detected when ANY of them
+    fails with an assertion (a cited test whose expectation the base already met — the English text that was English
+    before, a key-set guard — passes by design and no longer hides the ones that react). No reaction: a compile /
+    collection error first (the partial revert retries it), else the first row's class."""
+    files = getattr(tt, "file_cmds", None) or set()
+    first = None
+    load = None
     for cv, path, name, line, cmd in rows:
         r = p.check(cmd, tt.path, "tester", timeout_s, [tt.path])
-        kind = "timeout" if r.timed_out else rerun_kind(r.raw, runner, name, r.passed,
-                                                         loop_site(p.read_file(path), name))
-        if kind != "assertion":
+        kind = _classify(p, runner, r, path, name, cmd, files)
+        if kind == "assertion":
             return kind, cv, line, cmd
-    return "assertion", rows[0][0], rows[0][3], rows[0][4]
+        if kind == "load_error" and load is None:
+            load = (kind, cv, line, cmd)
+        if first is None:
+            first = (kind, cv, line, cmd)
+    return load or first
 
 
 def _outcome(ac, rows, res, second=False):

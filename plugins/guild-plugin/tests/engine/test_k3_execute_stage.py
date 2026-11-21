@@ -82,16 +82,18 @@ class Retry(unittest.TestCase):
         self.assertEqual(h.calls["judges"][0].model, "opus")
 
     def test_same_blocker_twice_is_stagnation(self):
-        h = XHarness(self, roles=[dev(), TL_DONE, auditor([finding()]), dev(), TL_DONE, auditor([finding(line=4)])],
-                     suites=[GREEN, GREEN], judges={"EX-ARB": [exarb()],
-                                                    "IDENT": decision("same", {"verdict": "same"})})
+        # 0.102.5: before a person, the developer gets ONE automatic retry with the cause (a third attempt)
+        h = XHarness(self, roles=[dev(), TL_DONE, auditor([finding()]), dev(), TL_DONE, auditor([finding(line=4)]),
+                                  dev(), TL_DONE, auditor([finding(line=5)])],
+                     suites=[GREEN, GREEN, GREEN], judges={"EX-ARB": [exarb(), exarb(), exarb()],
+                                                           "IDENT": decision("same", {"verdict": "same"})})
         r = X.run(h.p, "implement")
         self.assertEqual(r.kind, "PAUSE")
         self.assertTrue(r.cause.startswith("stagnant loop-back"))
         self.assertIn("guild:needs-human", h.labels())
         self.assertIn("guild:execute", h.labels())
         self.assertTrue(any(c[0] == "stagnation" for c in h.captures))
-        self.assertEqual([[f.token for f in b.findings] for b in h.audit().blocks], [["looped-back"], ["recorded"]])
+        self.assertEqual([[f.token for f in b.findings] for b in h.audit().blocks][:2], [["looped-back"], ["recorded"]])
 
     def test_red_suite_scan_none_then_cap(self):
         h = XHarness(self, roles=[dev(), dev()], suites=[RED, suite(FLUTTER_RED.replace("widget shows title", "other"),
@@ -296,8 +298,9 @@ class Variants(unittest.TestCase):
     def test_refactor_net_not_proven_loops_back(self):
         root = wt_repo(self, branch="refactor/#7-x")
         sha = git(root, "rev-parse", "HEAD")                  # the proof holds lib/a.dart's change
-        h = XHarness(self, root=root, body="<!-- guild:safety-net -->", suites=[GREEN, GREEN],
+        h = XHarness(self, root=root, body="<!-- guild:safety-net -->", suites=[GREEN, GREEN, GREEN],   # 0.102.5: + the retry
                      roles=[dev(safety_net=sha, net=["test/a_test.dart"], net_run=["test/a_test.dart +1"]),
+                            dev(safety_net=sha, net=["test/a_test.dart"], net_run=["test/a_test.dart +1"]),
                             dev(safety_net=sha, net=["test/a_test.dart"], net_run=["test/a_test.dart +1"])],
                      judges={"SAMECAUSE": decision("same", {"verdict": "same"})})
         h.p.branch = "refactor/#7-x"

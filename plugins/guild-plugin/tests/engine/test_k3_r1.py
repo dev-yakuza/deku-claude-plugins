@@ -106,7 +106,8 @@ class RolePaths(unittest.TestCase):
 class NeverAdvancePastBlocked(unittest.TestCase):
     def test_reviewer_probe_timeout_with_engine_green(self):
         line = "suite timed out at 600000 ms — last running: test/a_test.dart"
-        h = XHarness(self, roles=[dev("BLOCKED", line), dev("BLOCKED", line)], suites=[GREEN, GREEN])
+        h = XHarness(self, roles=[dev("BLOCKED", line), dev("BLOCKED", line), dev("BLOCKED", line)],
+                     suites=[GREEN, GREEN, GREEN])                           # 0.102.5: + the one automatic retry
         r = X.run(h.p, "implement")
         self.assertNotEqual(r.kind, "ADVANCE")
         self.assertEqual(h.gh.fx["prs"], [])
@@ -214,7 +215,7 @@ class DepsClassification(unittest.TestCase):
 
     def test_branch_changed_manifest_loops_back(self):
         root = wt_repo(self, files={"pubspec.yaml": "name: x\n"}, change={"pubspec.yaml": "name: x\ndependencies:\n  y: ^9.0.0\n"})
-        h = XHarness(self, root=root, roles=[dev(), dev()], suites=[GREEN, GREEN],
+        h = XHarness(self, root=root, roles=[dev(), dev(), dev()], suites=[GREEN, GREEN, GREEN],   # 0.102.5: + the retry
                      judges={"SAMECAUSE": decision("same", {"verdict": "same"})})
         h.p.deps = self.failing_deps
         r = X.run(h.p, "implement")
@@ -449,7 +450,7 @@ class FakeRunner(object):
         act = self.script.pop(0)
         return act(spec) if callable(act) else act
 
-    def drift_check(self, wt, issue):
+    def drift_check(self, wt, issue, *branch_base):           # 0.102.5: the Issue branch and base ride along
         return self.drift
 
     def rebaseline(self, wt, issue):

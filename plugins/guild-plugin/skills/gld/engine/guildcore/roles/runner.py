@@ -358,17 +358,35 @@ class Runner(object):
         edit during a pause was accepted: the next role's drift check starts from here."""
         self._set_baseline(worktree, issue, SC.snapshot(worktree, watch_files=self._watch(worktree)))
 
-    def drift_check(self, worktree, issue):
+    def drift_check(self, worktree, issue, branch=None, base_ref=None):
         """[] or the late changes since the last role / rebaseline — the engine calls it before
         its own push and, on resume, shows a non-empty result to the human before rebaselining
-        (a human's edit during a pause is legitimate; an orphan's is not — K1r3-M3)."""
+        (a human's edit during a pause is legitimate; an orphan's is not — K1r3-M3). 0.102.5: with the
+        Issue's `branch` and base, a drift that is only base merges on that branch is accepted here."""
         if (os.path.abspath(worktree), issue) in self._unbaselined:
             raise BaselineContract("a role ran without the scope check (a group member?) — call "
                                    "run_group or rebaseline before the next step")
         base = self._get_baseline(worktree, issue)
         if base is None:
             return []
-        return SC.drift(base, SC.snapshot(worktree, watch_files=self._watch(worktree)), worktree)
+        now = SC.snapshot(worktree, watch_files=self._watch(worktree))
+        late = SC.drift(base, now, worktree)
+        if late and self.accept_base_merge(worktree, issue, base, now, branch, base_ref):
+            return []
+        return late
+
+    def accept_base_merge(self, worktree, issue, baseline, now, branch, base_ref):
+        """0.102.5 (#1945): a person merged the base into this Issue's own branch between steps (`git merge origin/main`
+        in the worktree) — merges only, base content only (`scope.accept_base_merge`). Accepted without a question: the
+        drift baseline moves to `now` and the journal notes it (`drift-accepted`). Returns the merge shas or None."""
+        merges = SC.accept_base_merge(worktree, baseline, now, branch, base_ref)
+        if not merges:
+            return None
+        self._set_baseline(worktree, issue, now)
+        if self.journal is not None and hasattr(self.journal, "append"):
+            self.journal.append("event", what="drift-accepted", why="base merge", branch=branch, base=base_ref,
+                                merges=[m[:12] for m in merges])
+        return merges
 
     def run_group(self, specs):
         """A parallel group sharing one worktree (design: tech-lead · tester-cases · specialists;
@@ -376,7 +394,7 @@ class Runner(object):
         check after, then the baseline moves past the group's allowed results (K1r3-M1).
         K1 runs the members one after another; the parallel launch is K2's."""
         wt, issue = specs[0].worktree, specs[0].issue
-        late = self.drift_check(wt, issue)
+        late = self.drift_check(wt, issue, specs[0].branch, specs[0].base)
         if late:
             return [RoleResult("DRIFT", "worktree changed between steps — %s" % "; ".join(late)[:300],
                                violations=["late change after the previous step: %s" % x for x in late],
@@ -511,6 +529,10 @@ class Runner(object):
                                    "rebaseline before the next role")
         base = None if in_group else self._get_baseline(spec.worktree, spec.issue)
         late = SC.drift(base, before, spec.worktree) if (base is not None and before is not None) else []
+        accepted = None
+        if late and self.accept_base_merge(spec.worktree, spec.issue, base, before, spec.branch, spec.base):
+            accepted = "drift accepted: base merge on %s (journal `drift-accepted`)" % spec.branch
+            late = []
         gates_ok = (rendered.meta.get("gates_dir") is None or S.verify_gates(
             rendered.meta["gates_dir"], rendered.meta.get("gates_digest"))) and all(
             S.verify_gates(d, h) for d, h in rendered.meta.get("hook_files") or [])
@@ -523,7 +545,8 @@ class Runner(object):
             return None
         deadline = self.now() + spec.timeout_s          # ONE budget for every session (K1-M4)
         deny = rendered.settings["permissions"]["deny"]
-        st_ = {"sid": str(uuid.uuid4()), "notes": list(hook_notes), "denials": [], "cost": 0.0, "rls": [],
+        st_ = {"sid": str(uuid.uuid4()), "notes": list(hook_notes) + ([accepted] if accepted else []), "denials": [],
+               "cost": 0.0, "rls": [],
                "timed_out": False, "halted": False}
 
         def session(stdin, tag, kind, resume=None, session_id=None):

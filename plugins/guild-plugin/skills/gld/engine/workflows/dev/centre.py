@@ -9,8 +9,9 @@ output on held-out Issues — a paid run), and optionally the LEGACY rates of th
 * `first_sprint` centre (R4J-M4) = the SAME recorded decisions passed through the first-sprint forcing in code — no
   new call: an unattended EX-ARB BLOCKER/MAJOR dismiss → accept (`coerced_by: first-sprint`, excluded from the
   coercion rate); an analyze/design HANDOFF `ok_with_assumption` → an `ambiguity:` pause (the Issue counts as
-  paused); a decision of an unverified group (`unverified.pending` at the replay's time) → the conservative
-  question (a pause on an unattended Issue) — the "first-sprint path" G4 explains away, recorded separately as
+  paused); a decision of an unverified group (`unverified.pending` at the replay's time) → 0.102.5: graded after
+  (`post_hoc`, no pause) unless it is on an irreversible path — then the conservative question (a pause on an
+  unattended Issue) — the "first-sprint path" G4 explains away, recorded separately as
   `explained_pause_issues`. K6 r1 m5: as the gate does — only a NON-conservative choice is asked (QA `block`, TEST
   `gap`, STAKES `high` … go on without a question), and only a group's first `release_after` questions (in Issue
   order — the release after that ends its conservative path);
@@ -59,6 +60,11 @@ def first_sprint_view(blocks_by_issue, unattended=True, unverified=()):
                 explained[n] = True
                 continue
             g = pt.split(":")[0]
+            if judged and (g in uv or g.replace(":", "-") in uv) and ch != JG.UNSURE.get(g) and \
+                    b.get("irreversible") != "true":
+                # 0.102.5 (user decision 2026-11-22): an unverified group's decision runs and is graded after — no pause
+                nb.append(_set(b, post_hoc="unverified %s" % g.replace(":", "-")))
+                continue
             if judged and unattended and (g in uv or g.replace(":", "-") in uv) and ch != JG.UNSURE.get(g) and \
                     asked.get(g, 0) < limit:
                 asked[g] = asked.get(g, 0) + 1

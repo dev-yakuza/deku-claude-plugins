@@ -485,7 +485,7 @@ def run(p, only=None, config_present=True):
                 a6 = ("ask", with_readings(q), what)
             else:
                 judge_asked = bool(k.surface.get("ask"))
-                surf = judge_asked or FS.confirm_interpretation(p) or reask   # §10.4: on in the first sprint (and KICKOFF conservative)
+                surf = judge_asked or FS.confirm_interpretation(p, bool(irr)) or reask   # §10.4: on in the first sprint (and KICKOFF conservative)
                 if surf and "interpretation-surface" not in answers and "readiness" not in answers:
                     what = k.surface.get("question") or "해석 확인: %s" % k.chosen
                     if reask and not judge_asked:
@@ -514,7 +514,10 @@ def run(p, only=None, config_present=True):
             high = [x for x in open_dims if stakes.get(x) == "high"]
             # K5r5-M3: KICKOFF conservative (§9.5 count rule / unverified) — its decision goes to a person: the
             # interpretation is confirmed (openly — K6 r4) even when every dimension is clear; K6 r4: or a `reask`
-            cons_k = PF.conservative(p, "KICKOFF")
+            # 0.102.5: an UNVERIFIED KICKOFF (no valve) is graded after, not confirmed — unless the reading touches an
+            # irreversible area (§3.2)
+            from workflows.dev import conservative as CONS
+            cons_k = PF.conservative(p, "KICKOFF") and not CONS.posthoc(p, "KICKOFF", irreversible=bool(irr))
             cons = not human_decided and not high and (cons_k or reask) and bool(k.interpretations)
             if high or cons:
                 dim = high[0] if high else None
@@ -546,6 +549,10 @@ def run(p, only=None, config_present=True):
               "areas": AN.order_areas(k.areas, p.engine_cfg("irreversible_globs")),
               "explorer": explorer_state, "code_coercions": len(k.coerced) or None}
     kreason = "; ".join(k.coerced)[:300] or None
+    from workflows.dev import conservative as CONS
+    if a6 is None and CONS.posthoc(p, "KICKOFF", irreversible=bool(irr)):
+        # 0.102.5: the unverified KICKOFF ran without a person's confirmation — its decision is a grading-sheet row
+        kextra["post_hoc"] = "unverified KICKOFF"
     did = B.record_judgment(p, STAGE, "KICKOFF", "J-DEV-01,J-AN-05,J-AN-06,J-AN-10,J-AN-13", d,
                             choice=",".join("%s=%s" % (x, k.readiness[x]) for x in AN.DIMS),
                             reason=kreason, extra=kextra)

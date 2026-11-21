@@ -249,6 +249,22 @@ def suite_in_tree(worktree, base, cmds, owner, timeout_s, run_dir, env, copy_lis
                     texts.append(fh.read())
         r.report = "\n".join(texts) if texts else None
         r.report_expected = any(FLUTTER_TEST_RE.match(c) for c in cmds)
+        r.flake = None
+        if not r.passed and not r.timed_out:
+            # 0.102.5: ≤ 2 failing tests → those tests once more, alone, in THIS tree / sandbox / env (`flake`)
+            from workflows.dev import flake as FL
+
+            def _one(c):
+                return CH.run_command([c], timeout_s, cwd=tt.path, env=env, journal=journal, who="check-%s" % owner,
+                                      sandbox=sb, tmp=os.path.join(run_dir, "tmp"))
+
+            def _all():
+                return CH.run_command(list(cmds), timeout_s, cwd=tt.path, env=env, journal=journal,
+                                      who="check-%s" % owner, sandbox=sb, tmp=os.path.join(run_dir, "tmp"))
+            note = FL.recheck(r, cmds, _one, _all, root=tt.path)
+            if note is not None:
+                r.flake = note if note.get("green") else None
+                r.flake_tried = note
         for img in V.failing_images(r.raw):
             rel = os.path.relpath(img, tt.path) if os.path.isabs(img) else img
             src = tt._inside(os.path.normpath(rel)) if not rel.startswith("..") else None
@@ -262,6 +278,8 @@ def suite_in_tree(worktree, base, cmds, owner, timeout_s, run_dir, env, copy_lis
         # signature is an environment problem, not a test failure
         r.build_inputs_changed = (info["build_files"] or ["(dependency state)"]) \
             if safety_net(r, info, bool(base)) else None
+        if r.flake:                                  # 0.102.5: green on the re-run — no env halt read from a flake
+            r.missing_ignored, r.build_inputs_changed = [], None
         try:                                       # K2r5-m2: the per-run cost, on record
             du = subprocess.run(["du", "-sk", tt.path], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=120)
             r.tree_kb = int(du.stdout.split()[0]) if du.stdout else None
@@ -502,6 +520,20 @@ def deps_main(worktree, run_dir, env, copy_list=(), issue=None, timeout_s=1800, 
     return first
 
 
+def keep_raw(run_dir, cmds, r):
+    """0.102.5: the check's own output stays in its run dir (`out/raw.txt`, redacted) — #1945's causes could not be read
+    back afterwards (only the decision block's one-word class was left). Engine-owned dir; best effort."""
+    try:
+        text = "$ %s\nrc: %s%s\n\n%s" % (" && ".join(cmds if isinstance(cmds, (list, tuple)) else [cmds]), r.rc,
+                                          " (timed out)" if r.timed_out else "", CH.redact_lines(r.raw or ""))
+        fl = getattr(r, "flake_tried", None)
+        if fl:
+            text += "\n\n--- flake re-run: %s\n" % json.dumps(fl, ensure_ascii=False, sort_keys=True)
+        FS.write_text(os.path.join(run_dir, "out"), "raw.txt", text)
+    except Exception:                                   # noqa: BLE001 — a log, never a failure
+        pass
+
+
 def role_spec(call, issue, worktree, config, base=None, branch=None, unattended=True):
     try:
         per = config.persona(call.role) if hasattr(config, "persona") else None
@@ -538,6 +570,7 @@ def live(issue, worktree, base, branch, config, clock, gh, writer, decisions, ru
         env = check_env(root_env, worktree, run_dir)
         r = CH.run_command(cmds, timeout_s, cwd=tree, env=env, journal=journal, who="check-%s" % owner,
                            sandbox=sb, tmp=os.path.join(run_dir, "tmp"))
+        keep_raw(run_dir, cmds, r)
         runner.rebaseline(worktree, issue)
         return r
 
@@ -550,6 +583,7 @@ def live(issue, worktree, base, branch, config, clock, gh, writer, decisions, ru
         run_dir = RR.new_run_dir(RR.run_root(worktree, issue, root_env), "check", owner)
         r = suite_in_tree(worktree, base, cmds, owner, timeout_s, run_dir, check_env(root_env, worktree, run_dir),
                           _copy_list(), issue, journal=journal)
+        keep_raw(run_dir, cmds, r)
         runner.rebaseline(worktree, issue)
         return r
 
@@ -581,7 +615,7 @@ def live(issue, worktree, base, branch, config, clock, gh, writer, decisions, ru
         remote = G.run(worktree, "ls-remote", push_url, "refs/heads/%s" % branch, check=False).decode().split()
         if not local or (remote and remote[0] == local):
             return False
-        bad = runner.drift_check(worktree, issue)
+        bad = runner.drift_check(worktree, issue, ports.branch, ports.base)
         if bad:
             raise RuntimeError("drift before the engine push: %s" % bad)
         G.push(worktree, push_url, "refs/heads/%s:refs/heads/%s" % (branch, branch))
@@ -592,6 +626,11 @@ def live(issue, worktree, base, branch, config, clock, gh, writer, decisions, ru
                  mark=mark, journal=journal, push=push, host=host, plugin=plugin, branch=branch,
                  base=base, impl_files=impl_files)
     ports.warm = warm
+
+    def accept_drift():
+        """0.102.5: a person answered `accept` to the drift question — the worktree as it is now is the baseline."""
+        runner.rebaseline(worktree, issue)
+    ports.accept_drift = accept_drift
     return ports
 
 
@@ -703,7 +742,7 @@ def live_execute(issue, main, variant, config, clock, gh, writer, decisions, run
 
     def push_branch():
         """D-5.1/D-5.9: drift check → fixed-URL push (hooks off) → verify the remote ref."""
-        bad = runner.drift_check(worktree, issue)
+        bad = runner.drift_check(worktree, issue, p.branch, p.base)
         if bad:
             raise X.PushProblem("defect", "drift before the engine push: %s" % bad)
         local = G.run(worktree, "rev-parse", "refs/heads/%s" % p.branch, check=False).decode().strip()

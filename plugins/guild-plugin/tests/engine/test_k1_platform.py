@@ -574,7 +574,12 @@ class Scope(unittest.TestCase):
         b = SC.snapshot(self.r, remote=url)
         git(self.r, "push", "-q", "origin", ":other")
         v = SC.check(self.r, b, SC.snapshot(self.r, remote=url), ["reviewer"])
-        self.assertTrue(any("remote refs/heads/other deleted" in x for x in v), v)
+        # 0.102.5 (#1945): another branch deleted on the remote (a merged PR's auto-delete) is a warning, not a violation
+        self.assertFalse(any("remote refs/heads/other deleted" in x for x in v), v)
+        self.assertIn("remote refs/heads/other moved during the role", SC.remote_warnings(b, SC.snapshot(self.r, remote=url)))
+        git(self.r, "push", "-q", "origin", ":feat")
+        v = SC.check(self.r, b, SC.snapshot(self.r, remote=url), ["reviewer"], branch="feat")
+        self.assertTrue(any("remote refs/heads/feat deleted" in x for x in v), v)        # this Issue's own branch is
         gone = dict(b, remote=None)
         self.assertTrue(any("remote unverifiable" in x for x in SC.check(self.r, gone, b, ["reviewer"])))
 
