@@ -55,6 +55,13 @@ K6 r12 M1 — group names are matched case-insensitively (`canonical`), and ONE 
 names a group that is not a known group (a typo like `DIRECTVE`, an empty group), the input cannot say which groups
 were replayed — so NO group of that input is verified by synthetic (the names under `_unknown_groups`, the reason in
 each group's `why`). Fix the rows and run it again.
+K6 r13 m1 — the synthetic path presupposes a replay in the SAME input: with no replay tuning row in the input
+(`"replay"` under `_no_tuning_rows` — e.g. the graded synthetic file alone) no group is verified by synthetic; a row
+that is not a JSON object (e.g. replay rows nested per Issue) is rejected (`_rows_rejected`: "row is not an object")
+and closes the synthetic path like an unknown group. Feed the replay and synthetic rows as ONE flat list.
+K6 r13 m2 — `group` must be a §9.5 group name (`valves.GROUPS`; EX-ARB as the bare `EX-ARB` + `kind`), never a
+judgment / point name (`L0-KICKOFF`, `SJ-STAKES`, `KICK-EXPLORE` …): such a name is an unknown group and closes the
+synthetic path for the whole input (the safe side).
 K6 r8 user decision 2 — the OPEN groups (KICKOFF · STAKES, `predict.OPEN_GROUPS`) and the INHERENT groups
 (`conservative.INHERENT`) are released ONLY by the person's grading-sheet verdicts: their replay / synthetic results
 are recorded (`would_pass`) but never put under `verified` (`sheet_only`); `unverified()` ignores them in a shipped
@@ -219,9 +226,11 @@ def decide(rows, groups=None):
         from guildcore import valves as VALVES
         groups = VALVES.GROUPS
     sheet = sheet_only()
-    rows = [r for r in (rows or ()) if isinstance(r, dict)]
+    rows = list(rows or ())
+    not_obj = sum(1 for r in rows if not isinstance(r, dict))  # K6 r13 m1: reported, and closes the synthetic path
+    rows = [r for r in rows if isinstance(r, dict)]
     no_id = 0
-    rejected = {}
+    rejected = {"row is not an object": not_obj} if not_obj else {}
     unknown = {}
     acc = dict((g, {"replay_n": 0, "replay_agree": 0, "replay_advance": 0, "synthetic_n": 0, "synthetic_wrong": 0,
                     "ignored": 0, "duplicates": 0}) for g in groups)
@@ -269,6 +278,7 @@ def decide(rows, groups=None):
         kept.append((r, g, st, src, cid, issue))
     # K6 r9 m3: the train = test checks need the tuning rows beside the held-out ones — per source
     tuning_src = set(src for _r, _g, st, src, _c, _i in kept if st == "tuning")
+    no_replay = "replay" not in tuning_src               # K6 r13 m1: no replay in this input — no synthetic path
     # K6 r9 M1(d): one held-out decision / scenario belongs to ONE group — an id held out under two or more groups is
     # dropped from all of them and reported
     groups_of = {}
@@ -321,8 +331,8 @@ def decide(rows, groups=None):
         planned = SYNTH_PLANNED.get(g)                   # K6 r9 M1(a): no plan in §10.2-3 → no synthetic path
         ok_replay = n >= MIN_N and a["replay_agree"] >= MIN_AGREE * n and a["replay_advance"] >= MIN_ADVANCE * n
         was_replayed = g in replayed                     # K6 r11 M1: replay only, whatever the counts
-        ok_synth = (planned is not None and not was_replayed and not stray and sn >= planned and sw < sn
-                    and sw <= lim)
+        ok_synth = (planned is not None and not was_replayed and not stray and not not_obj and not no_replay
+                    and sn >= planned and sw < sn and sw <= lim)
         parts = []
         if ok_replay:
             parts.append("held-out replay n=%d, agreement %d/%d, advance %d/%d" % (n, a["replay_agree"], n,
@@ -346,6 +356,12 @@ def decide(rows, groups=None):
                 parts.append("a non-synthetic row names an unknown group (%s) — it may be a replay of this group, so "
                              "no group of this input is verified by synthetic (K6 r12 M1; fix the group names)"
                              % ", ".join(repr(x) for x in sorted(set(stray))))
+            elif not_obj:
+                parts.append("%d input row(s) are not objects — they may be replay rows, so no group of this input "
+                             "is verified by synthetic (K6 r13 m1; feed one flat list of rows)" % not_obj)
+            elif no_replay and sn:
+                parts.append("the input has no replay tuning rows — which groups were replayed is unchecked, so "
+                             "no group of this input is verified by synthetic (K6 r13 m1; feed the replay rows too)")
             elif not sn:
                 parts.append("no held-out synthetic")
             elif sn < planned:
@@ -404,7 +420,8 @@ def report(rows, replay="", raw=b""):
                          "synthetic_max_wrong": SYNTH_MAX_WRONG, "synthetic_max_wrong_high_risk": 0,
                          "high_risk": list(HIGH_RISK), "synthetic_planned": dict(sorted(SYNTH_PLANNED.items())),
                          "synthetic_min_n": SYNTH_MIN_N, "synthetic_only_when_never_replayed": True,
-                         "synthetic_closed_by_unknown_group": True, "group_case_insensitive": True,
+                         "synthetic_closed_by_unknown_group": True,
+                         "synthetic_needs_replay_tuning_rows": True, "group_case_insensitive": True,
                          "synthetic_unplanned": "replay only", "row_id_required": True,
                          "replay_id": "issue/D-id", "split_unit": "issue", "one_group_per_id": True,
                          "pass_counted": False, "retired_set": "replayed, not counted, blocks its Issues",
@@ -432,7 +449,8 @@ def main(argv=None):
     # K6 r12 M1: the reports on stdout too — not only inside the file
     shown = {"verified": rep["verified"], "out": a.out,
              "replayed": sorted(g for g, v in rep["groups"].items() if isinstance(v, dict) and v.get("replayed"))}
-    for k in ("_unknown_groups", "_rows_rejected", "_conflicting_groups"):
+    for k in ("_unknown_groups", "_rows_rejected", "_conflicting_groups", "_no_tuning_rows", "_rows_without_id",
+              "_split_overlap"):  # K6 r13 m1: every report
         if k in rep["groups"]:
             shown[k] = rep["groups"][k]
     print(json.dumps(shown, ensure_ascii=False, sort_keys=True))
