@@ -53,8 +53,11 @@ def metrics(blocks_by_issue):
             if pt.startswith("EX-ARB") and judged:
                 add("exarb_dismiss", "dismiss" in ch)
             if pt == "KICKOFF" and judged:
-                add("kickoff_clear", ch == "clear" or "ready" == ch)
-                add("kickoff_unclear", "unclear" in ch or ch == "not_ready")
+                # the engine writes `goal=clear,constraint=partial,success=clear` (stages/analyze.py) — clear means
+                # every dimension clear, the same rule as replay/legacy_rates.py; bare words are older blocks
+                dims = [v.split("=", 1)[1].strip() for v in ch.split(",") if "=" in v]
+                add("kickoff_clear", (bool(dims) and all(v == "clear" for v in dims)) or ch in ("clear", "ready"))
+                add("kickoff_unclear", "unclear" in dims or "unclear" in ch or ch == "not_ready")
             if pt == "STAKES" and judged:
                 add("stakes_low", ch == "low")
                 add("stakes_high", ch == "high")
