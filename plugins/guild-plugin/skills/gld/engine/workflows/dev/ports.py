@@ -440,6 +440,14 @@ def install_check_tools(worktree, run_dir, env, mans, tools, copy_list=(), issue
             fcntl.flock(lk, fcntl.LOCK_UN)
 
 
+def check_env(root_env, worktree, run_dir):
+    """0.102.2: every engine-run command in a check sandbox (deps · suite · warm-up · net · checks · local_dev · gate)
+    gets the rendered global git config — ~/.gitconfig is denyRead there and flutter/npm/git abort on it (rc 128)."""
+    env = C.child_env(root_env, {}, role_dir=run_dir)
+    env.update(S.render_gitconfig(worktree, os.path.join(run_dir, "in", "gitconfig")))
+    return env
+
+
 def deps_main(worktree, run_dir, env, copy_list=(), issue=None, timeout_s=1800, tools=(), base=None):
     """The K1 deps step for EVERY manifest, resolve/download only, under the registry-only proxy:
     pubspec → `flutter pub get` in the worktree; package.json → the CHECK TOOLS from <base>'s
@@ -527,7 +535,7 @@ def live(issue, worktree, base, branch, config, clock, gh, writer, decisions, ru
     def _tree_run(cmds, tree, owner, timeout_s):
         run_dir = RR.new_run_dir(RR.run_root(worktree, issue, root_env), "check", owner)
         sb = tree_sandbox(tree, run_dir, worktree, issue)
-        env = C.child_env(root_env, {}, role_dir=run_dir)
+        env = check_env(root_env, worktree, run_dir)
         r = CH.run_command(cmds, timeout_s, cwd=tree, env=env, journal=journal, who="check-%s" % owner,
                            sandbox=sb, tmp=os.path.join(run_dir, "tmp"))
         runner.rebaseline(worktree, issue)
@@ -540,7 +548,7 @@ def live(issue, worktree, base, branch, config, clock, gh, writer, decisions, ru
     def suite(cmds, owner, timeout_s):
         """K2r5-B1: `suite_in_tree` — never in the checkout (no ignored original is reachable)."""
         run_dir = RR.new_run_dir(RR.run_root(worktree, issue, root_env), "check", owner)
-        r = suite_in_tree(worktree, base, cmds, owner, timeout_s, run_dir, C.child_env(root_env, {}, role_dir=run_dir),
+        r = suite_in_tree(worktree, base, cmds, owner, timeout_s, run_dir, check_env(root_env, worktree, run_dir),
                           _copy_list(), issue, journal=journal)
         runner.rebaseline(worktree, issue)
         return r
@@ -553,7 +561,7 @@ def live(issue, worktree, base, branch, config, clock, gh, writer, decisions, ru
     def warm(rev, tree, inspect=None):
         """The engine's own warm-up (K2r4-M1, K2r7-M1): `warm_in_place` on the pristine tree."""
         run_dir = RR.new_run_dir(RR.run_root(worktree, issue, root_env), "check", "warmup")
-        r, _px = warm_in_place(worktree, tree, run_dir, C.child_env(root_env, {}, role_dir=run_dir), issue,
+        r, _px = warm_in_place(worktree, tree, run_dir, check_env(root_env, worktree, run_dir), issue,
                                inspect=inspect)
         return r
 
@@ -687,7 +695,7 @@ def live_execute(issue, main, variant, config, clock, gh, writer, decisions, run
         from workflows.dev import local_checks as LC
         rd = run_tmp("deps")
         tools = LC.npx_tools(base_checks()[0]) if ((raw.get("local_developer") or {}).get("enabled")) else ()
-        r = deps_main(worktree, rd, C.child_env(root_env, {}, role_dir=rd), copy_list, issue, tools=tools, base=p.base)
+        r = deps_main(worktree, rd, check_env(root_env, worktree, rd), copy_list, issue, tools=tools, base=p.base)
         state["deps"] = r if r is not None else CH.CheckResult(True, 0, False, "", [], 0)
         runner.rebaseline(worktree, issue)
         return r
@@ -731,8 +739,7 @@ def live_execute(issue, main, variant, config, clock, gh, writer, decisions, run
         model's impl and the role's tests) — so it runs in the check sandbox with the scrubbed role
         env; the only network is the local model's loopback port."""
         rd = run_tmp("local-dev")
-        env = C.child_env(root_env, {}, role_dir=rd)
-        env.update(S.render_gitconfig(worktree, os.path.join(rd, "in", "gitconfig")))
+        env = check_env(root_env, worktree, rd)
         port = ollama_port(raw)
         cmd = " ".join(shlex.quote(x) for x in ["python3", os.path.abspath(ld_py)] + list(args))
         r = CH.run_command([cmd], 7200, cwd=worktree, env=env, sandbox=local_sandbox(worktree, rd, issue),
@@ -766,8 +773,7 @@ def live_execute(issue, main, variant, config, clock, gh, writer, decisions, run
         G.run(worktree, "--literal-pathspecs", "add", "--", *paths)
         rd = run_tmp("gate")
         sb = local_sandbox(worktree, rd, issue)
-        env = C.child_env(root_env, {}, role_dir=rd)
-        env.update(S.render_gitconfig(worktree, os.path.join(rd, "in", "gitconfig")))
+        env = check_env(root_env, worktree, rd)
         env["npm_config_offline"] = "true"           # measured: npx otherwise waits ~70 s for the registry
         staged = [x for x in G.run(worktree, "diff", "--cached", "--name-only").decode("utf-8", "replace").split("\n") if x]
         node_bin = getattr(state["deps"], "node_bin", None)
@@ -816,7 +822,7 @@ def live_execute(issue, main, variant, config, clock, gh, writer, decisions, run
     def net_run(rev, files):
         """K3r2-M3 / K3r3-M3: the engine's own net run — `net_in_tree` (the suite's preparation)."""
         rd = run_tmp("net")
-        r = net_in_tree(worktree, p.base, rev, files, raw, copy_list, rd, C.child_env(root_env, {}, role_dir=rd), issue)
+        r = net_in_tree(worktree, p.base, rev, files, raw, copy_list, rd, check_env(root_env, worktree, rd), issue)
         runner.rebaseline(worktree, issue)
         return r
     p.net_run = net_run
