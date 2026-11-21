@@ -11,4 +11,5 @@ Commit with the repo's convention; the hooks run (INV2 — never weaken, skip or
 `gate INV2` refusal → `BLOCKED: gate INV2 — <path> (subject removed: <path>)`).
 
 `result.json`: `tests`, `impl_files`, `red` (the failing summary line(s) of the regression test
-before the fix), `root_cause` (one line), `baselines` (or `["none"]`), `branch`, `pr_summary_path`.
+before the fix), `root_cause` (one line), `baselines` (`A|M|D|C|P|P-withdrawn <path> — <reason>` per visual
+baseline you touched or must be regenerated, or `["none"]`), `branch`, `pr_summary_path`.

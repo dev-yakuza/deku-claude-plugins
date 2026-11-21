@@ -631,6 +631,12 @@ def evidence_step(p, cx, dev, attempt):
         und = VC.undeclared(rows, cases)
         if green and und:
             green, reason = False, "undeclared visual change: %s" % ", ".join(und)
+            # 0.102.4: a declaration the engine cannot read is named, with the format, so the retry can fix it
+            bad = [x for x in ((dev.extras or {}).get("baselines") or [])
+                   if (x or "").strip().lower() != "none" and not VC.DECL_RE.match((x or "").strip())]
+            if bad:
+                reason += " — unreadable baselines line(s) %s; write `<A|M|D|C|P|P-withdrawn> <path> — <reason>`" % \
+                    ", ".join(bad)[:300]
         cx.ledger = (rows, run)
     if green:
         met, why, concern = VR.evidence_rule(cx.variant, green, dict(dev.extras or {}, dwc=dev.line if

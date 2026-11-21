@@ -13,5 +13,5 @@ the branch). Report `safety-net:`, the run lines, `post-transform-net:` and `lef
 `pr_summary_path`, and `deferred` cases with `DONE_WITH_CONCERNS: untestable without a seam: …`.
 
 Inputs (run `in/`): `issue.md`, `skeleton-path.txt`, `test-cases-path.txt`, `net.md`, `resume.md`,
-`loopback.md`, `retry.md`. `result.json` as for implement (`tests`, `impl_files`, `baselines`,
+`loopback.md`, `retry.md`. `result.json` as for implement (`tests`, `impl_files`, `baselines` — `A|M|D|C|P|P-withdrawn <path> — <reason>` per visual baseline, or `["none"]`,
 `branch`, `pr_summary_path`).
