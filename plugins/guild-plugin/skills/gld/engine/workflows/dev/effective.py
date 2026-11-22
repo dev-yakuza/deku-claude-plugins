@@ -993,6 +993,7 @@ class TempTree(object):
         self.copied = []
         self.refused = []
         self.linked = []
+        self.dep_skipped = []                 # 0.102.15: dep dirs not linked (pnpm node_modules, parent absent)
         self.warm = None
 
     def copy_listed(self, paths):
@@ -1128,6 +1129,10 @@ class TempTree(object):
                 continue
 
     def _ignored(self):
+        from guildcore.checks import pmcache as PMC
+        # 0.102.15 (lead decision 6): a pnpm tree gets its node_modules from the engine's offline `pnpm install` in the
+        # temp tree itself — no worktree node_modules is linked (an npm-installed one would shadow it)
+        pnpm = PMC.is_pnpm(self.root)
         lines = G.run(self.root, "ls-files", "-z", "--others", "--ignored", "--exclude-standard",
                       "--directory", check=False).decode("utf-8", "replace").split("\0")
         for e in [x for x in lines if x]:
@@ -1139,6 +1144,9 @@ class TempTree(object):
                 continue
             src = os.path.join(self.root, rel)
             base = os.path.basename(rel)
+            if pnpm and base == "node_modules":
+                self.dep_skipped.append(rel)
+                continue
             if base in DEP_DIRS and os.path.islink(src) and engine_owned(os.path.realpath(src)):
                 src = os.path.realpath(src)             # the engine's own node install (K3r5-M1), read-only
             dst = self._inside(rel)
@@ -1153,12 +1161,42 @@ class TempTree(object):
                 elif base in FRESH_DIRS:
                     FS.makedirs(self.path, rel)
                 elif base in DEP_DIRS:
+                    if not os.path.isdir(os.path.dirname(dst)):
+                        # 0.102.15 (#227 diagnosis): the dep dir's parent is not in the temp tree (an untracked
+                        # package) — nothing there to resolve from; recorded, never a FileNotFoundError
+                        self.dep_skipped.append(rel)
+                        continue
                     FS.symlink(self.path, rel, src)    # read-only: the check sandbox denies main writes
                     self.linked.append(os.path.realpath(src))
                 else:
                     self.skipped_ignored.append(rel + "/")
-            except FS.UnsafePath:
+            except (FS.UnsafePath, OSError):
                 self.skipped_ignored.append(rel + "/")
+        self._engine_dep_links(pnpm)
+
+    def _engine_dep_links(self, pnpm):
+        """0.102.15 (japanlifeinfo #227 diagnosis A — lead decision 5): the deps step replaced the worktree's
+        `node_modules` with a symlink to the ENGINE's install; with `.gitignore` `node_modules/` (trailing slash: a
+        directory pattern) git calls that symlink untracked, not ignored, so `_ignored` never saw it and `_overlay`
+        skips links → the temp tree had no node_modules (`Command "turbo" not found`). A root DEP_DIRS entry that is a
+        symlink into the engine's own cache is linked whatever git says (never for a pnpm tree's node_modules)."""
+        for base in DEP_DIRS:
+            if pnpm and base == "node_modules":
+                continue
+            src = os.path.join(self.root, base)
+            if not os.path.islink(src):
+                continue
+            real = os.path.realpath(src)
+            if not engine_owned(real) or not os.path.isdir(real) or real in self.linked:
+                continue
+            dst = self._inside(base)
+            if dst is None or os.path.lexists(dst):
+                continue
+            try:
+                FS.symlink(self.path, base, real)
+            except (FS.UnsafePath, OSError):
+                continue
+            self.linked.append(real)
 
     def __exit__(self, *exc):
         if self.path:

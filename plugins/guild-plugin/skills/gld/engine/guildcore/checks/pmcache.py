@@ -21,7 +21,9 @@ Now (lead decision M4):
 * `offline_fetch_failure(raw)` — the output of a package-manager fetch that failed offline (`Corepack is about to
   download`, `ENOTFOUND` / `EAI_AGAIN` for a registry, `COREPACK_ENABLE_NETWORK`, `fetch failed`): an `env` stop
   (`engine-env-package-manager-offline`), never "the summary format is unreadable".
-pnpm's store and Yarn's cache are not needed by an offline `pnpm exec` / `yarn run` (no fetch) — not managed here.
+0.102.15 (japanlifeinfo #227): a pnpm repo's dependencies DO need pnpm's store — the engine's own (`pnpm_store`),
+filled by the deps step's `pnpm fetch` and read by each offline tree's `pnpm install --offline` (workflows.dev.ports);
+`runner_missing` / `deps_offline_line` name the env stops. Yarn's cache is still not managed here.
 """
 
 import json
@@ -151,3 +153,68 @@ def offline_line(where, raw, root=None):
     return ("engine-env-package-manager-offline: %s — the offline suite needed %s, which is not in the engine's "
             "Corepack cache (%s): %s — run `COREPACK_HOME=%s corepack install` in the repo (or let the deps step "
             "reach the registry), then continue" % (where, spec, home(), offline_fetch_failure(raw) or "-", home()))
+
+
+# 0.102.15 (japanlifeinfo #227 on 0.102.14 `012-check-developer`: `ERR_PNPM_RECURSIVE_EXEC_FIRST_FAIL  Command "turbo" not
+# found` → "테스트 요약 형식을 읽지 못함" — lead decision 7): the suite's own runner binary was not installed in the tree —
+# an environment stop naming the dependencies (`engine-env-deps-missing`), never a test-summary question.
+RUNNER_MISSING_RE = re.compile(
+    r"ERR_PNPM_RECURSIVE_EXEC_FIRST_FAIL.*Command \".+\" not found"
+    r"|(?:^|\s)(?:sh|bash|zsh|/bin/sh|/bin/bash|/usr/bin/env): (?:line \d+: |\d+: )?\S+: (?:command )?not found"
+    r"|npm ERR! could not determine executable to run"
+    r"|npm error could not determine executable to run"
+    r"|(?:^|\s)error Command \".+\" not found", re.I | re.M)
+
+
+def runner_missing(raw):
+    """The first output line that shows the test runner's executable is not installed, or None."""
+    for ln in (raw or "").split("\n"):
+        if RUNNER_MISSING_RE.search(ln):
+            return " ".join(ln.split())[:200]
+    return None
+
+
+def runner_missing_line(where, raw, root=None):
+    """The `env` stop line for a runner executable that is not installed in the offline tree."""
+    pm = package_manager(root) if root else None
+    return ("engine-env-deps-missing: %s — the suite's runner is not installed in the offline tree: %s — the engine's "
+            "deps step did not provide it (packageManager %s); check the deps step's output in this run's `deps` run "
+            "dir (lockfile, registry, store), then continue" % (where, runner_missing(raw) or "-",
+                                                                "%s@%s" % pm if pm else "-"))
+
+
+def is_pnpm(root):
+    """0.102.15 (lead decision 6): a pnpm repo — package.json's `packageManager` is pnpm@…, or a `pnpm-lock.yaml` is at
+    the root."""
+    pm = package_manager(root)
+    if pm is not None:
+        return pm[0] == "pnpm"
+    return os.path.isfile(os.path.join(root, "pnpm-lock.yaml"))
+
+
+def pnpm_store(env=None):
+    """0.102.15 (lead decision 6): the ENGINE's pnpm store — `<engine cache>/pnpm-store` (`GLD_ENGINE_PNPM_STORE`
+    overrides: tests, a person's own store). Filled only by the networked deps step (`pnpm fetch`); every offline
+    install reads it (read-only in the sandbox). Passed as `--store-dir` explicitly — `~/.npmrc` is denyRead."""
+    e = os.environ if env is None else env
+    if e.get("GLD_ENGINE_PNPM_STORE"):
+        return os.path.abspath(e["GLD_ENGINE_PNPM_STORE"])
+    base = e.get("GLD_ENGINE_RUNS") or os.path.join(e.get("HOME") or os.path.expanduser("~"), ".cache", "guild-engine")
+    return os.path.join(base, "pnpm-store")
+
+
+def pnpm_failure_line(raw):
+    """The `ERR_PNPM_…` line of a failed pnpm step (else its last non-empty line)."""
+    lines = [" ".join(x.split()) for x in (raw or "").split("\n") if x.strip()]
+    for ln in lines:
+        if "ERR_PNPM_" in ln:
+            return ln[:240]
+    return (lines[-1] if lines else "-")[:240]
+
+
+def deps_offline_line(where, line, store):
+    """The `env` stop line for the offline `pnpm install` of the temp tree (lockfile drift, a package missing from the
+    engine store) — a dependency/environment stop, never a test-summary question."""
+    return ("engine-env-deps-offline: %s — `pnpm install --offline --frozen-lockfile` in the temp tree failed: %s — "
+            "pnpm-lock.yaml must match every package.json (run `pnpm install` and commit the lockfile) and the engine "
+            "store (%s) is filled by the deps step's `pnpm fetch`; then continue" % (where, line, store))

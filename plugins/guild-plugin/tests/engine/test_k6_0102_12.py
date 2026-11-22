@@ -601,10 +601,11 @@ class R687ResultLine(unittest.TestCase):
         reply = ">>> RESULT <<<\nFAIL: broke"
         p = R.parse_pres(reply, ("DONE", "BLOCKED"))
         self.assertIsNone(R.structured_pres(p, {"skeleton": "x"}, ("DONE", "BLOCKED"), reply, tl))
+        # 0.102.15 (review-0102-13 B1 — lead decision 1): no marker → the repair session, whatever result.json says
         p = R.parse_pres("no sentinel at all")
-        self.assertEqual(R.structured_pres(p, {"status": "BLOCKED", "skeleton": "x"}, R.STATUSES, "no sentinel at all",
-                                           tl).status, "BLOCKED")
-        self.assertEqual(R.structured_pres(p, {"skeleton": "x"}, R.STATUSES, "no sentinel at all", tl).status, "DONE")
+        self.assertIsNone(R.structured_pres(p, {"status": "BLOCKED", "skeleton": "x"}, R.STATUSES,
+                                            "no sentinel at all", tl))
+        self.assertIsNone(R.structured_pres(p, {"skeleton": "x"}, R.STATUSES, "no sentinel at all", tl))
 
 
 if __name__ == "__main__":

@@ -603,12 +603,19 @@ def evidence_step(p, cx, dev, attempt):
                                               None, tail)
             dep_reason = "dependency step failed — %s" % B.one_line(tail, 240)     # K3r1-M3: the Issue's
     r = p.suite(cmds, "developer", CEILING_S)
+    if isinstance(getattr(r, "deps_offline", None), str):
+        # 0.102.15 (lead decision 6): the temp tree's offline `pnpm install` failed — deps / env, never a red suite
+        from guildcore.checks import pmcache as PMC
+        return env_pause(p, PMC.deps_offline_line("execute suite", r.deps_offline, PMC.pnpm_store()),
+                         "engine-env-deps-offline", "X2.3")
     if getattr(r, "missing_ignored", None):
         return B.ignored_missing(r.missing_ignored, "execute")
     if getattr(r, "build_inputs_changed", None):
         return B.build_inputs_changed(r.build_inputs_changed, "execute", getattr(r, "warm", None),
                                       getattr(r, "warm_detail", None))
-    summ = CH.parse_summary(r.raw, config=cfg_dict(p))
+    # 0.102.15 (japanlifeinfo #227 diagnosis C): the repo's `commands.test_summary` (execute passed the whole config,
+    # so it was never read here — the test stage did it right)
+    summ = CH.parse_summary(r.raw, config=(cfg_dict(p).get("commands") or {}).get("test_summary"))
     reason = None
     if r.timed_out:
         reason = "suite timed out at %d ms — last running: %s" % (r.ceiling_s * 1000, r.last_running or "?")
@@ -623,6 +630,9 @@ def evidence_step(p, cx, dev, attempt):
         if not r.passed and PMC.offline_fetch_failure(r.raw):
             line = PMC.offline_line("execute suite", r.raw, getattr(p, "root", None))
             return env_pause(p, line, "engine-env-package-manager-offline", "X2.3")
+        if not r.passed and PMC.runner_missing(r.raw):              # 0.102.15 (#227): `Command "turbo" not found`
+            line = PMC.runner_missing_line("execute suite", r.raw, getattr(p, "root", None))
+            return env_pause(p, line, "engine-env-deps-missing", "X2.3")
         return env_pause(p, "테스트 요약 형식을 읽지 못함 — commands.test_summary 를 설정하세요",
                          "테스트 요약 형식을 읽지 못함", "X2.3")
     else:

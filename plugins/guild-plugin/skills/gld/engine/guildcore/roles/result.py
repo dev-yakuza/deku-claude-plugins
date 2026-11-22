@@ -122,14 +122,11 @@ def _status_of(line):
 # readers do not take — lowercase, `Status: BLOCKED`, `BLOCKED.`, `BLOCKED → …`, bare — is read as that status.
 _BLOCKING_LINE_RE = re.compile(r"^[*`_\s]*(?:status\s*[:：=]?\s*)?[*`_]*(blocked|fail(?:ed)?|needs[_ -]?context)\b"
                                r"[*`_]*[\s:：.,;!→>=\-–—]*(.*)$", re.I)
-# any blocking / failing token anywhere in a reply (any case, any punctuation) — no structured stand-in then
-_BLOCKING_TOKEN_RE = re.compile(r"(?<![A-Za-z0-9])(blocked|fail|failed|needs[_ -]?context|halted)(?![A-Za-z0-9])", re.I)
-
-
-def blocking_token(reply):
-    """The first BLOCKED / FAIL / NEEDS_CONTEXT / HALTED token anywhere in a reply (any case or form), else None."""
-    m = _BLOCKING_TOKEN_RE.search(reply or "")
-    return m.group(1) if m else None
+# 0.102.15 (review-0102-13 B1 — lead decision 1): the structured result stands in for the status line by an ALLOW shape
+# only — the line after the one RESULT marker starts with the word `done` (any case, markdown marks allowed: `Done.`,
+# `done — …`, `**done**`), never `done_with_concerns`. A deny-list of blocking words (0.102.13) leaves every other
+# spelling of a refusal (`REJECTED: …`, `CHANGES_REQUESTED`, a Japanese refusal, no marker at all) open.
+_DONE_WORD_RE = re.compile(r"^[*`_\s]*done(?![A-Za-z0-9_])", re.I)
 
 
 def _filled(v):
@@ -155,17 +152,16 @@ def structured_pres(pres, obj, allowed=STATUSES, reply="", schema=None):
     """0.102.12 (one-man-company #687: tech-lead design wrote skeleton.md, split.json and a valid result.json, ended
     `DONE_WITH_CONCERNS: …` where the task allows DONE / BLOCKED / NEEDS_CONTEXT / FAIL — three sessions, then a
     pause): the status line could not be used but `out/result.json` validated — the structured result decides.
-    0.102.13 (review-0102-12 B1 — lead decision): ONLY when (a) the final message carries no BLOCKED / FAIL /
-    NEEDS_CONTEXT / HALTED token anywhere (any case or form), (b) it has at most one RESULT marker and (c) the task's
-    schema has required fields, all present and non-empty in result.json. Otherwise None — the repair session
-    (0.102.11). Then: a narrowed DONE_WITH_CONCERNS line (DONE allowed) is `DONE: concerns — …` (the line before the
-    json `status`); else the json's allowed `status`; else a missing / unreadable line is DONE — but a text-less
-    DONE_WITH_CONCERNS (its concern not on the line) is no DONE."""
+    0.102.15 (review-0102-13 B1 — lead decision 1, an allow shape): ONLY for
+      (a) a narrowed DONE_WITH_CONCERNS line where DONE is allowed (#687) → `DONE: concerns — …`, and
+      (b) one RESULT marker whose next non-empty line starts with the word `done` (any case) → DONE (a result.json
+          `status` other than DONE contradicts the line → repair),
+    each with the schema's required fields all present and non-empty (0.102.13 condition c). Every other unusable
+    line — no marker, two markers, `REJECTED: …`, a refusal in any language, a narrowed FAIL — returns None: the
+    repair session (once, then INVALID). No whole-reply word scan any more (review-0102-13 m1)."""
     if pres is None or pres.ok:
         return None
-    if blocking_token(reply) or blocking_token(pres.text) or pres.status in ("BLOCKED", "FAIL", "NEEDS_CONTEXT"):
-        return None
-    if (reply or "").count(SENTINEL) > 1 or pres.violation == "duplicate":
+    if (reply or "").count(SENTINEL) != 1 or pres.violation not in ("narrowed", "invalid"):
         return None
     if not required_filled(obj, schema):
         return None
@@ -173,15 +169,12 @@ def structured_pres(pres, obj, allowed=STATUSES, reply="", schema=None):
         if pres.status == "DONE_WITH_CONCERNS" and "DONE" in allowed:
             return Pres(True, "DONE", "concerns — %s" % (pres.text or "-"))
         return None
-    st = obj.get("status") if isinstance(obj, dict) else None
-    if isinstance(st, str) and st.strip().upper() in allowed:
-        return Pres(True, st.strip().upper(), pres.text or "status from out/result.json")
-    if pres.violation == "invalid" and re.search(r"concern", _after_sentinel(reply), re.I):
+    if "DONE" not in allowed or not _DONE_WORD_RE.match(_after_sentinel(reply)):
         return None
-    if pres.violation in ("none", "invalid") and "DONE" in allowed:
-        return Pres(True, "DONE", "status from out/result.json (the RESULT line was %s)" % (
-            {"none": "missing"}.get(pres.violation, "unreadable")))
-    return None
+    st = obj.get("status")
+    if isinstance(st, str) and st.strip() and st.strip().upper() != "DONE":
+        return None
+    return Pres(True, "DONE", "status from out/result.json (the RESULT line was %r)" % _after_sentinel(reply)[:80])
 
 
 def _after_sentinel(reply):

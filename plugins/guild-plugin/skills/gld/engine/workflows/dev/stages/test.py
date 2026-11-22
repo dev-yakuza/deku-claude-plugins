@@ -197,6 +197,11 @@ def run(p, only=None, config_present=True):
     p.suite_warm = getattr(r, "warm", None)          # K2r5-m3: recorded with the TEST decision
     p.suite_warm_detail = getattr(r, "warm_detail", None)     # K2r7-m1: proxy summary + output tail
     p.suite_shim = getattr(r, "offline_shim", None)           # 0.102.14: the engine's offline flutter/fvm shims
+    if isinstance(getattr(r, "deps_offline", None), str):
+        # 0.102.15 (lead decision 6): the temp tree's offline `pnpm install` failed — deps / env, never a red suite
+        from guildcore.checks import pmcache as PMC
+        return B.pause(p, STAGE, "env", PMC.deps_offline_line("test suite", r.deps_offline, PMC.pnpm_store()),
+                       "engine-env-deps-offline", env_key="other")
     miss = getattr(r, "missing_ignored", None)
     if not r.passed and miss:                        # the same halt, found by the run itself
         return B.ignored_missing(miss, "suite")
@@ -214,6 +219,9 @@ def run(p, only=None, config_present=True):
         if PMC.offline_fetch_failure(r.raw):
             line = PMC.offline_line("test suite", r.raw, p.root)
             return B.pause(p, STAGE, "env", line, "engine-env-package-manager-offline", env_key="other")
+        if PMC.runner_missing(r.raw):                                  # 0.102.15 (#227): the runner is not installed
+            line = PMC.runner_missing_line("test suite", r.raw, p.root)
+            return B.pause(p, STAGE, "env", line, "engine-env-deps-missing", env_key="other")
     if summ is None and not r.timed_out:
         d = p.judge(JG.spec(p, "RUNNER", [("raw", r.raw[-4000:])], STAGE, "T2.3"))
         if d.choice not in ("green", "red"):
@@ -561,8 +569,18 @@ def _judge_coverage(p, cfg, test_cases, covers, raw, ledger, visual_cases, tc_re
     # 0.102.12 (review-0102-11 M1): a visual row cover (`visual:*`, `VIS-n(…)`) is a visual case, never an orphan
     orphans = sorted(set(CS.ac_key(c.get("ac")) for c in covers if covering(c) and c.get("ac") and not c.get("visual")
                          and not CS.is_visual_id(c.get("case") or c.get("ac"))) - judged) if uncovered else []
-    rows_unc = [r_.get("row") for r_ in d.fields.get("visual_rows") or [] if r_.get("verdict") != "covered"] \
-        if visual_cases else []
+    # 0.102.15 (word_app #1797 on 0.102.13 — lead decision): a visual row the judge answered `unsure` is covered for the
+    # gate and graded after (code row `visual-unsure`) — the developer cannot fix a judge's uncertainty (the three
+    # golden rows existed: matchesGoldenFile('…_$name.png') + the PNGs → loop-back cap). Only an explicit non-covered
+    # verdict (`uncovered`, `missing`, …) is a gap.
+    vrows = [r_ for r_ in d.fields.get("visual_rows") or [] if isinstance(r_, dict)] if visual_cases else []
+    rows_unc = [r_.get("row") for r_ in vrows if str(r_.get("verdict") or "").strip().lower() not in ("covered", "unsure")]
+    rows_unsure = [str(r_.get("row")) for r_ in vrows if str(r_.get("verdict") or "").strip().lower() == "unsure"
+                   and r_.get("row")]
+    if rows_unsure:
+        B.record_code(p, STAGE, "visual-unsure", "graded", reason="visual rows the TEST judge was unsure of (counted "
+                      "covered, graded after): %s" % ", ".join(rows_unsure)[:600], refs="T-AC-COVER",
+                      extra={"grade": "trigger", "visual_unsure": ",".join(rows_unsure)})
     coverage = [(ac, verdicts[ac] if not (ac in outcomes and outcomes[ac].result in ("unverified", "n/a", "unsure")
                                           and verdicts[ac] == "effective")
                  else {"unverified": "effective (unverified)", "unsure": "effective (check unsure — graded)"}.get(
@@ -769,7 +787,57 @@ def name_in_source(text, name, runner=None):
         for i in range(len(path)):
             if _chain_match(cited, path[i:]):
                 return True
+    return _reporter_name(text, cited, tests)
+
+
+def _group_names(text):
+    """0.102.15: every group call's first-argument literal anywhere in the file, and every string constant's value
+    (a literal right after `=` — `const kScreen = 'SettingsScreen'`)."""
+    masked, lits = _mask(text or "")
+    by_start = dict((st, v) for st, _e, v in lits)
+    names = set()
+    for m in _CALL_RE.finditer(masked):
+        if m.group(1) not in _GROUP_SET:
+            continue
+        j = m.end()
+        while j < len(masked) and masked[j] in " \t\r\n":
+            j += 1
+        if j in by_start and _norm(by_start[j]):
+            names.add(_norm(by_start[j]))
+    for st, _e, v in lits:
+        before = masked[:st].rstrip()
+        if before.endswith("=") and not before.endswith(("==", "!=", "<=", ">=")) and _norm(v):
+            names.add(_norm(v))
+    return names
+
+
+def _reporter_name(text, cited, tests):
+    """0.102.15 (review-0102-13 m3 — lead decision 4): a reporter name the lexical chain misses — a group registered
+    from another function, a group named by a constant. Accepted when the cited name ends with a test literal that is
+    UNIQUE in the file (exactly, no prefix rule) and everything before it splits into group names of the file
+    (`_group_names`: group-call literals anywhere, string-constant values). Deterministic; never a free composition of
+    arbitrary literals."""
+    counts = {}
+    for path in tests:
+        counts[path[-1]] = counts.get(path[-1], 0) + 1
+    groups = _group_names(text)
+    for t, k in counts.items():
+        if k != 1 or not cited.endswith(" " + t):
+            continue
+        if _splits(cited[:-len(t) - 1], groups):
+            return True
     return False
+
+
+def _splits(prefix, groups):
+    words = prefix.split(" ")
+    ok = [True] + [False] * len(words)
+    for i in range(1, len(words) + 1):
+        for j in range(i):
+            if ok[j] and " ".join(words[j:i]) in groups:
+                ok[i] = True
+                break
+    return bool(prefix) and ok[-1]
 
 
 def valid_covers(p, cfg, covers):

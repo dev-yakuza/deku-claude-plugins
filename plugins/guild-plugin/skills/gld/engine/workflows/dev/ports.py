@@ -320,6 +320,15 @@ def suite_in_tree(worktree, base, cmds, owner, timeout_s, run_dir, env, copy_lis
             return r
         sb = tree_sandbox(tt.path, run_dir, worktree, issue, extra_roots)
         env, shim = offline_shims(run_dir, env)      # 0.102.14: also for the flake re-runs below (same env)
+        inst = pnpm_offline_install(tt.path, run_dir, env, sb, journal, owner, timeout_s)    # 0.102.15
+        if inst is not None and not inst.passed:
+            r = deps_offline_result(inst, timeout_s)
+            r.raw = r.raw.replace(os.path.realpath(tt.path), worktree).replace(tt.path, worktree)
+            r.warm, r.warm_detail, r.build_inputs = info["warm"], info.get("warm_detail"), info["build_inputs"]
+            r.missing_ignored, r.build_inputs_changed, r.flake = [], None, None
+            r.skipped_ignored, r.ignored_copied, r.tree_kb = list(tt.skipped_ignored), list(tt.copied), None
+            r.offline_shim, r.deps_cmd = shim, inst.deps_cmd
+            return r
         reports = [os.path.join(run_dir, "tmp", "report-%d.jsonl" % i) for i in range(len(cmds))]
         os.makedirs(os.path.join(run_dir, "tmp"), exist_ok=True)  # fs-ok: this check's run dir tmp/ (new_run_dir, outside the worktree; the role sandbox gets it only as scratch)
         r = CH.run_command([with_json_report(c, rp) for c, rp in zip(cmds, reports)], timeout_s, cwd=tt.path,
@@ -378,6 +387,7 @@ def suite_in_tree(worktree, base, cmds, owner, timeout_s, run_dir, env, copy_lis
         r.skipped_ignored = list(tt.skipped_ignored)
         r.ignored_copied = list(tt.copied)
         r.offline_shim = shim
+        r.deps_offline, r.deps_cmd = None, inst.deps_cmd if inst is not None else None
         return r
 
 
@@ -550,6 +560,86 @@ def install_check_tools(worktree, run_dir, env, mans, tools, copy_list=(), issue
             fcntl.flock(lk, fcntl.LOCK_UN)
 
 
+# 0.102.15 (japanlifeinfo #227 diagnosis B — lead decision 6): a pnpm repo (`packageManager: pnpm@…` or a pnpm-lock.yaml)
+# gets its dependencies the pnpm way. 0.102.14 ran `npm install --no-package-lock` of the ROOT package.json only (no
+# pnpm-lock, no workspace packages' node_modules, `latest` resolved anew and cached forever by a manifest-only key) and
+# linked it as the worktree's node_modules. Now:
+# * network step (the deps step, registry hosts only): ONLY the lockfile (+ pnpm-workspace.yaml) and an engine-written
+#   package.json holding just `packageManager` are copied into an engine tmp dir → `pnpm fetch --ignore-scripts
+#   --store-dir <engine store>` — no repo script, hook or .pnpmfile can run, nothing of the worktree is executed;
+# * offline step (every offline suite tree, before its test commands): `pnpm install --offline --frozen-lockfile
+#   --ignore-scripts --ignore-pnpmfile --store-dir <engine store>` IN the temp tree, inside `tree_sandbox` with the store
+#   denyWrite (read-only) — measured on #227: 11.8 s, then `pnpm exec turbo run test` 6 tasks / 1548 tests green;
+# * no node_modules is linked into a pnpm temp tree (`effective.TempTree`), the npm suite install is not made;
+# * an offline install failure (lockfile drift, a package not in the store) is `env` (`engine-env-deps-offline`).
+# The store is passed as --store-dir explicitly (`~/.npmrc` is denyRead). The npm path is unchanged for other repos.
+PNPM_FETCH = "pnpm fetch --ignore-scripts --store-dir %s"
+PNPM_OFFLINE = "pnpm install --offline --frozen-lockfile --ignore-scripts --ignore-pnpmfile --store-dir %s"
+PNPM_INPUTS = ("pnpm-lock.yaml", "pnpm-workspace.yaml")
+
+
+def pnpm_fetch(worktree, run_dir, env, copy_list=(), issue=None, timeout_s=1800):
+    """The networked half for a pnpm repo → (CheckResult, proxy). The worktree's lockfile (+ workspace file) only —
+    regular files, never through a link — in a fresh dir under the run's tmp."""
+    import shutil as _sh
+    import tempfile
+    from guildcore.checks import pmcache as PMC
+    store = PMC.pnpm_store()
+    os.makedirs(store, exist_ok=True)  # fs-ok: the engine's pnpm store (engine cache, outside every role's allowWrite)
+    os.makedirs(os.path.join(run_dir, "tmp"), exist_ok=True)  # fs-ok: this deps run dir's tmp/ (engine-owned)
+    tmp = tempfile.mkdtemp(prefix="pnpm-fetch-", dir=os.path.join(run_dir, "tmp"))
+    try:
+        have = False
+        for f in PNPM_INPUTS:
+            src = os.path.join(worktree, f)
+            if os.path.isfile(src) and not os.path.islink(src):
+                with open(src, "rb") as fh:
+                    FS.write_bytes(tmp, f, fh.read())
+                have = have or f == "pnpm-lock.yaml"
+        if not have:
+            r = CH.CheckResult(False, None, False, "pnpm: no pnpm-lock.yaml at the repository root — nothing to fetch\n",
+                               [], 0)
+            return r, {}
+        pm = PMC.package_manager(worktree)
+        man = {"name": "guild-engine-pnpm-fetch", "private": True}
+        if pm:
+            man["packageManager"] = "%s@%s" % pm              # Corepack picks the pinned pnpm (no repo script)
+        FS.write_text(tmp, "package.json", json.dumps(man))
+        sb = deps_sandbox(worktree, run_dir, worktree, copy_list, issue)
+        fs = sb["filesystem"]
+        fs["allowWrite"] = list(fs["allowWrite"]) + [tmp + "/**", store + "/**"]
+        fs["readOnlyAllow"] = list(fs["readOnlyAllow"]) + [tmp + "/**", store + "/**"]
+        r, px = CH.deps_step([PNPM_FETCH % shlex.quote(store)], tmp, sb, os.path.join(run_dir, "tmp"), env=env,
+                             hosts=REGISTRY_HOSTS["package.json"], timeout_s=timeout_s)
+        return r, px
+    finally:
+        _sh.rmtree(tmp, True)  # fs-ok: the engine's fetch dir under this run's tmp/ (rmtree never follows links)
+
+
+def pnpm_offline_install(tree, run_dir, env, sb, journal=None, owner="suite", timeout_s=1800):
+    """The offline half: `PNPM_OFFLINE` in the temp tree, the engine store read-only → CheckResult, or None (no pnpm
+    repo, or the tree already has its node_modules — an effective re-run of the same tree)."""
+    from guildcore.checks import pmcache as PMC
+    if not PMC.is_pnpm(tree) or os.path.lexists(os.path.join(tree, "node_modules")):
+        return None
+    store = PMC.pnpm_store()
+    sb2 = dict(sb, filesystem=dict(sb["filesystem"]))
+    sb2["filesystem"]["denyWrite"] = list(sb2["filesystem"].get("denyWrite") or []) + [store + "/**"]
+    cmd = PNPM_OFFLINE % shlex.quote(store)
+    r = CH.run_command([cmd], timeout_s, cwd=tree, env=env, journal=journal, who="check-%s" % owner, sandbox=sb2,
+                       tmp=os.path.join(run_dir, "tmp"))
+    r.deps_cmd = cmd
+    return r
+
+
+def deps_offline_result(inst, timeout_s):
+    """A red suite result standing for a failed offline install (the test commands never ran)."""
+    from guildcore.checks import pmcache as PMC
+    r = CH.CheckResult(False, inst.rc, inst.timed_out, inst.raw, inst.steps, int(timeout_s))
+    r.deps_offline = PMC.pnpm_failure_line(inst.raw)
+    return r
+
+
 def check_env(root_env, worktree, run_dir):
     """0.102.2: every engine-run command in a check sandbox (deps · suite · warm-up · net · checks · local_dev · gate)
     gets the rendered global git config — ~/.gitconfig is denyRead there and flutter/npm/git abort on it (rc 128)."""
@@ -583,15 +673,22 @@ def deps_main(worktree, run_dir, env, copy_list=(), issue=None, timeout_s=1800, 
             with open(fp, "rb") as fh:
                 branch_mans[f] = fh.read()
     suite_node = None
+    from guildcore.checks import pmcache as PMC
     if "package.json" in branch_mans:
         pm_note = prepare_corepack(worktree, run_dir, env, copy_list, issue, timeout_s)
         if pm_note:
             notes.append(pm_note)
-        rb, pxb, bin_b = install_check_tools(worktree, run_dir, env, branch_mans, (), copy_list, issue, timeout_s,
-                                             kind="suite")
-        if bin_b:
-            suite_node = os.path.dirname(os.path.dirname(bin_b))
-            link_node_modules(worktree, suite_node)
+        if PMC.is_pnpm(worktree):
+            # 0.102.15 (lead decision 6): pnpm — `pnpm fetch` of the lockfile into the engine store; the suite's
+            # node_modules is installed offline in each temp tree (`pnpm_offline_install`), never linked here
+            rb, pxb = pnpm_fetch(worktree, run_dir, env, copy_list, issue, timeout_s)
+            notes.append("pnpm: fetch into %s — %s" % (PMC.pnpm_store(), "ok" if rb.passed else "failed"))
+        else:
+            rb, pxb, bin_b = install_check_tools(worktree, run_dir, env, branch_mans, (), copy_list, issue,
+                                                 timeout_s, kind="suite")
+            if bin_b:
+                suite_node = os.path.dirname(os.path.dirname(bin_b))
+                link_node_modules(worktree, suite_node)
         if first is None:
             first = rb if rb is not None else CH.CheckResult(True, 0, False, "", [], 0)
             first.proxy = pxb
@@ -688,8 +785,12 @@ def live(issue, worktree, base, branch, config, clock, gh, writer, decisions, ru
         run_dir = RR.new_run_dir(RR.run_root(worktree, issue, root_env), "check", owner)
         sb = tree_sandbox(tree, run_dir, worktree, issue)
         env, shim = offline_shims(run_dir, check_env(root_env, worktree, run_dir))     # 0.102.14
-        r = CH.run_command(cmds, timeout_s, cwd=tree, env=env, journal=journal, who="check-%s" % owner,
-                           sandbox=sb, tmp=os.path.join(run_dir, "tmp"))
+        inst = pnpm_offline_install(tree, run_dir, env, sb, journal, owner, timeout_s)   # 0.102.15 (pnpm)
+        if inst is not None and not inst.passed:
+            r = deps_offline_result(inst, timeout_s)
+        else:
+            r = CH.run_command(cmds, timeout_s, cwd=tree, env=env, journal=journal, who="check-%s" % owner,
+                               sandbox=sb, tmp=os.path.join(run_dir, "tmp"))
         r.offline_shim = shim
         keep_raw(run_dir, cmds, r)
         runner.rebaseline(worktree, issue)
@@ -1048,6 +1149,12 @@ def net_in_tree(worktree, base, rev, files, raw, copy_list, run_dir, env, issue=
         sb = tree_sandbox(tt.path, run_dir, worktree, issue)
         c = with_json_report(offline_cmd(cmd), rep)
         senv, shim = offline_shims(run_dir, env)                    # 0.102.14
+        inst = pnpm_offline_install(tt.path, run_dir, senv, sb, None, "net", timeout_s)     # 0.102.15 (pnpm)
+        if inst is not None and not inst.passed:
+            r = deps_offline_result(inst, timeout_s)
+            r.offline_shim, r.warm, r.report, r.report_expected = shim, info["warm"], None, False
+            r.env = "deps offline: %s" % r.deps_offline
+            return r
         r = CH.run_command([c], timeout_s, cwd=tt.path, env=senv, sandbox=sb, tmp=os.path.join(run_dir, "tmp"))
         r.offline_shim = shim
         r.report = open(rep, encoding="utf-8", errors="replace").read() if os.path.exists(rep) else None

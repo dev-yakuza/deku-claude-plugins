@@ -51,6 +51,12 @@ _TRACE_EXTRA = (
                 r"""api_key|apikey|private_key)(?:["'])?\s*[:=]\s*)(["'])(?:(?!\2).)*\2""", re.I), r"\1\2[REDACTED]\2"),
     (re.compile(r"((?<![\w-])(?:password|passwd|secret|token|api_key|apikey)=)[^\s&'\",;]+", re.I), r"\1[REDACTED]"),
     (re.compile(r"\beyJ[\w-]{5,}\.[\w-]{5,}\.[\w-]+"), "[REDACTED]"),
+    # 0.102.15 (review-0102-13 m4): env-style assignments with a prefix (`GITHUB_TOKEN=…`, `OPENAI_API_KEY=…`,
+    # `DB_PASSWORD=…`, `AWS_SECRET_ACCESS_KEY=…`), URL userinfo (`postgres://u:pass@h`), `Bearer …`
+    (re.compile(r"(?<![A-Za-z0-9-])((?:[A-Za-z0-9]+_)+(?:TOKEN|KEY|SECRET|PASSWORD|PASSWD)\s*=\s*)"
+                r"[^\s'\",;&]+", re.I), r"\1[REDACTED]"),
+    (re.compile(r"(://[^/\s:@]+:)[^@\s/]+@"), r"\1[REDACTED]@"),
+    (re.compile(r"(\bBearer\s+)[A-Za-z0-9\-._~+/=]+", re.I), r"\1[REDACTED]"),
 )
 
 

@@ -200,9 +200,14 @@ def ac_map(text):
     ids = set(case_ids(text))
     out = {}
     section = []
+    head_case = None                               # the case the nearest heading marks (for a `Covers:` line)
     for ln in (text or "").split("\n"):
         h = HEADING.match(ln)
         cid = _line_case(ln, section)
+        if h:
+            head_case = cid if (cid and cid in ids and not AC_TAG.match(cid)) else None
+        elif head_case and head_case not in out and COVERS_LINE.match(ln) and ac_refs(ln):
+            out[head_case] = list(dict.fromkeys(ac_refs(ln)))      # 0.102.15 (m5)
         if h:
             level = len(h.group(1))
             while section and section[-1][0] >= level:
@@ -250,6 +255,9 @@ def judged_units(text, deferred=(), acs=(), legacy=False):
 AC_DEF = re.compile(r"^[\s>]{0,8}\**\s{0,4}AC ?#?\d+\**\s{0,2}(?:[:：.)—–]|-\s)")    # `AC #3: …` — not `AC #7 은 …`
 LIST_ITEM = re.compile(r"^\s{0,8}(?:[-*+・•]|\d{1,3}[.)])\s")
 AC_TAG_BRACKET = re.compile(r"[\[(（【]\s*AC ?#? ?-?\d+[^\])）】\n]{0,40}[\])）】]")
+# 0.102.15 (review-0102-13 m5): a `Covers: AC #1` / `AC: #1, #2` / `対象 AC: …` line under a case heading names that case's
+# ACs — a field line, not prose
+COVERS_LINE = re.compile(r"^[\s>]{0,8}[*_]{0,2}(?:covers?|ACs?|対象\s?AC|대상\s?AC|관련\s?AC)[*_]{0,2}\s{0,2}[:：]", re.I)
 
 
 def doc_ac_refs(text):
@@ -258,7 +266,7 @@ def doc_ac_refs(text):
     out = []
     for ln in (text or "").split("\n"):
         s_ = ln.strip()
-        if s_.startswith("|") or HEADING.match(ln) or LIST_ITEM.match(ln) or AC_DEF.match(ln):
+        if s_.startswith("|") or HEADING.match(ln) or LIST_ITEM.match(ln) or AC_DEF.match(ln) or COVERS_LINE.match(ln):
             got = ac_refs(ln)
         else:
             got = []

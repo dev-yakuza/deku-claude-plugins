@@ -129,17 +129,18 @@ class B1BlockedNeverDone(unittest.TestCase):
             self.assertFalse(R.parse_pres(">>> RESULT <<<\n" + ln).ok, ln)
 
     def test_a_token_anywhere_in_the_reply_means_repair(self):
+        # 0.102.15 (review-0102-13 B1 — lead decision 1): an allow shape — only a line starting with `done`
         s = R.RESULT_SCHEMAS["tech-lead"]
         for reply in ("The build failed once.\n>>> RESULT <<<\nAll set", "Halted on review.\nall set",
-                      "needs_context?\n>>> RESULT <<<\nok"):
+                      "needs_context?\n>>> RESULT <<<\nok", "skeleton written.\n>>> RESULT <<<\nAll set"):
             p = R.parse_pres(reply, R.STATUSES)
             self.assertIsNone(R.structured_pres(p, {"skeleton": "out/s.md"}, R.STATUSES, reply, s), reply)
-        reply = "skeleton written.\n>>> RESULT <<<\nAll set"
+        reply = "The build failed once.\n>>> RESULT <<<\nDone — skeleton written"
         p = R.parse_pres(reply, R.STATUSES)
         self.assertEqual(R.structured_pres(p, {"skeleton": "out/s.md"}, R.STATUSES, reply, s).status, "DONE")
 
     def test_required_fields_must_be_present_and_non_empty(self):
-        reply = "work done\n>>> RESULT <<<\nall set"
+        reply = "work done\n>>> RESULT <<<\ndone, all set"           # 0.102.15: the allowed `done…` shape
         p = R.parse_pres(reply, R.STATUSES)
         no_req = {"type": "object", "properties": {"a": {"type": "string"}}}
         self.assertIsNone(R.structured_pres(p, {"a": "x"}, R.STATUSES, reply, no_req))
@@ -427,9 +428,10 @@ class M4MissingIgnored(unittest.TestCase):
             with open(os.path.join(root, rel), "w") as fh:
                 fh.write("v\n")
         tree = tmpdir(self)
-        # (1) a mention that is no read failure, or a write
-        self.assertEqual(PF.missing_ignored("loaded x.env fine\n", root, ["x.env"], tree), [])
-        self.assertEqual(PF.missing_ignored("Writing x.env: not found before, created\n", root, ["x.env"], tree), [])
+        # (1) 0.102.15 (review-0102-13 M2): any path-bounded mention counts — no read-failure wording needed
+        self.assertEqual(PF.missing_ignored("loaded x.env fine\n", root, ["x.env"], tree), ["x.env"])
+        self.assertEqual(PF.missing_ignored("Writing x.env: not found before, created\n", root, ["x.env"], tree),
+                         ["x.env"])
         self.assertEqual(PF.missing_ignored("Cannot open x.env\n", root, ["x.env"], tree), ["x.env"])
         # (2) the run made it — present in the temp tree after the run
         with open(os.path.join(tree, "x.env"), "w") as fh:

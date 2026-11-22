@@ -148,7 +148,11 @@ def _tree_hash(root):
 # diff.*.textconv, alias.*, credential.*, url.*.insteadOf / pushInsteadOf, remote.*.url / pushurl and any unknown key
 # stay in).
 _BOOKKEEPING = (re.compile(r"^branch\."), re.compile(r"^remote\..*\.fetch$"), re.compile(r"^gc\."),
-                re.compile(r"^maintenance\."), re.compile(r"vscode"))
+                re.compile(r"^maintenance\."))
+# 0.102.15 (review-0102-13 m2): the `vscode` substring pattern is gone — it hid `alias.vscode-sync`,
+# `url.<…/vscode/>.insteadOf`, `filter.vscode.clean`, `remote.vscode.url`; VS Code's own `branch.<b>.vscode-merge-base`
+# is already under `^branch\.`. The hash of a config with such keys changes → INTEGRITY_FORMAT 3 (a format-only
+# difference is re-taken silently, 0.102.14).
 
 
 def config_relevant(raw):
@@ -174,7 +178,7 @@ def _config_hash(args, cwd):
 # snapshot. 0.102.13 changed the git-config hashes (execution-relevant keys only), so a baseline written by 0.102.12
 # read as two late config changes on resume. A baseline of another (or no) format whose ONLY late items are these
 # config hashes is re-taken silently (`config_format_only`, journal `rebaseline-format`) — never a drift question.
-INTEGRITY_FORMAT = 2
+INTEGRITY_FORMAT = 3
 CONFIG_ITEM_PREFIXES = ("git config ", "config file ")
 
 
@@ -506,6 +510,26 @@ def _read_regular(full, limit):
         return fh.read() if limit is None else fh.read(limit)
 
 
+def behind_link(worktree, rel):
+    """0.102.15 (review-0102-13 M1): the first PARENT component of `rel` (under `worktree`) that is a symlink (or no
+    directory), else None — `os.lstat` / O_NOFOLLOW guard only the last component, so a tracked directory replaced by
+    a link to `~` would let the revert read `~/.npmrc` as `pkg/.npmrc`."""
+    parts = [x for x in rel.replace(os.sep, "/").split("/") if x][:-1]
+    cur = worktree
+    for i, part in enumerate(parts):
+        cur = os.path.join(cur, part)
+        try:
+            st = os.lstat(cur)
+        except FileNotFoundError:
+            return None
+        except OSError:
+            return "/".join(parts[:i + 1])
+        import stat as ST
+        if not ST.S_ISDIR(st.st_mode):
+            return "/".join(parts[:i + 1])
+    return None
+
+
 def revert_writes(worktree, paths, cap=1200, keep_dir=None, after=None):
     """Put each path back to HEAD (a new file is removed) → [(path, what the role wrote — its added lines, capped)].
 
@@ -518,7 +542,13 @@ def revert_writes(worktree, paths, cap=1200, keep_dir=None, after=None):
     runner's `<issue>/reverted/<run>` beside `runs/`); it must not be a link and every write under it goes through
     `fsafe` (O_NOFOLLOW, a link on the way refused). The revert never follows a link: a symlink is recorded as a symlink
     (its target string — the file it points at is never read) and removed as a link; a FIFO / device / socket /
-    directory is never opened — recorded and left in place (not reverted: the re-check stops for a person)."""
+    directory is never opened — recorded and left in place (not reverted: the re-check stops for a person).
+    0.102.15 (review-0102-13 M1 — lead decision 2): a path behind a symlinked PARENT component (`behind_link`) is
+    never opened, copied or diffed — recorded (`kind: behind-link`, `link_at`); a tracked one is restored by git
+    alone (`checkout HEAD` replaces the link with the directory and never writes through it), an untracked one is
+    left (the link itself is its own path). Every unlink re-checks the path is still what was recorded (a link /
+    regular file) and an unlink that fails or no longer applies is recorded on the row (`unlink`), never raised —
+    nothing was copied from there, so no SCOPE stop from the revert itself; the caller's re-check decides."""
     from guildcore import fsafe as FS
     rows, keep = [], {}
     if keep_dir:
@@ -530,21 +560,24 @@ def revert_writes(worktree, paths, cap=1200, keep_dir=None, after=None):
         full = os.path.join(worktree, p)
         tracked = subprocess.run(["git", "cat-file", "-e", "HEAD:%s" % p], cwd=worktree,
                                  stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0
-        kind, _st = _lkind(full)
+        via = behind_link(worktree, p)
+        kind, _st = ("behind-link", None) if via else _lkind(full)
         exists = kind != "missing"
         partner = rename_partner(after, p) if after else None
         ent = ((after or {}).get("status") or {}).get(p) or []
         state = ("renamed-to %s" % partner if ent[:1] and str(ent[0]).startswith("D") else "renamed-from %s" % partner) \
             if partner else ("deleted" if not exists else ("modified" if tracked else "new"))
         row = {"path": p, "state": state, "tracked": tracked, "copy": None, "diff": None, "kind": kind}
-        if kind == "link":
+        if via:
+            row["link_at"] = via                          # never opened, copied or diffed
+        elif kind == "link":
             try:
                 row["link"] = os.readlink(full)           # the link's own text — its target is never opened
             except OSError as e:
                 row["error"] = str(e)
         elif kind not in ("file", "missing"):
             row["error"] = "not a regular file (%s) — never opened, left in place" % kind
-        if keep_dir and not row.get("error"):
+        if keep_dir and not row.get("error") and not via:
             try:
                 if kind == "file":
                     data = _read_regular(full, COPY_CAP)
@@ -573,7 +606,9 @@ def revert_writes(worktree, paths, cap=1200, keep_dir=None, after=None):
         kind = row["kind"]
         text = ""
         try:
-            if kind == "link":
+            if kind == "behind-link":
+                text = "(behind the symlink %s — never opened)" % row.get("link_at")
+            elif kind == "link":
                 text = "(symlink to %s)" % row.get("link")
             elif kind == "file":
                 data = _read_regular(full, 8192)
@@ -589,18 +624,39 @@ def revert_writes(worktree, paths, cap=1200, keep_dir=None, after=None):
             text = ""
         if row["tracked"]:
             if kind == "link":
-                os.unlink(full)  # fs-ok: removes the role's link itself (never followed) before git restores HEAD
+                _unlink_as(full, "link", row)  # removes the role's link itself (never followed) before git restores HEAD
             G.run(worktree, "reset", "-q", "HEAD", "--", p, check=False)     # a staged rename / deletion side
             G.run(worktree, "checkout", "HEAD", "--", p)              # the git adapter: the one mutating door
+        elif kind == "behind-link":
+            row["unlink"] = "left: behind the symlink %s (the link is its own path)" % row.get("link_at")
         else:
             # `reset` unstages a staged add / a rename's destination whatever its content (`rm --cached` refuses a
             # path whose staged content differs from both the file and HEAD — an edited rename destination)
             G.run(worktree, "reset", "-q", "HEAD", "--", p, check=False)
             G.run(worktree, "rm", "-q", "--cached", "--ignore-unmatch", "--", p, check=False)
             if os.path.lexists(full) and (row.get("copy") or row.get("link") is not None or not keep_dir):
-                os.unlink(full)  # fs-ok: an engine worktree path the role wrote outside its scope (a link removed as a link), recorded first
+                _unlink_as(full, kind, row)
         out.append((p, " ".join(text.split())[:cap]))
+    if keep_dir and any(r.get("unlink") for r in rows):
+        try:                                              # the unlink notes too (best effort — the copies are kept)
+            FS.write_text(keep_dir, "manifest.json", json.dumps(rows, ensure_ascii=False, indent=1, sort_keys=True))
+        except (OSError, IOError, FS.UnsafePath):
+            pass
     return out
+
+
+def _unlink_as(full, kind, row):
+    """Unlink `full` only while it is still the recorded kind (a link / regular file) and no parent is a link; a path
+    that changed meanwhile (an earlier `checkout` turned a link back into a directory) or an unlink that fails is
+    recorded on the row (`unlink`), never raised (0.102.15 review-0102-13 M1)."""
+    now, _st = _lkind(full)
+    if now != kind or kind not in ("link", "file"):
+        row["unlink"] = "skipped: now %s (was %s)" % (now, kind)
+        return
+    try:
+        os.unlink(full)  # fs-ok: an engine worktree path the role wrote outside its scope (a link removed as a link), recorded first
+    except OSError as e:
+        row["unlink"] = "failed: %s" % e
 
 
 def drift(baseline, now, worktree=None):

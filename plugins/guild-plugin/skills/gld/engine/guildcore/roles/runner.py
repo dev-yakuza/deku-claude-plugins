@@ -626,6 +626,10 @@ class Runner(object):
                                         SC.recorded_base_tips(spec.worktree, before, spec.base))
         late = SC.drift(base, before, spec.worktree) if (base is not None and before is not None) else []
         accepted = None
+        # 0.102.15 (one-man-company #687 on 0.102.14): the single-role path re-takes a baseline of another integrity
+        # format whose only late items are the git-config hashes too — 0.102.14 did it only in drift_state
+        if late and self.format_rebaseline(spec.worktree, spec.issue, base, before, late):
+            late = []
         if late and self.accept_base_merge(spec.worktree, spec.issue, base, before, spec.branch, spec.base):
             accepted = "drift accepted: base merge on %s (journal `drift-accepted`)" % spec.branch
             late = []
@@ -794,8 +798,8 @@ class Runner(object):
         self._src = None
         if spec.result_schema is not None and not pres.ok:
             # 0.102.12 (one-man-company #687): an unusable status line beside a valid out/result.json — the structured
-            # result decides (R.structured_pres), never a repair session and a pause for a finished role — 0.102.13 (B1):
-            # only with no blocking token in the reply, one marker and the schema's required fields all filled
+            # result decides (R.structured_pres), never a repair session and a pause for a finished role — 0.102.15
+            # (review-0102-13 B1): only a narrowed DONE_WITH_CONCERNS or a `done…` line after one marker, required filled
             o_, s_, e_ = R.read_result_json(run_dir, st.last_text)
             if not e_ and not R.validate(o_, spec.result_schema, None) and \
                     not R.missing_artifacts(o_, spec.worktree, run_dir):

@@ -220,7 +220,12 @@ def check_env(role_env, tmp):
     e.update({"PYTHONDONTWRITEBYTECODE": "1", "PYTHONPYCACHEPREFIX": pyc, "TMPDIR": tmp,
               # K3r6-m3: the suite's node_modules is the engine's (read-only) — tool caches go to the run tmp
               "BABEL_CACHE_PATH": os.path.join(tmp, "babel-cache.json"), "XDG_CACHE_HOME": os.path.join(tmp, "cache"),
-              "npm_config_cache": os.path.join(tmp, "npm-cache")})
+              "npm_config_cache": os.path.join(tmp, "npm-cache"),
+              # 0.102.15 (japanlifeinfo #227, measured in tree_sandbox): turbo's default STRICT env mode drops TMPDIR
+              # from its tasks → vitest `mkdir /tmp/…` EPERM in every package (the sandbox writes only the run tmp);
+              # loose mode passes this env through (it only changes turbo's cache hashing — a throwaway temp tree).
+              # Telemetry off: no network attempt from an offline check
+              "TURBO_ENV_MODE": "loose", "TURBO_TELEMETRY_DISABLED": "1", "DO_NOT_TRACK": "1"})
     # 0.102.12 (review-0102-11 M4, japanlifeinfo #227): ONE engine-owned Corepack home (never the run tmp's empty
     # `$XDG_CACHE_HOME/node/corepack`); a networked step (the deps step marks its env) may fetch into it, every other
     # check runs with Corepack's network off
@@ -339,30 +344,69 @@ def _flutter(raw):
     return Summary("flutter", int(last.group(1)), int(last.group(3) or 0), int(last.group(2) or 0), names)
 
 
-def _jest(raw):
-    m = re.search(r"^Tests:\s+(.*)$", raw, re.M)
-    if not m:
-        return None
-    seg = m.group(1)
+def _sum_counts(segs):
+    """0.102.15 (#227 turbo): the counts of EVERY summary line (one per package / command), summed."""
+    tot = {"passed": 0, "failed": 0, "skipped": 0}
+    for seg in segs:
+        for w in tot:
+            x = re.search(r"(\d+) %s" % w, seg)
+            tot[w] += int(x.group(1)) if x else 0
+    return tot
 
-    def n(word):
-        x = re.search(r"(\d+) %s" % word, seg)
-        return int(x.group(1)) if x else 0
+
+def _jest(raw):
+    segs = re.findall(r"^Tests:\s+(.*)$", raw, re.M)
+    if not segs:
+        return None
+    t = _sum_counts(segs)
     names = re.findall(r"^\s+● (.+?)\s*$", raw, re.M)
-    return Summary("jest", n("passed"), n("failed"), n("skipped"), names)
+    return Summary("jest", t["passed"], t["failed"], t["skipped"], names)
 
 
 def _vitest(raw):
-    m = re.search(r"^\s*Tests\s+(.*?\(\d+\))\s*$", raw, re.M)
-    if not m:
+    segs = re.findall(r"^\s*Tests\s+(.*?\(\d+\))\s*$", raw, re.M)
+    if not segs:
         return None
-    seg = m.group(1)
-
-    def n(word):
-        x = re.search(r"(\d+) %s" % word, seg)
-        return int(x.group(1)) if x else 0
+    t = _sum_counts(segs)
     names = re.findall(r"^\s*(?:×|FAIL)\s+(.+?)\s*$", raw, re.M)
-    return Summary("vitest", n("passed"), n("failed"), n("skipped"), names)
+    return Summary("vitest", t["passed"], t["failed"], t["skipped"], names)
+
+
+# 0.102.15 (japanlifeinfo #227 diagnosis D — lead decision 8): a turbo (or any ANSI-coloured) run — colour codes and
+# turbo's `<pkg>:<task>: ` line prefixes are stripped before any parser reads it (only when turbo's own banner /
+# summary is in the output); every package's summary line is summed; turbo's `Tasks: N successful, M total` and
+# `Failed: <pkg>#<task>` lines are an auxiliary RED signal (a package that failed before printing a summary).
+ANSI_RE = re.compile(r"\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b\][^\x07]*(?:\x07|\x1b\\)")
+TURBO_RE = re.compile(r"^\s*Tasks:\s+\d+ successful, \d+ total\s*$|^turbo \d+\.\d+", re.M)
+TURBO_PREFIX_RE = re.compile(r"^[\w@/.-]+:[\w:-]+: ?", re.M)
+TURBO_TASKS_RE = re.compile(r"^\s*Tasks:\s+(\d+) successful, (\d+) total\s*$", re.M)
+TURBO_FAILED_RE = re.compile(r"^\s*Failed:\s+(\S+#\S+)\s*$", re.M)
+
+
+def normalize_output(raw):
+    """`raw` without ANSI codes; a turbo run's `<pkg>:<task>: ` prefixes stripped too."""
+    text = ANSI_RE.sub("", raw or "")
+    if TURBO_RE.search(text):
+        text = TURBO_PREFIX_RE.sub("", text)
+    return text
+
+
+def _turbo(text, s):
+    """Fold turbo's own task summary into `s` (may be None): failed tasks make it red with their names."""
+    m = None
+    for m in TURBO_TASKS_RE.finditer(text):
+        pass
+    failed_tasks = TURBO_FAILED_RE.findall(text)
+    if m is None and not failed_tasks:
+        return s
+    ok, total = (int(m.group(1)), int(m.group(2))) if m else (0, 0)
+    bad = max(total - ok, len(failed_tasks))
+    if s is None:
+        return Summary("turbo", ok, bad, 0, failed_tasks) if (m is not None) else None
+    if bad and s.failed == 0:
+        s.failed = bad
+    s.failed_names = list(s.failed_names) + [x for x in failed_tasks if x not in s.failed_names]
+    return s
 
 
 def _pytest(raw):
@@ -447,7 +491,7 @@ def failure_kind(raw, runner=None, passed=None):
 
 def parse_summary(raw, runner=None, config=None):
     """Summary or None (unknown format). `config` = commands.test_summary."""
-    raw = raw or ""
+    raw = normalize_output(raw)                     # 0.102.15: ANSI + turbo prefixes (lead decision 8)
     if config and config.get("passed_re") and config.get("failed_re"):
         p = re.search(config["passed_re"], raw, re.M)
         f = re.search(config["failed_re"], raw, re.M)
@@ -455,13 +499,14 @@ def parse_summary(raw, runner=None, config=None):
             names = re.findall(config["test_name_re"], raw, re.M) if config.get("test_name_re") else []
             return Summary("config", int(p.group(1)) if p else 0, int(f.group(1)) if f else 0, 0, names)
     order = [x for x in PARSERS if runner is None or x[0] == runner] or PARSERS
+    turbo = TURBO_RE.search(raw) is not None
     for name, fn in order:
         s = fn(raw)
         if s is not None:
             if name == "dart":
                 s.runner = "dart"
-            return s
-    return None
+            return _turbo(raw, s) if turbo else s
+    return _turbo(raw, None) if turbo else None
 
 
 def mutation_snapshot(worktree):
