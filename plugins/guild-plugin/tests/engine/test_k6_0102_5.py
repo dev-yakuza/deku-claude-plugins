@@ -53,8 +53,14 @@ def _write(d, rel, text):
 # ---- 1. drift: base merges accepted, any other drift asks accept / stop ----------------------------------------
 
 class BaseMerge(unittest.TestCase):
+    # 0.102.6 (review-0102-5 M1): the base a merge may bring in is the REMOTE's (read by the engine) — the fixture has a
+    # real bare `origin`; the person's flow is #1945's: `git fetch` then `git merge origin/main` in the worktree
     def setUp(self):
         self.main = repo(self, {"a.txt": "a\n", "b.txt": "b\n"})
+        self.origin = os.path.join(tmpdir(self), "origin.git")
+        git(self.main, "clone", "-q", "--bare", self.main, self.origin)
+        git(self.main, "remote", "add", "origin", self.origin)
+        git(self.main, "fetch", "-q", "origin")
         self.wt = os.path.join(tmpdir(self), "wt")
         git(self.main, "worktree", "add", "-q", "-b", "fix/1", self.wt)
         _write(self.wt, "lib/x.txt", "work\n")
@@ -65,29 +71,32 @@ class BaseMerge(unittest.TestCase):
     def _main_moves(self):
         _write(self.main, "a.txt", "a2\n")
         git(self.main, "commit", "-qam", "main moves")
+        git(self.main, "push", "-q", "origin", "main")
+        git(self.wt, "fetch", "-q", "origin")
 
     def test_a_merge_of_main_is_accepted(self):
         self._main_moves()
-        git(self.wt, "merge", "-q", "--no-edit", "main")
+        git(self.wt, "merge", "-q", "--no-edit", "origin/main")
         now = SC.snapshot(self.wt)
         self.assertTrue({"ref refs/heads/fix/1", "HEAD"} <= set(SC.drift(self.base, now, self.wt)))
-        got = SC.accept_base_merge(self.wt, self.base, now, "fix/1", "main")
+        got = SC.accept_base_merge(self.wt, self.base, now, "fix/1", "origin/main")
         self.assertEqual(got, [git(self.wt, "rev-parse", "HEAD")])
+        self.assertEqual(SC.accept_base_merge(self.wt, self.base, now, "fix/1", "main"), got)   # same remote base
 
     def test_a_merge_carrying_a_hand_edit_is_not(self):
         self._main_moves()
-        git(self.wt, "merge", "-q", "--no-commit", "--no-ff", "main")
+        git(self.wt, "merge", "-q", "--no-commit", "--no-ff", "origin/main")
         _write(self.wt, "a.txt", "edited in the merge\n")
         git(self.wt, "add", "-A")
         git(self.wt, "commit", "-qm", "merge with an edit")
-        self.assertIsNone(SC.accept_base_merge(self.wt, self.base, SC.snapshot(self.wt), "fix/1", "main"))
+        self.assertIsNone(SC.accept_base_merge(self.wt, self.base, SC.snapshot(self.wt), "fix/1", "origin/main"))
 
     def test_a_plain_commit_or_a_dirty_tree_is_not(self):
         _write(self.wt, "lib/y.txt", "late\n")
-        self.assertIsNone(SC.accept_base_merge(self.wt, self.base, SC.snapshot(self.wt), "fix/1", "main"))
+        self.assertIsNone(SC.accept_base_merge(self.wt, self.base, SC.snapshot(self.wt), "fix/1", "origin/main"))
         git(self.wt, "add", "-A")
         git(self.wt, "commit", "-qm", "a person's commit")
-        self.assertIsNone(SC.accept_base_merge(self.wt, self.base, SC.snapshot(self.wt), "fix/1", "main"))
+        self.assertIsNone(SC.accept_base_merge(self.wt, self.base, SC.snapshot(self.wt), "fix/1", "origin/main"))
 
     def test_a_merge_of_another_branch_is_not(self):
         git(self.main, "branch", "side")
@@ -97,7 +106,7 @@ class BaseMerge(unittest.TestCase):
         git(self.main, "commit", "-qm", "side")
         git(self.main, "switch", "-q", "main")
         git(self.wt, "merge", "-q", "--no-edit", "side")
-        self.assertIsNone(SC.accept_base_merge(self.wt, self.base, SC.snapshot(self.wt), "fix/1", "main"))
+        self.assertIsNone(SC.accept_base_merge(self.wt, self.base, SC.snapshot(self.wt), "fix/1", "origin/main"))
 
     def _runner(self, sessions, journal):
         return RR.Runner(journal=journal, parent_env={"PATH": os.environ["PATH"]}, spawn=FakeSpawn(sessions),
@@ -106,14 +115,14 @@ class BaseMerge(unittest.TestCase):
 
     def _spec(self, role="developer", task="implement"):
         return RR.RoleSpec(role, task, "t", issue=1, stage="s", step="x", worktree=self.wt, model="sonnet",
-                           base="main", branch="fix/1", remote_check=False)
+                           base="origin/main", branch="fix/1", remote_check=False)
 
     def test_the_runner_accepts_a_base_merge_and_runs_the_role(self):
         j = EvJournal()
         r = self._runner([{"stream": stream_lines(texts=[DONE])}, {"stream": stream_lines(texts=[DONE])}], j)
         self.assertEqual(r.run_role(self._spec()).status, "DONE")
         self._main_moves()
-        git(self.wt, "merge", "-q", "--no-edit", "main")
+        git(self.wt, "merge", "-q", "--no-edit", "origin/main")
         res = r.run_role(self._spec("reviewer", None))
         self.assertEqual(res.status, "DONE")
         self.assertEqual(len(r.spawn.calls), 2)
@@ -133,9 +142,9 @@ class BaseMerge(unittest.TestCase):
         r = self._runner([{"stream": stream_lines(texts=[DONE])}], EvJournal())
         r.run_role(self._spec())
         self._main_moves()
-        git(self.wt, "merge", "-q", "--no-edit", "main")
+        git(self.wt, "merge", "-q", "--no-edit", "origin/main")
         self.assertNotEqual(r.drift_check(self.wt, 1), [])                       # without the branch: strict
-        self.assertEqual(r.drift_check(self.wt, 1, "fix/1", "main"), [])
+        self.assertEqual(r.drift_check(self.wt, 1, "fix/1", "origin/main"), [])
 
 
 LATE = ["late change after the previous step: ref refs/heads/fix/1", "late change after the previous step: HEAD"]
@@ -145,11 +154,12 @@ class DriftQuestion(unittest.TestCase):
     def _h(self, unattended, roles=()):
         h = Harness(self, fixture(labels=("guild:test",)), roles=list(roles), unattended=unattended)
         h.accepted = []
-        h.p.accept_drift = lambda: h.accepted.append(1)
+        h.p.accept_drift = lambda fp: h.accepted.append(fp)                    # None: accepted (0.102.6 M2)
         return h
 
     def _drift(self):
-        return RoleResult("DRIFT", "worktree changed", violations=list(LATE), notes=["not run"])
+        return RoleResult("DRIFT", "worktree changed", violations=list(LATE), notes=["not run"],
+                          extras={"drift_fp": "fp1"})
 
     def test_attended_asks_accept_or_stop_never_a_dead_end(self):
         h = self._h(False)
@@ -173,7 +183,7 @@ class DriftQuestion(unittest.TestCase):
         ASK.answer(h.decisions, h.writer, 7, r.qid, "accept")
         res = h.p.run_role(B.RoleCall("tester", "verify", "test", "T1"))
         self.assertEqual(res.status, "DONE")
-        self.assertEqual(h.accepted, [1])
+        self.assertEqual(h.accepted, ["fp1"])
         applied = [b for b in DecisionLog.load(h.gh.comments(7)).blocks if b.get("point") == "applied"]
         self.assertEqual(len(applied), 1)
         h.p.__dict__.pop("_drift_read", None)
@@ -225,19 +235,21 @@ class StagnantRetry(unittest.TestCase):
         self.assertIn("`<A|M|D|C|P|P-withdrawn> <path> — <reason>`", t)
         self.assertIn("M test/a/goldens/x.png", t)
 
-    def test_a_developer_result_is_never_replayed_from_a_tape(self):
-        h = Harness(self, fixture(), roles=[role("DONE")])
-        call = B.RoleCall("developer", "implement", "test", "T1", inputs={"a.txt": "x"})
-        sig = CONS._sig(call)
-        orig_r, orig_a = CONS._replay, CONS.any_active
-        CONS._replay = lambda p, stage: {"roles": [{"sig": sig, "result": {"status": "BLOCKED", "line": "no"}}], "at": 0}
-        CONS.any_active = lambda p: True
-        try:
-            res = CONS.role(h.p, call, h._role)
-        finally:
-            CONS._replay, CONS.any_active = orig_r, orig_a
-        self.assertEqual(res.status, "DONE")                                    # the developer ran again
-        self.assertEqual(len(h.calls["roles"]), 1)
+    def test_no_replayed_stage_calls_the_developer(self):
+        # review-0102-5 m1 (0.102.6): `NEVER_REPLAYED` is gone — the developer is called only by stages that are never
+        # replayed from a tape (`conservative.REPLAY_STAGES`); a new call site in a replayed stage fails here
+        import re
+        root = os.path.dirname(os.path.abspath(X.__file__))
+        sites = []
+        for f in sorted(os.listdir(root)):
+            if not f.endswith(".py"):
+                continue
+            text = open(os.path.join(root, f), encoding="utf-8").read()
+            if re.search(r'RoleCall\(\s*"developer"', text):
+                sites.append(re.search(r'(?m)^STAGE = "([a-z]+)"', text).group(1))
+        self.assertEqual(sorted(set(sites)), ["execute"])
+        self.assertNotIn("execute", CONS.REPLAY_STAGES)
+        self.assertFalse(hasattr(CONS, "NEVER_REPLAYED"))
 
     def test_a_resumed_execute_calls_the_developer_again(self):
         tl = role("DONE")
@@ -281,10 +293,12 @@ class Flake(unittest.TestCase):
     def test_one_failing_test_green_alone_is_a_flake(self):
         ran = []
         note = FL.recheck(_r(RED1, False, _report([("perf is fast", "failure"), ("x", "success")])), ["flutter test"],
-                          lambda c: ran.append(c) or _r(ALONE_GREEN, True), root="/T")
-        self.assertTrue(note["green"])
+                          lambda c: ran.append(c) or _r(ALONE_GREEN, True),
+                          lambda: ran.append("ALL") or _r(FLUTTER_GREEN, True), root="/T")
+        self.assertTrue(note["green"] and note["full_rerun"])                 # 0.102.6 B1: always the whole suite
         self.assertEqual(note["tests"], ["perf is fast"])
-        self.assertEqual(len(ran), 1)
+        self.assertEqual(len(ran), 2)
+        self.assertEqual(ran[1], "ALL")
         self.assertIn("test/a_test.dart", ran[0])
         self.assertIn("--name", ran[0])
 
@@ -330,7 +344,7 @@ class Flake(unittest.TestCase):
 
     def test_the_test_stage_goes_on_green_with_a_flake_note(self):
         red = suite(RED1, passed=False, rc=1)
-        red.flake = {"tests": ["perf is fast"], "reruns": [{"cmd": "x", "passed": True}], "full_rerun": False,
+        red.flake = {"tests": ["perf is fast"], "reruns": [{"cmd": "x", "passed": True}], "full_rerun": True,
                      "green": True}
         h = Harness(self, fixture(), roles=[role("DONE", covers=[{"ac": "C1", "test": "test/a_test.dart::a"},
                                                                  {"ac": "C2", "test": "test/a_test.dart::b"}])],
@@ -450,7 +464,9 @@ class EffectiveRealTests(unittest.TestCase):
         git(r, "commit", "-qam", "impl")
         return r
 
-    def test_an_acs_tests_react_together(self):
+    def test_an_acs_cited_tests_must_each_react(self):
+        # 0.102.6 (review-0102-5 M4 a): `en` still passes with the impl reverted — the AC is `unsure` naming it (and
+        # that `ko` reacted); 0.102.5 called it `pass`. An unsure check never changes the verdict: graded after
         r = self._repo()
 
         def reverted(cwd):
@@ -463,7 +479,9 @@ class EffectiveRealTests(unittest.TestCase):
         cfg = {"commands": {"test": "flutter test"}}
         covers = {"AC #1": [{"kind": "new", "test": "test/a_test.dart::g en"}, {"kind": "new", "test": "test/a_test.dart::g ko"}]}
         out, _meta = EFF.run(p, cfg, ["AC #1"], covers, "main", ["lib/a.dart"])
-        self.assertEqual(out["AC #1"].result, "pass")                          # `en` passes by design; `ko` reacts
+        self.assertEqual(out["AC #1"].result, "unsure", out["AC #1"].why)
+        self.assertEqual(out["AC #1"].test, "test/a_test.dart::g en")
+        self.assertIn("reacted: test/a_test.dart::g ko", out["AC #1"].why)
 
     def test_a_test_that_fails_alone_runs_in_its_file(self):
         r = self._repo()
@@ -499,13 +517,14 @@ class RemoteDeletion(unittest.TestCase):
         b = SC.snapshot(wt)
         a = SC.snapshot(wt)
         b["remote_url"] = a["remote_url"] = "u"
+        # 0.102.6 (M3): the deleted branch is still a pull request's head on the remote (`refs/pull/1962/head`)
         b["remote"] = {"refs/heads/feature/#1956-x": "f" * 40, "refs/pull/1962/merge": "e" * 40,
-                       "refs/heads/fix/1": h}
-        a["remote"] = {"refs/heads/fix/1": h}
+                       "refs/pull/1962/head": "f" * 40, "refs/heads/fix/1": h}
+        a["remote"] = {"refs/heads/fix/1": h, "refs/pull/1962/head": "f" * 40}
         v = SC.check(wt, b, a, ["tester"], branch="fix/1")
         self.assertEqual([x for x in v if "remote" in x], [])
         self.assertEqual(len(SC.remote_warnings(b, a)), 2)
-        a["remote"] = {}
+        a["remote"] = {"refs/pull/1962/head": "f" * 40}
         self.assertIn("remote refs/heads/fix/1 deleted during the role", SC.check(wt, b, a, ["tester"], branch="fix/1"))
 
     def test_a_remote_move_to_a_commit_a_remote_already_had_is_not_a_push(self):
@@ -559,11 +578,12 @@ class UnverifiedPostHoc(unittest.TestCase):
 
     def test_an_irreversible_or_security_decision_still_asks(self):
         class S(object):
-            point, brief_parts = "STAKES", [("irreversible", "supabase/migrations")]
+            group = point = "STAKES"
+            brief_parts = [("irreversible", "supabase/migrations")]
         p = type("P", (), {})()
         p.valves, p.unverified = {}, frozenset(["STAKES"])
         self.assertFalse(CONS.posthoc(p, "STAKES", S(), irreversible=True))
-        S.brief_parts = [("security", "token stored in plain text")]
+        S.brief_parts = [("question", "security: token stored in plain text")]     # 0.102.6 B2: the real part
         self.assertFalse(CONS.posthoc(p, "STAKES", S()))
         S.brief_parts = []
         self.assertTrue(CONS.posthoc(p, "STAKES", S()))

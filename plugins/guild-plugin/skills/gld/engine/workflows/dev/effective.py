@@ -432,28 +432,41 @@ def flutter_assertion(raw):
                 GOLDEN_FAIL_RE.search(raw))
 
 
-def _name_rx(name):
-    short = (name or "").split(" › ")[-1]
-    return re.compile(r"^\d\d:\d\d \+\d+(?: ~\d+)?(?: -\d+)?: (?:.*[ :] ?)?%s( \[E\])?\s*$" % re.escape(short))
+PROGRESS_RE = re.compile(r"^\d\d:\d\d \+\d+(?: ~\d+)?(?: -\d+)?: (.*?)\s*$")
+
+
+def _line_test(content):
+    """(test name, failed) of one compact-reporter progress line's text: `[<file>.dart: ]<full name>[ [E]]`."""
+    failed = content.endswith(" [E]")
+    if failed:
+        content = content[:-4].rstrip()
+    m = re.match(r"^(\S+\.dart): (.*)$", content)
+    return (m.group(2) if m else content), failed
 
 
 def file_kind(raw, runner, name, passed):
     """0.102.5 (#1945 AC #2): the cited test's own outcome inside a run of its WHOLE FILE (flutter/dart compact
     reporter) — for a test that cannot run alone (it leans on state an earlier test of its file set up: a `late`
     local initialised by another test → `LateInitializationError` under `--name`). passed | assertion | runtime |
-    load_error | none_ran. The failure block is the test's own: from its start line to its `[E]` line."""
+    load_error | none_ran | unknown. 0.102.6 (review-0102-5 M4 b): a line is the cited test's only when its name is
+    EXACTLY the cited full name (groups joined by a space, a `<file>.dart: ` prefix allowed) — never a test whose name
+    merely ends the same way. m2: the failure block runs from the test's start line through its `[E]` line AND on to
+    the next progress line (package:test prints a plain `test()`'s `Expected:` / `Actual:` after the `[E]` line)."""
     raw = raw or ""
     for rx in CH.LOAD_ERROR_RES.get(runner, ()):
         if re.search(rx, raw, re.M):
             return "load_error"
-    rx = _name_rx(name)
+    full = " ".join((name or "").replace(" › ", " ").split())
     lines = raw.split("\n")
     start, fail = None, None
     for i, ln in enumerate(lines):
-        m = rx.match(ln)
+        m = PROGRESS_RE.match(ln)
         if not m:
             continue
-        if m.group(1):
+        t, failed = _line_test(m.group(1))
+        if " ".join(t.split()) != full:
+            continue
+        if failed:
             fail = i
             break
         start = i
@@ -462,7 +475,10 @@ def file_kind(raw, runner, name, passed):
             return "none_ran"
         # a run that ended red with no `[E]` line at all crashed — the cited test's own outcome is unknown
         return "passed" if (passed or re.search(r"(?m) \[E\]\s*$", raw)) else "unknown"
-    block = "\n".join(lines[(start if start is not None else 0):fail + 1])
+    end = fail + 1
+    while end < len(lines) and not PROGRESS_RE.match(lines[end]):
+        end += 1
+    block = "\n".join(lines[(start if start is not None else 0):end])
     return "assertion" if flutter_assertion(block) else "runtime"
 
 
@@ -1243,36 +1259,46 @@ def _phases(p, runner, pending, tt, base, impl, out, timeout_s):
 
 
 def _rerun(p, runner, tt, rows, timeout_s):
-    """0.102.5 (#1945 AC #1/#3): the AC's cited tests react TOGETHER — the reverted impl is detected when ANY of them
-    fails with an assertion (a cited test whose expectation the base already met — the English text that was English
-    before, a key-set guard — passes by design and no longer hides the ones that react). No reaction: a compile /
-    collection error first (the partial revert retries it), else the first row's class."""
+    """The AC's cited (new) tests re-run with the impl reverted. 0.102.6 (review-0102-5 M4 a): the AC's OWN cited tests
+    must react — every one of them fails with an assertion; one that still passes (or fails some other way) makes the
+    AC `unsure` with that test named (a reaction of another cited test no longer hides it: it may be another AC's
+    test). An unsure check does not change the verdict (0.102.5) — it is recorded (`check_unsure`) and graded after.
+    Returns (kind, cv, line, cmd, reacted): `assertion` only when all reacted; else a compile / collection error first
+    (the partial revert retries it), else the first row that did not react, with the names of those that did."""
     files = getattr(tt, "file_cmds", None) or set()
-    first = None
-    load = None
+    load, other, reacted = None, None, []
     for cv, path, name, line, cmd in rows:
         r = p.check(cmd, tt.path, "tester", timeout_s, [tt.path])
         kind = _classify(p, runner, r, path, name, cmd, files)
         if kind == "assertion":
-            return kind, cv, line, cmd
+            reacted.append(cv.get("test") or name)
+            continue
         if kind == "load_error" and load is None:
             load = (kind, cv, line, cmd)
-        if first is None:
-            first = (kind, cv, line, cmd)
-    return load or first
+        if other is None:
+            other = (kind, cv, line, cmd)
+    if load is not None:
+        return load + (reacted,)
+    if other is not None:
+        return other + (reacted,)
+    cv, _path, _name, line, cmd = rows[0]
+    return ("assertion", cv, line, cmd, reacted)
 
 
 def _outcome(ac, rows, res, second=False):
-    kind, cv, line, cmd = res
+    kind, cv, line, cmd = res[:4]
+    reacted = list(res[4]) if len(res) > 4 else []
     t = cv.get("test")
     if kind == "assertion":
-        return CheckOutcome(ac, t, "pass", "assertion present; reacts to the reverted impl", kind, line, cmd)
+        return CheckOutcome(ac, t, "pass", "assertion present; every cited test reacts to the reverted impl", kind,
+                            line, cmd)
+    also = "; reacted: %s" % ", ".join(reacted[:3]) if reacted else ""
     if kind in ("passed", "runtime", "none_ran"):
         why = {"passed": "test still passes with the impl reverted",
                "runtime": "re-run failed with a non-assertion error",
                "none_ran": "the test did not run after the revert"}[kind]
-        return CheckOutcome(ac, t, "unsure", why, kind, line, cmd)
+        return CheckOutcome(ac, t, "unsure", why + also, kind, line, cmd)
     why = {"load_error": "compile/collection error after the revert%s" % (" (added files kept, too)" if second else ""),
            "ambiguous": "filter did not run exactly one test", "unknown": "re-run output unreadable",
            "timeout": "re-run timed out"}[kind]
-    return CheckOutcome(ac, t, "unverified", why, kind, line, cmd)
+    return CheckOutcome(ac, t, "unverified", why + also, kind, line, cmd)

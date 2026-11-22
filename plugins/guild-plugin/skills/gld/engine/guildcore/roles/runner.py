@@ -311,6 +311,7 @@ class Runner(object):
         self.now = now
         self._sources = {}
         self._baseline = {}          # (worktree, issue) → after-snapshot of the last step
+        self._first_tips = {}        # 0.102.6 M1: (worktree, issue) → base tips read before the Issue's first role
         self._unbaselined = set()
         # real runs reap strays by cwd; injected spawns (tests) do not unless given one
         self.reap_strays = reap_strays if reap_strays is not None else (
@@ -342,6 +343,15 @@ class Runner(object):
         return self._baseline[k]
 
     def _set_baseline(self, worktree, issue, snap):
+        # 0.102.6 (review-0102-5 M1): the base tips recorded before the Issue's first role (`scope.recorded_base_tips`)
+        # ride on every later baseline unchanged — a base merge is checked against them and the remote's own tip,
+        # never against a local base ref a role could have moved
+        k = (os.path.abspath(worktree), issue)
+        prev = self._get_baseline(worktree, issue)
+        tips = prev.get("base_tips") if isinstance(prev, dict) else None
+        if prev is None:
+            tips = self._first_tips.pop(k, None)
+        snap = dict(snap, base_tips=list(tips or []))
         self._baseline[(os.path.abspath(worktree), issue)] = snap
         self._unbaselined.discard((os.path.abspath(worktree), issue))
         p = self._baseline_path(worktree, issue)
@@ -375,6 +385,38 @@ class Runner(object):
             return []
         return late
 
+    def drift_state(self, worktree, issue, branch=None, base_ref=None):
+        """0.102.6 (review-0102-5 M2): (late items, fingerprint) now — what a drift question shows (`drift_print`)."""
+        base = self._get_baseline(worktree, issue)
+        if base is None:
+            return [], None
+        now = SC.snapshot(worktree, watch_files=self._watch(worktree))
+        late = SC.drift(base, now, worktree)
+        if late and self.accept_base_merge(worktree, issue, base, now, branch, base_ref):
+            return [], None
+        return late, (SC.drift_print(base, now, late) if late else None)
+
+    def accept_drift(self, worktree, issue, shown_fp, branch=None, base_ref=None):
+        """0.102.6 M2: a person's `accept` to a drift question — the baseline moves to the worktree ONLY while it is
+        exactly what the question showed (`shown_fp`, the fingerprint recorded on the question). Returns None when
+        accepted (or nothing is late any more), else (late items now, their fingerprint) — changed since the question:
+        the caller asks again with them."""
+        base = self._get_baseline(worktree, issue)
+        if base is None:
+            return None
+        now = SC.snapshot(worktree, watch_files=self._watch(worktree))
+        late = SC.drift(base, now, worktree)
+        if not late:
+            return None
+        if shown_fp and SC.drift_print(base, now, late) == shown_fp:
+            self._set_baseline(worktree, issue, now)
+            if self.journal is not None and hasattr(self.journal, "append"):
+                self.journal.append("event", what="drift-accepted", why="person", items=len(late), fp=shown_fp)
+            return None
+        if self.accept_base_merge(worktree, issue, base, now, branch, base_ref):
+            return None
+        return late, SC.drift_print(base, now, late)
+
     def accept_base_merge(self, worktree, issue, baseline, now, branch, base_ref):
         """0.102.5 (#1945): a person merged the base into this Issue's own branch between steps (`git merge origin/main`
         in the worktree) — merges only, base content only (`scope.accept_base_merge`). Accepted without a question: the
@@ -396,12 +438,15 @@ class Runner(object):
         wt, issue = specs[0].worktree, specs[0].issue
         late = self.drift_check(wt, issue, specs[0].branch, specs[0].base)
         if late:
+            fp = self.drift_state(wt, issue, specs[0].branch, specs[0].base)[1]
             return [RoleResult("DRIFT", "worktree changed between steps — %s" % "; ".join(late)[:300],
                                violations=["late change after the previous step: %s" % x for x in late],
-                               notes=["not run"]) for _ in specs]
+                               extras={"drift_fp": fp} if fp else None, notes=["not run"]) for _ in specs]
         url = SC.remote_url(wt) if specs[0].remote_check else None
         before = SC.snapshot(wt, remote=url or ("unresolved:origin" if specs[0].remote_check else None),
                              watch_files=self._watch(wt))
+        if self._get_baseline(wt, issue) is None and specs[0].base:
+            self._first_tips.setdefault((os.path.abspath(wt), issue), SC.recorded_base_tips(wt, before, specs[0].base))
         results = []
         for sp in specs:
             sp.scope_check = False
@@ -528,6 +573,9 @@ class Runner(object):
             raise BaselineContract("a role ran without the scope check — call run_group or "
                                    "rebaseline before the next role")
         base = None if in_group else self._get_baseline(spec.worktree, spec.issue)
+        if base is None and before is not None and spec.base:
+            self._first_tips.setdefault((os.path.abspath(spec.worktree), spec.issue),
+                                        SC.recorded_base_tips(spec.worktree, before, spec.base))
         late = SC.drift(base, before, spec.worktree) if (base is not None and before is not None) else []
         accepted = None
         if late and self.accept_base_merge(spec.worktree, spec.issue, base, before, spec.branch, spec.base):
@@ -541,7 +589,8 @@ class Runner(object):
             v = (["late change after the previous step: %s" % x for x in late] +
                  ([] if gates_ok else ["gate scripts changed since export"]) + lh_local)
             self._last = RoleResult("DRIFT", "worktree changed between steps — %s" % "; ".join(v)[:300],
-                                    violations=v, run_dir=run_dir, notes=["not run"])
+                                    violations=v, run_dir=run_dir, notes=["not run"],
+                                    extras={"drift_fp": SC.drift_print(base, before, late)} if late else None)
             return None
         deadline = self.now() + spec.timeout_s          # ONE budget for every session (K1-M4)
         deny = rendered.settings["permissions"]["deny"]

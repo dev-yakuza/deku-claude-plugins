@@ -529,10 +529,11 @@ def role_outcome(p, stage, role, res):
         if res.violations and all(str(v).startswith(LATE) for v in res.violations):
             # 0.102.5: a late change in the worktree (a person's edit, a commit — base merges are accepted by the
             # runner itself) is never a dead end: the person accepts it (the worktree as it is becomes the baseline)
-            # or stops; attended a question, unattended a pause with the same options
-            q = ASK.Question(DRIFT_KIND, "%s — accept the worktree as it is and continue?" % line,
-                             [{"token": "accept", "label": "인정하고 계속"}, {"token": "stop", "label": "멈춤"}])
-            return ask(p, stage, q, q.text, {"cause_kind": "defect", "line": line, "token_cause": line})
+            # or stops; attended a question, unattended a pause with the same options.
+            # 0.102.6 (review-0102-5 M2): the question names how many changes there are and carries every one of
+            # them and their fingerprint (`drift_fp`) — `accept` applies only to exactly that worktree
+            return drift_question(p, stage, role, [str(v)[len(LATE):] for v in res.violations],
+                                  (res.extras or {}).get("drift_fp"))
         if overlay and res.violations:
             return pause(p, stage, "env", line, "env: other — %s" % line, env_key="other") if p.unattended else \
                 StageResult(StageResult.FAIL, line=line, fail_class="defect")
@@ -554,6 +555,23 @@ LATE = "late change after the previous step: "
 DRIFT_KIND = "drift"
 
 
+DRIFT_SHOWN = 5
+
+
+def drift_question(p, stage, role, items, fp):
+    """The drift question (accept / stop) over `items` (all of them on the block, the first `DRIFT_SHOWN` in the line
+    with the count of the rest) and their fingerprint."""
+    shown = ", ".join(items[:DRIFT_SHOWN])
+    more = len(items) - DRIFT_SHOWN
+    line = "%s not started — the worktree needs a person first: %d late change(s): %s%s" % (
+        role, len(items), shown, " (+%d more, all listed on this question)" % more if more > 0 else "")
+    q = ASK.Question(DRIFT_KIND, "%s — accept the worktree as it is and continue?" % line,
+                     [{"token": "accept", "label": "인정하고 계속"}, {"token": "stop", "label": "멈춤"}])
+    q.extra = {"drift_n": str(len(items)), "drift_fp": fp or "-",
+               "drift_items": one_line(" ;; ".join(items), 1500)}
+    return ask(p, stage, q, q.text, {"cause_kind": "defect", "line": line, "token_cause": line})
+
+
 def apply_drift_answer(p, stage):
     """0.102.5: a person's answer to this stage's drift question, applied once, right before the next role call:
     `accept` → the worktree as it is now becomes the drift baseline (`p.accept_drift`) and the role runs; `stop` → the
@@ -572,9 +590,19 @@ def apply_drift_answer(p, stage):
         return None
     from guildcore.roles.runner import RoleResult
     if res.get("choice") == "accept":
+        # 0.102.6 (review-0102-5 M2): only the drift the question showed — its fingerprint, re-checked now; a worktree
+        # that changed after the question (or a question without a fingerprint) is asked again with what is there now
         acc = getattr(p, "accept_drift", None)
-        if acc is not None:
-            acc()
+        fp = q.get("drift_fp") if q.get("drift_fp") not in (None, "", "-") else None
+        again = acc(fp) if acc is not None else None
+        if again:
+            items, fp2 = again
+            mark_applied(p, stage, res, extra={"superseded": "the worktree changed after the question — asked again"})
+            if getattr(p, "journal", None) is not None:
+                p.journal.append("event", what="drift-reasked", why="changed after the question (%s)" % res.id,
+                                 stage=stage)
+            return RoleResult("DRIFT", q.id, violations=[LATE + x for x in items],
+                              extras={"drift_fp": fp2} if fp2 else None, notes=["not run"])
         mark_applied(p, stage, res)
         if getattr(p, "journal", None) is not None:
             p.journal.append("event", what="drift-accepted", why="person (%s)" % res.id, stage=stage)

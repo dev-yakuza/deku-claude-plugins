@@ -627,9 +627,10 @@ def live(issue, worktree, base, branch, config, clock, gh, writer, decisions, ru
                  base=base, impl_files=impl_files)
     ports.warm = warm
 
-    def accept_drift():
-        """0.102.5: a person answered `accept` to the drift question — the worktree as it is now is the baseline."""
-        runner.rebaseline(worktree, issue)
+    def accept_drift(shown_fp):
+        """0.102.5: a person answered `accept` to the drift question — 0.102.6 (review-0102-5 M2): the worktree becomes
+        the baseline only while it is exactly what the question showed (`shown_fp`); else (late, fp) to ask again."""
+        return runner.accept_drift(worktree, issue, shown_fp, ports.branch, ports.base)
     ports.accept_drift = accept_drift
     return ports
 

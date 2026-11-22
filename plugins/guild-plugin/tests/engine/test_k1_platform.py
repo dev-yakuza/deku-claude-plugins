@@ -574,7 +574,14 @@ class Scope(unittest.TestCase):
         b = SC.snapshot(self.r, remote=url)
         git(self.r, "push", "-q", "origin", ":other")
         v = SC.check(self.r, b, SC.snapshot(self.r, remote=url), ["reviewer"])
-        # 0.102.5 (#1945): another branch deleted on the remote (a merged PR's auto-delete) is a warning, not a violation
+        # 0.102.6 (review-0102-5 M3): another branch deleted on the remote is a violation again (0.102.4) — unless it is
+        # still a pull request's head there (`refs/pull/<n>/head`: GitHub's auto-delete of a merged PR's branch, #1945)
+        self.assertTrue(any("remote refs/heads/other deleted" in x for x in v), v)
+        git(self.r, "push", "-q", "origin", "feat:other")
+        git(bare, "update-ref", "refs/pull/5/head", git(self.r, "rev-parse", "feat"))
+        b = SC.snapshot(self.r, remote=url)
+        git(self.r, "push", "-q", "origin", ":other")
+        v = SC.check(self.r, b, SC.snapshot(self.r, remote=url), ["reviewer"])
         self.assertFalse(any("remote refs/heads/other deleted" in x for x in v), v)
         self.assertIn("remote refs/heads/other moved during the role", SC.remote_warnings(b, SC.snapshot(self.r, remote=url)))
         git(self.r, "push", "-q", "origin", ":feat")

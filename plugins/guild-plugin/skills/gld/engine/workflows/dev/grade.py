@@ -94,11 +94,26 @@ def _engine_made(b):
     return by.startswith("judge:") or by.startswith("leader:")
 
 
+FLAKE_POINT = "flake"            # 0.102.6 M5: the code's flake note (`flake.record`) — a sheet row of its own
+FLAKE_GROUP = "flake"
+
+
+def flake_row(b):
+    """A flake note the code wrote (`point: flake`, `grade: trigger`): a red suite the engine took as green."""
+    return b.get("point") == FLAKE_POINT and b.get("by") == "code" and str(b.get("grade") or "") == "trigger"
+
+
 def triggered(b, later_events):
     """unsure, coerced (not by first-sprint / valve), or a later loop-back / needs-human / QA fail / review
     rejection on the Issue (K5r4-m5: from its history — `history_triggers`)."""
     if str(b.get("unsure")).lower() == "true":
         return "unsure"
+    if b.get("check_unsure"):
+        # 0.102.6 (review-0102-5 M5): the code check could not confirm these effective verdicts (0.102.5: the verdict
+        # stands, graded after) — the decision IS a sheet row
+        return "effectiveness check unsure (%s)" % b.get("check_unsure")
+    if str(b.get("grade") or "").lower() == "trigger":
+        return "grade trigger"
     if str(b.get("dual") or "") == "disagree":                   # K6 item 11: §9.5 — 이중 판단 불일치
         return "dual-judge disagreement (%s said %s)" % (b.get("dual_model") or "-", b.get("dual_choice") or "-")
     if str(b.get("coerced")).lower() == "true" and b.get("coerced_by") not in ("first-sprint", "valve", "conservative"):
@@ -162,6 +177,11 @@ def select(blocks_by_issue, repo, first_sprint, rate, later, grader=None, watch=
     for issue in sorted(blocks_by_issue):
         human_resolved = _human_decided(blocks_by_issue[issue])
         for b in blocks_by_issue[issue]:
+            if flake_row(b):
+                # 0.102.6 (review-0102-5 M5): every flake the code took as green is graded (ok = it was a flake,
+                # wrong = a real failure was masked → `group.flake.conservative`: no flake is taken any more)
+                out.append((issue, b, "triggered: flake — %s" % (b.get("reason") or b.get("refs") or "-")))
+                continue
             if not _engine_made(b) or b.id in human_resolved or b.get("shadow") == "true" or b.get("post_hoc"):
                 continue                                         # 0.102.5: a post-hoc decision is its own row
             g = group_of(b)
@@ -362,8 +382,9 @@ def posthoc_rows(blocks, issue):
                     "mode": POSTHOC_MODE, "choice": b.get("choice") or "", "coerced": b.get("coerced") or "false",
                     "coerced_by": b.get("coerced_by") or "", "unsure": b.get("unsure") or "false",
                     "irreversible": "true" if block_irreversible(b) else "", "outcome": "", "note": "",
-                    "reason": "post-hoc: %s — the engine ran the judge's %s without a person" % (
-                        b.get("post_hoc"), " ".join(str(b.get("choice") or "").split())[:160]),
+                    "reason": "post-hoc: %s — the engine ran the judge's %s without a person%s" % (
+                        b.get("post_hoc"), " ".join(str(b.get("choice") or "").split())[:160],
+                        "; effectiveness check unsure: %s" % b.get("check_unsure") if b.get("check_unsure") else ""),
                     "given_info": "",
                     "evidence": "post-hoc verdict — grade the engine's decision on the evidence (ok = it was right, "
                                 "wrong = it was not; a wrong puts %s back on the asking path)" % g})
@@ -634,6 +655,8 @@ def apply_judgments(common, rows, repo, version, irreversible=lambda row: False,
         if gi == "wrong":
             st["streak"][g] = 0
             ph = (row.get("mode") or "") == POSTHOC_MODE
+            if g == FLAKE_GROUP:
+                ph = True                          # 0.102.6 M5: a masked real failure — flakes are no longer taken
             if g in st["watch"] or g in IRREVERSIBLE or irreversible(row) or ph:
                 # 0.102.5: a confirmed wrong on a decision that ran unasked (post-hoc) puts the group back on the
                 # asking path at once (user decision 2026-11-22)

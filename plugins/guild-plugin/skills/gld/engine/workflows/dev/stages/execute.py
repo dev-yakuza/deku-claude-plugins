@@ -210,6 +210,8 @@ def attempts(p, e, cx):
     attempt = 1
     retry_note = None
     restore_invocation_state(p, cx)                                             # m4
+    if getattr(cx, "resume_note", None):
+        retry_note, cx.resume_note = cx.resume_note, None                       # 0.102.6 m4: the retry's hint
     while True:
         dev, local_pass = developer_step(p, cx, attempt, retry_note)            # X1
         if isinstance(dev, B.StageResult):
@@ -347,6 +349,10 @@ def restore_invocation_state(p, cx):
             cx.reinvoked = True
         if blk.get("stage") == STAGE and blk.get("point") == "stagnant-retry" and blk.get("refs") == cx.stage_start:
             cx.stagnant_retried = True                           # 0.102.5: once per invocation, crash-safe
+            # 0.102.6 m4: the retry's hint is rebuilt from its block — the next developer call of this invocation
+            # (the resumed retry) gets it again
+            cause = blk.get("cause") or blk.get("reason") or ""
+            cx.resume_note = stagnant_hint(cause, [x for x in (blk.get("details") or "").split(" ;; ") if x])
 
 
 # ---- X0 helpers -----------------------------------------------------------------------------------
@@ -612,9 +618,10 @@ def evidence_step(p, cx, dev, attempt):
     else:
         green = bool(r.passed and summ.green)
         flake = getattr(r, "flake", None)
-        if not green and flake and flake.get("green"):
-            # 0.102.5: ≤ 2 failing tests passed when re-run alone in the same tree — green, with a flake note
-            from workflows.dev import flake as FL
+        from workflows.dev import flake as FL
+        if not green and flake and flake.get("green") and not FL.off(p):
+            # 0.102.5: ≤ 2 failing tests passed when re-run alone in the same tree and (0.102.6) the whole suite
+            # re-ran green — green, with a flake note (a grading-sheet row)
             FL.record(p, STAGE, flake)
             green, cx.flake_line = True, FL.line(flake)
         if not green:
@@ -1075,8 +1082,13 @@ def arbitrate_step(p, cx, attempt, scan, scan_ran, head, untracked, role_trigger
         # 0.102.5 (#1945): before a person, the developer gets ONE more attempt (per invocation, durable in the log)
         # with the exact blocker and how to clear it — #1945 asked a person twice over a bare-path `baselines` line
         cx.stagnant_retried = True
+        # 0.102.6 (review-0102-5 m4): the block carries what the hint is made of (the cause and this attempt's
+        # reasons) — a crash during the retried developer call resumes with the same hint (`restore_invocation_state`)
         B.record_code(p, STAGE, "stagnant-retry", "developer", refs=cx.stage_start,
-                      reason=B.one_line(arb.stagnant_reason, 300))
+                      reason=B.one_line(arb.stagnant_reason, 300),
+                      extra={"cause": B.one_line(arb.stagnant_reason, 600),
+                             "details": B.one_line(" ;; ".join(B.one_line(x, 400) for x in arb.reasons or () if x),
+                                                   1500) or None})
         cx.reinvoke_addendum = stagnant_hint(arb.stagnant_reason, arb.reasons)
         return "reinvoke"
     if arb.kind == "stagnant":

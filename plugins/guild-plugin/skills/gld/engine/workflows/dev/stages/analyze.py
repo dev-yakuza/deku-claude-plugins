@@ -549,6 +549,10 @@ def run(p, only=None, config_present=True):
               "areas": AN.order_areas(k.areas, p.engine_cfg("irreversible_globs")),
               "explorer": explorer_state, "code_coercions": len(k.coerced) or None}
     kreason = "; ".join(k.coerced)[:300] or None
+    if irr:
+        # 0.102.6 (review-0102-5 m3): the KICKOFF of an irreversible area says so on its block — the first-sprint
+        # centre (`centre.first_sprint_view`) then pauses it as the engine does (a confirmation, never post-hoc)
+        kextra["irreversible"] = "true"
     from workflows.dev import conservative as CONS
     if a6 is None and CONS.posthoc(p, "KICKOFF", irreversible=bool(irr)):
         # 0.102.5: the unverified KICKOFF ran without a person's confirmation — its decision is a grading-sheet row

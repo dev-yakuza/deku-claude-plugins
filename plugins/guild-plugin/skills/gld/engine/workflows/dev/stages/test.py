@@ -211,9 +211,12 @@ def run(p, only=None, config_present=True):
         raw_green = bool(r.passed and not r.timed_out and (summ is None or summ.green))
     s_line = r.red_line() or summary_line(r.raw, summ)
     flake = getattr(r, "flake", None)
+    from workflows.dev import flake as FL
+    if flake and FL.off(p):
+        flake = None                                   # 0.102.6: a confirmed wrong flake — red stays red
     if flake and flake.get("green") and not raw_green and not r.timed_out:
-        # 0.102.5: ≤ 2 failing tests passed when re-run alone in the same tree (`flake`) — green, with a note
-        from workflows.dev import flake as FL
+        # 0.102.5: ≤ 2 failing tests passed when re-run alone in the same tree and (0.102.6) the whole suite re-ran
+        # green (`flake`) — green, with a note (a grading-sheet row)
         FL.record(p, STAGE, flake)
         raw_green = True
         s_line = FL.line(flake)

@@ -146,10 +146,10 @@ def options_of(spec):
     return enum or None
 
 
-REPLAY_STAGES = ("analyze", "design", "test", "qa")   # execute/children: roles change the tree — their own re-entry
-# 0.102.5: the DEVELOPER is never replayed from a tape — its result is the work itself; a developer outcome that
-# caused a blocker (#1945: a stagnant loop-back) is re-called live on every resume (execute re-runs its attempts)
-NEVER_REPLAYED = ("developer",)
+# execute/children: roles change the tree — their own re-entry. The developer runs only in execute, so it is never
+# replayed from a tape (review-0102-5 m1: 0.102.5's `NEVER_REPLAYED` guard could never fire — removed; a test pins
+# that no replayed stage calls the developer)
+REPLAY_STAGES = ("analyze", "design", "test", "qa")
 _MEM = {}                                               # tapes when a port has no journal (tests, the procedure replay)
 
 
@@ -597,7 +597,7 @@ def role(p, call, raw):
     """`Ports.run_role` (K5r6-M1): the role calls a stage made before it asked are replayed — not run again — when the
     stage runs after the person's answer; every call is taped for a question this run may raise."""
     stage = getattr(call, "stage", None)
-    if stage not in REPLAY_STAGES or not any_active(p) or getattr(call, "role", None) in NEVER_REPLAYED:
+    if stage not in REPLAY_STAGES or not any_active(p):
         return raw(call)
     live = p.__dict__.setdefault("_cons_live", [])
     rp = _replay(p, stage)
@@ -797,16 +797,66 @@ def gate(p, spec, raw):
     raise Ask(q, line)
 
 
-SECURITY_PARTS = ("security", "security_findings", "secrets")
+SECURITY_ROLE = "security"
+# 0.102.6 (review-0102-5 B2): a decision is about security when its INPUTS carry a security concern — derived from the
+# brief parts the engine's own call sites build (never from a part name no call site uses):
+#   DE-ARB  `arbitration.blocked`  ("role", "<role> returned <status>"), ("line", <the role's blocker>)
+#   STAKES  `arbitration.blocked`  → `stakes`  ("question", "<role>: <line>"), ("about_to_take", <assumption>)
+#   QA      `stages.qa._judge`     ("qa", "QA report: …"), ("candidates", "Human-QA candidates from qa: …")
+#   EX-ARB  `stages.execute.ex_arb` ("findings", <auditor json>), ("roles", "<role> <status> — <why>" lines)
+# (a) the security ROLE is the source: its name opens the `role` / `question` / a `roles` line;
+# (b) the content names a security ISSUE (`SECURITY_ISSUE_WORDS`, whole identifier words; `plain text`, `API key`) —
+#     not a feature word (`login`, `session`, `token` — `execute.SECURITY_WORDS` casts the security role; an auth
+#     Issue's every decision would ask).
+SECURITY_INPUTS = {
+    "DE-ARB": {"role": ("role",), "text": ("line",)},
+    "STAKES": {"role": ("question",), "text": ("question", "about_to_take")},
+    "QA": {"role": (), "text": ("qa", "candidates")},
+    "EX-ARB": {"role": ("roles",), "text": ("findings", "roles")},
+}
+SECURITY_ISSUE_WORDS = frozenset((
+    "security", "insecure", "vulnerability", "vulnerabilities", "vulnerable", "exploit", "xss", "csrf", "ssrf",
+    "injection", "plaintext", "unauthorized", "unauthenticated", "privilege", "privileges", "cve", "leak", "leaks",
+    "leaked", "leaking", "keychain", "encryption", "encrypt", "decrypt"))
+
+
+def _security_words(text):
+    import re
+    t = text or ""
+    if re.search(r"(?i)\bplain[ -]?text\b|\bapi[ _-]?keys?\b", t):
+        return True
+    for word in re.findall(r"[A-Za-z][A-Za-z0-9]*", t):
+        for part in re.findall(r"[A-Z]?[a-z0-9]+|[A-Z]+(?![a-z])", word):
+            if part.lower() in SECURITY_ISSUE_WORDS:
+                return True
+    return False
+
+
+def _role_named(text):
+    """A brief line that opens with the security role's name (`security returned BLOCKED`, `security: …`,
+    `security BLOCKED — …`)."""
+    import re
+    return any(re.match(r"\s*%s\b(?![-\w])" % SECURITY_ROLE, ln) for ln in (text or "").split("\n"))
 
 
 def security(spec):
-    """A decision about a security concern (a security role's finding in the brief, or a `security` point) — never
-    post-hoc: a person decides it (0.102.5 user decision)."""
+    """A decision about a security concern — never post-hoc: a person decides it (0.102.5 user decision). 0.102.6:
+    read from the group's real brief parts (`SECURITY_INPUTS`): the security role as the source, or a security issue
+    named in the content. A group with no table entry has no security input."""
+    g = str(getattr(spec, "group", "") or "")
+    if "security" in str(getattr(spec, "point", "") or "").lower():
+        return True
+    if getattr(spec, "security", False):
+        return True                                     # a call site that knows its input is a security role's
+    want = SECURITY_INPUTS.get(g)
+    if not want:
+        return False
     for n, t in (getattr(spec, "brief_parts", None) or []):
-        if str(n).lower() in SECURITY_PARTS and str(t).strip() not in ("", "none"):
+        if n in want["role"] and _role_named(str(t)):
             return True
-    return "security" in str(getattr(spec, "point", "") or "").lower()
+        if n in want["text"] and _security_words(str(t)):
+            return True
+    return False
 
 
 def posthoc(p, group, spec=None, irreversible=False):
