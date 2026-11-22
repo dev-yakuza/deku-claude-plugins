@@ -45,6 +45,7 @@ def stakes(p, stage, refs, question, options, about_to_take, body, areas, irreve
         """K6 r4 (user decision 2026-11-20): STAKES is asked openly — its reason and `irreversible` are written as they
         are (the K5r6-m7 / K6 r3 M2 seals existed only for a blind KICKOFF question that followed)."""
         return B.record_judgment(p, stage, "STAKES", refs, d, choice=level, reason=reason, extra=extra or None)
+    record.decision = d        # 0.102.8 (review-0102-7 M1): the caller reads this judgment's own `security_concern`
     if defer:
         return level, record
     record()

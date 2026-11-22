@@ -471,25 +471,40 @@ def run(p, only=None, config_present=True):
             q.extra = dict(q.extra or {}, **AN.capture_fields(capture))
         return q
     recorders, high, cons = [], [], False
-    auto = None                    # 0.102.7 m5: (token, drops) — the narrowest nested reading taken without a person
+    auto = None                    # 0.102.7 m5: (token, drops, dropped AC, judge's chosen) — taken without a person
+    stakes_dec = {}                # 0.102.8 (review-0102-7 M1): dim → the STAKES decision (its own security_concern)
 
     def auto_narrow():
-        """0.102.7 (review-0102-6 m5): take the narrowest of nested readings (`analysis.narrowest`) — True if taken."""
+        """0.102.7 (review-0102-6 m5): take the narrowest of nested readings (`analysis.narrowest`) — True if taken.
+        0.102.8 (review-0102-7 M1/M4/M5, lead decision 3): the interpretation choice ONLY — refused when an open
+        dimension is `unclear` (those still ask), when an open dimension's question is not the choice between the
+        readings (`about_readings`), when any STAKES judgment of an open dimension names a security concern, or when
+        an AC the Issue itself states would be dropped (checked by code against the Issue body)."""
         nonlocal auto
         from workflows.dev import conservative as CONS_
         if human_decided or reask:
             return False
-        tok, own, drops = AN.narrowest(k, capture, p.root, bool(irr), CONS_.concern_of(d),
-                                       p.engine_cfg("irreversible_globs"))
+        why = None
+        if any(k.readiness[x] == "unclear" for x in open_dims):
+            why = "an unclear dimension (%s)" % ",".join(x for x in open_dims if k.readiness[x] == "unclear")
+        elif any(x not in k.about_readings for x in open_dims):
+            why = "an open dimension's question is not the reading choice (%s)" % ",".join(
+                x for x in open_dims if x not in k.about_readings)
+        elif any(CONS_.concern_of(dd) for dd in stakes_dec.values()):
+            why = "a STAKES judgment names a security concern"
+        tok, own, drops = (None, None, why) if why else AN.narrowest(
+            k, capture, p.root, bool(irr), CONS_.concern_of(d), p.engine_cfg("irreversible_globs"),
+            issue_acs=AN.issue_ac_lines(body))
         if tok is None:
             if getattr(p, "journal", None) is not None:
                 p.journal.append("event", what="auto-narrow-refused", why=drops)
             return False
-        AN.take_narrowest(k, capture, tok, own, p.root, widen=AN.real_dirs(p.root, ev_areas),
-                          globs=p.engine_cfg("irreversible_globs"))
-        auto = (tok, drops)
+        was = k.chosen
+        dropped = AN.take_narrowest(k, capture, tok, own, p.root, widen=AN.real_dirs(p.root, ev_areas),
+                                    globs=p.engine_cfg("irreversible_globs"))
+        auto = (tok, drops, dropped or [], was)
         if getattr(p, "journal", None) is not None:
-            p.journal.append("event", what="auto-narrow", token=tok, drops=drops)
+            p.journal.append("event", what="auto-narrow", token=tok, drops=drops, dropped_ac=dropped or [])
         return True
     if not a4 and not a5:
         if not p.unattended:
@@ -534,6 +549,7 @@ def run(p, only=None, config_present=True):
                                              [i["summary"] for i in k.interpretations], chosen_txt, judge_body,
                                              k.areas, irr, "A1.3", defer=True)
                     recorders.append(rec_)
+                    stakes_dec[dim] = rec_.decision
             high = [x for x in open_dims if stakes.get(x) == "high"]
             # K5r5-M3: KICKOFF conservative (§9.5 count rule / unverified) — its decision goes to a person: the
             # interpretation is confirmed (openly — K6 r4) even when every dimension is clear; K6 r4: or a `reask`
@@ -543,15 +559,21 @@ def run(p, only=None, config_present=True):
             cons_k = PF.conservative(p, "KICKOFF") and not CONS.posthoc(p, "KICKOFF", irreversible=bool(irr), decision=d)
             if high and not cons_k and all(x not in k.high for x in high) and auto_narrow():
                 # 0.102.7 m5: the open dimensions' STAKES `high` were about which nested reading — the narrowest is
-                # taken (graded after); the code-fixed `high` (premise, reinterpretation) still asks
+                # taken (graded after); the code-fixed `high` (premise, reinterpretation) still asks. 0.102.8: only
+                # when every open dimension is that reading choice (`about_readings`), none `unclear`, no STAKES
+                # security concern (`auto_narrow`) — the STAKES level stays on its own block (`high`)
                 for x in high:
-                    stakes[x] = "auto-narrow"
+                    stakes[x] = "high → auto-narrow"
                 high = []
             cons = not human_decided and not high and (cons_k or reask) and bool(k.interpretations)
             if high or cons:
                 dim = high[0] if high else None
                 if dim:
                     line = "%s %s — %s" % (AN.DIM_KEY[dim], k.readiness[dim], B.one_line(k.choice_needed.get(dim) or "-", 160))
+                    sec_dims = [x for x in open_dims if x in stakes_dec and CONS.concern_of(stakes_dec[x])]
+                    if sec_dims:
+                        # 0.102.8 (review-0102-7 M1): a STAKES judgment named a security concern — the question says so
+                        line += " (보안: %s)" % CONS.security_why(None, stakes_dec[sec_dims[0]], "STAKES")
                 elif cons_k:
                     line = "%s — 해석 확인" % PF.conservative_label(p, "KICKOFF")
                 else:
@@ -590,7 +612,12 @@ def run(p, only=None, config_present=True):
         # 0.102.7 m5: the engine took the narrowest nested reading — a post-hoc grading-sheet row, and the broader parts
         # it dropped are follow-up candidates (the analyze output, QA's follow-up list)
         kextra["auto_narrow"] = auto[0]
-        kextra["follow_ups"] = " ;; ".join(auto[1])
+        kextra["judge_chosen"] = auto[3]
+        # 0.102.8 (review-0102-7 m5): an item never splits on the separator
+        kextra["follow_ups"] = " ;; ".join(" ".join(x.replace(";;", ";").split()) for x in auto[1])
+        if auto[2]:
+            # 0.102.8 (review-0102-7 M4): the AC the narrow reading removed (the judge's chosen reading's) — on record
+            kextra["dropped_ac"] = " ;; ".join(" ".join(x.replace(";;", ";").split()) for x in auto[2])
         kextra["post_hoc"] = AN.NARROW_POST_HOC
     did = B.record_judgment(p, STAGE, "KICKOFF", "J-DEV-01,J-AN-05,J-AN-06,J-AN-10,J-AN-13", d,
                             choice=",".join("%s=%s" % (x, k.readiness[x]) for x in AN.DIMS),
@@ -651,9 +678,12 @@ def run(p, only=None, config_present=True):
             assumptions.append("%s %s (stakes %s): %s — %s 로 진행" % (AN.DIM_KEY[dim], k.readiness[dim], stakes[dim],
                                                                     k.choice_needed.get(dim) or "-", k.chosen))
     assumptions = AN.readiness_assumptions(k) + assumptions
+    narrowed = []
     if auto is not None:
-        assumptions.append("겹친 해석 중 가장 좁은 해석(%s)으로 진행 — 사후 채점" % auto[0])
+        assumptions.append("겹친 해석 중 가장 좁은 해석(%s)으로 진행 — 판단의 선택 %s, 사후 채점" % (auto[0], auto[3]))
         assumptions += ["후속 Issue 후보: %s" % x for x in auto[1]]
+        assumptions += ["후속 Issue 후보 (좁힌 해석이 뺀 AC): %s" % x for x in auto[2]]
+        narrowed = ["%s" % x for x in auto[1]] + ["(빠진 AC) %s" % x for x in auto[2]]
     if harness_note:
         assumptions.append(harness_note)
 
@@ -685,7 +715,7 @@ def run(p, only=None, config_present=True):
             k.readiness[x] == "clear" for x in AN.DIMS) else "")
     chosen_summary = next((i["summary"] for i in k.interpretations if i["id"] == k.chosen), "")
     trace += ["standards: %s" % (", ".join(n for n, _ in std) or "none"), "roster: %s" % (", ".join(ros) or "none")]
-    out = AN.render_output(p.issue, k, chosen_summary, note, trace, assumptions, po_line)
+    out = AN.render_output(p.issue, k, chosen_summary, note, trace, assumptions, po_line, followups=narrowed)
     p.writer.upsert_comment(p.issue, "analyze:output", out)
     for kind, (q, res) in answers.items():
         B.mark_applied(p, STAGE, res)

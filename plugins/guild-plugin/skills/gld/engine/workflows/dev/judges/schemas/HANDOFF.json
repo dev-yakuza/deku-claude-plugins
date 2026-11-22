@@ -1,7 +1,8 @@
 {
  "type": "object",
  "required": [
-  "verdict"
+  "verdict",
+  "security_concern"
  ],
  "properties": {
   "verdict": {
@@ -27,6 +28,12 @@
   },
   "fixable_by_execute": {
    "type": "boolean"
+  },
+  "security_concern": {
+   "type": "boolean"
+  },
+  "security_reason": {
+   "type": "string"
   }
  }
 }

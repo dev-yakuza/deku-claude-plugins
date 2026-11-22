@@ -79,7 +79,9 @@ def took(k, orig):
 
 
 def stakes(level="low", reason="local to one widget, a revert undoes it"):
-    return decision(level, {"level": level, "local_reversible_reason": reason, "cites": []}, by="judge:opus")
+    # 0.102.8: a schema-valid STAKES output carries `security_concern` (analyze reads it for auto-narrow)
+    return decision(level, {"level": level, "local_reversible_reason": reason, "cites": [], "security_concern": False},
+                    by="judge:opus")
 
 
 ANCHOR_OK = {"cite": "lib/app/home.dart:3", "quote": "int count() => 3;"}

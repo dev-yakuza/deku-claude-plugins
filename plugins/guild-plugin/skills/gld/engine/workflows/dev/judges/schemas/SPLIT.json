@@ -3,7 +3,8 @@
  "required": [
   "decision",
   "slices",
-  "reason"
+  "reason",
+  "security_concern"
  ],
  "properties": {
   "decision": {
@@ -49,6 +50,12 @@
    }
   },
   "reason": {
+   "type": "string"
+  },
+  "security_concern": {
+   "type": "boolean"
+  },
+  "security_reason": {
    "type": "string"
   }
  }

@@ -1,7 +1,8 @@
 {
  "type": "object",
  "required": [
-  "action"
+  "action",
+  "security_concern"
  ],
  "properties": {
   "action": {
@@ -38,6 +39,12 @@
    }
   },
   "reason": {
+   "type": "string"
+  },
+  "security_concern": {
+   "type": "boolean"
+  },
+  "security_reason": {
    "type": "string"
   }
  }

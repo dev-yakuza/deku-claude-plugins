@@ -379,6 +379,17 @@ def inherent_row(q, r, issue):
 POSTHOC_MODE = UV.POSTHOC_MODE
 
 
+def _narrow_note(b):
+    """0.102.8 (review-0102-7 M4): an auto-narrowed KICKOFF row names the reading taken, the judge's own pick, what was
+    left out and the AC the narrow reading removed — the grader sees the whole choice without the journal."""
+    if not b.get("auto_narrow"):
+        return ""
+    one = lambda x: " ".join(str(x or "").split())           # noqa: E731
+    return "; auto-narrow: took reading %s (judge chose %s); dropped: %s; dropped AC: %s" % (
+        one(b.get("auto_narrow")), one(b.get("judge_chosen")) or "-", one(b.get("follow_ups"))[:400] or "-",
+        one(b.get("dropped_ac"))[:600] or "none")
+
+
 def posthoc_rows(blocks, issue):
     """0.102.5: every decision an unverified group ran WITHOUT a person (`post_hoc` on its block) → one grading-sheet
     row (`mode: post-hoc`, `choice` = what ran), open — holding the group's §10.2-6 release — until the person imports
@@ -393,9 +404,10 @@ def posthoc_rows(blocks, issue):
                     "mode": POSTHOC_MODE, "choice": b.get("choice") or "", "coerced": b.get("coerced") or "false",
                     "coerced_by": b.get("coerced_by") or "", "unsure": b.get("unsure") or "false",
                     "irreversible": "true" if block_irreversible(b) else "", "outcome": "", "note": "",
-                    "reason": "post-hoc: %s — the engine ran the judge's %s without a person%s" % (
+                    "reason": "post-hoc: %s — the engine ran the judge's %s without a person%s%s" % (
                         b.get("post_hoc"), " ".join(str(b.get("choice") or "").split())[:160],
-                        "; effectiveness check unsure: %s" % b.get("check_unsure") if b.get("check_unsure") else ""),
+                        "; effectiveness check unsure: %s" % b.get("check_unsure") if b.get("check_unsure") else "",
+                        _narrow_note(b)),
                     "given_info": "",
                     "evidence": "post-hoc verdict — grade the engine's decision on the evidence (ok = it was right, "
                                 "wrong = it was not; a wrong puts %s back on the asking path)" % g})

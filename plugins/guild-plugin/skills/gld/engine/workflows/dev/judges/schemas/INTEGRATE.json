@@ -3,7 +3,8 @@
  "required": [
   "verdict",
   "coverage",
-  "gaps"
+  "gaps",
+  "security_concern"
  ],
  "properties": {
   "verdict": {
@@ -71,6 +72,12 @@
    "items": {
     "type": "integer"
    }
+  },
+  "security_concern": {
+   "type": "boolean"
+  },
+  "security_reason": {
+   "type": "string"
   }
  }
 }

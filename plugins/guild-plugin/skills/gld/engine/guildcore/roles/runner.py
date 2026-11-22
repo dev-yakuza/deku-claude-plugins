@@ -169,7 +169,7 @@ class RoleSpec(object):
 
 class RoleResult(object):
     def __init__(self, status, line=None, extras=None, artifacts=(), session_id=None, cost=0.0,
-                 denials=(), violations=(), rl=None, run_dir=None, notes=(), pres=None):
+                 denials=(), violations=(), rl=None, run_dir=None, notes=(), pres=None, result_source=None):
         self.status = status          # DONE | DONE_WITH_CONCERNS | BLOCKED | NEEDS_CONTEXT | FAIL
         self.line = line              # | INVALID | PERMISSION | TIMEOUT | HALTED | SCOPE
         self.extras = extras or {}
@@ -182,6 +182,9 @@ class RoleResult(object):
         self.run_dir = run_dir
         self.notes = list(notes)
         self.pres = pres
+        # 0.102.8: where the result JSON came from — "file" (out/result.json) or "fence" (the last message's
+        # ```guild-result``` block) — None without a result schema
+        self.result_source = result_source
 
 
 def repo_hash(worktree):
@@ -515,7 +518,7 @@ class Runner(object):
         for d in st.denial_records():
             cls = denial_class(d.get("command"), deny) if d.get("tool") == "Bash" else "tool:%s" % d.get("tool")
             rec = {"role": spec.who, "command": d.get("command") or d.get("tool"), "class": cls,
-                   "reason_type": d.get("reason_type")}
+                   "reason_type": d.get("reason_type"), "tool": d.get("tool"), "path": d.get("path")}
             out.append(rec)
             if self.journal is not None:
                 self.journal.record_denial(spec.who, rec["command"], cls, d.get("reason_type"))
@@ -600,7 +603,7 @@ class Runner(object):
         deadline = self.now() + spec.timeout_s          # ONE budget for every session (K1-M4)
         deny = rendered.settings["permissions"]["deny"]
         st_ = {"sid": str(uuid.uuid4()), "notes": list(hook_notes) + ([accepted] if accepted else []), "denials": [],
-               "cost": 0.0, "rls": [],
+               "cost": 0.0, "rls": [], "src": None,
                "timed_out": False, "halted": False}
 
         def session(stdin, tag, kind, resume=None, session_id=None):
@@ -633,6 +636,7 @@ class Runner(object):
                 status, line = hit
                 return None
             pres, obj, errs = self._judge_reply(spec, run_dir, st)
+            st_["src"] = self._src
             perm_blocked = pres.ok and pres.status == "BLOCKED" and (pres.text or "").startswith("permission")
             denials = st_["denials"]
             if perm_blocked or (denials and not (pres.ok and pres.status.startswith("DONE"))):
@@ -647,6 +651,7 @@ class Runner(object):
                     status, line = hit
                     return None
                 pres, obj, errs = self._judge_reply(spec, run_dir, st)
+                st_["src"] = self._src
                 if pres.ok and pres.status == "BLOCKED" and (pres.text or "").startswith("permission"):
                     status, line = "PERMISSION", pres.line
                     return None
@@ -668,6 +673,7 @@ class Runner(object):
                         status, line = hit
                         return None
                 pres, obj, errs = self._judge_reply(spec, run_dir, st)
+                st_["src"] = self._src
                 if not pres.ok or errs:
                     status, line = "INVALID", "%s returned no valid RESULT line" % spec.role
                     obj = {"errors": errs}
@@ -710,13 +716,15 @@ class Runner(object):
             self._last = RoleResult(status or "INVALID", line, obj, session_id=st_["sid"],
                                     cost=st_["cost"], denials=st_["denials"], violations=violations,
                                     rl=RL.verdict(st_["rls"]), run_dir=run_dir, notes=st_["notes"],
-                                    pres=pres)
+                                    pres=pres, result_source=st_["src"])
 
     def _judge_reply(self, spec, run_dir, st):
         pres = R.parse_pres(st.last_text, spec.allowed_status)
         obj, errs = None, []
+        self._src = None
         if spec.result_schema is not None and pres.ok:
-            obj, _src, err = R.read_result_json(run_dir, st.last_text)
+            obj, src, err = R.read_result_json(run_dir, st.last_text)
+            self._src = src
             errs = [err] if err else R.validate(obj, spec.result_schema, pres.status)
             if not errs and pres.status.startswith("DONE"):
                 miss = R.missing_artifacts(obj, spec.worktree, run_dir)

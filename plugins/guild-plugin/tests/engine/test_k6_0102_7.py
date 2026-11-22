@@ -92,7 +92,8 @@ class M1StructuredField(_Briefs):
                 for want in ("`security_concern`", "vulnerability", "auth / security FEATURE", "memory leak",
                              "whatever\nlanguage", "Doubt → `true`"):
                     self.assertIn(want, text.replace("language they", "language they"), (g, want))
-        self.assertEqual(set(CONS.SECURITY_FIELD_GROUPS), {"QA", "DE-ARB", "STAKES", "EX-ARB", "KICKOFF"})
+        # 0.102.8 (lead decision 1): every gated group and KICKOFF / EX-ARB
+        self.assertEqual(set(CONS.SECURITY_FIELD_GROUPS), set(CONS.GATED) | {"EX-ARB", "KICKOFF"})
 
     def test_the_field_decides_in_any_language(self):
         # the briefs carry no English issue word: only the judge's field can say it is security
@@ -287,7 +288,7 @@ class M3PrTitle(unittest.TestCase):
     def test_the_prefix_forms(self):
         for t, want in (("fix: a", "fix: a"), ("refactor!: a", "refactor!: a"), ("chore(deps): a", "chore(deps): a"),
                         ("Note: a", "feat: Note: a"), ("a: b c", "feat: a: b c"), ("Fix: a", "Fix: a"), ("v2.0: x", "feat: v2.0: x"),
-                        ("fix:a", "feat: fix:a")):
+                        ("fix:a", "fix:a")):                       # 0.102.8 m4: no space is a prefix too
             self.assertEqual(X.pr_title("implement", t), want, t)
 
 
@@ -334,6 +335,7 @@ def _nested(narrow=None, chosen="B", concern=False, broad_areas=("lib/app", "lib
         nar]
     k.fields["chosen"] = chosen
     k.fields[CONS.SECURITY_FIELD] = concern
+    k.fields["readiness"]["constraint"]["about_readings"] = True       # 0.102.8: the open question IS the reading
     return k
 
 
@@ -358,13 +360,16 @@ class M5Narrowest(unittest.TestCase):
         self.assertEqual(kb.get("areas"), "lib/app")
         out = h.body_with("analyze:output")
         self.assertIn("the entry point shows the type", out)
-        self.assertNotIn("the fix keeps the summary right", out)              # the chosen reading's AC are not its
+        acs = out.split("### 수용 기준")[1].split("###")[0]
+        self.assertNotIn("the fix keeps the summary right", acs)              # the chosen reading's AC are not its
+        self.assertIn("(빠진 AC) the fix keeps the summary right", out)       # 0.102.8 M4: but on record
         self.assertIn("후속 Issue 후보: exampleReading 불일치 수정", out)
         # the post-hoc row on the grading sheet
         self.assertTrue([b for b in _blocks(h) if b.get("post_hoc") == AN.NARROW_POST_HOC])
         # and QA lists the dropped parts as follow-up candidates
         fu = Q.narrowed_followups(h.gh.comments(7))
-        self.assertEqual([x["title"] for x in fu], ["exampleReading 불일치 수정", "공용 위젯 추출"])
+        self.assertEqual([x["title"] for x in fu], ["exampleReading 불일치 수정", "공용 위젯 추출",
+                                                    "AC: the fix keeps the summary right"])
 
     def test_any_condition_missing_asks_as_before(self):
         rows = [
@@ -469,8 +474,11 @@ class AuditorOut(unittest.TestCase):
     def test_a_concerned_auditor_with_valid_findings_is_an_audit_not_a_pause(self):
         # #1797 runs 018/020: the write was refused, the findings came in the guild-result block with
         # DONE_WITH_CONCERNS — 0 BLOCKER/MAJOR: the attempt advances
+        # 0.102.8 (M3): the runner saw the Write of out/result.json refused and read the findings from the fence
         dwc = RoleResult("DONE_WITH_CONCERNS", "out/result.json 쓰기 권한이 거부되어 guild-result 블록으로 제출",
-                         {"findings": [finding("MINOR")]})
+                         {"findings": [finding("MINOR")]}, result_source="fence",
+                         denials=[{"role": "auditor", "command": "Write", "class": "tool:Write", "tool": "Write",
+                                   "path": "/runs/020-execute-auditor-scan/out/result.json"}])
         h = XHarness(self, roles=[dev(), K3.TL_DONE, dwc], suites=[K3.GREEN])
         r = X.run(h.p, "implement")
         self.assertEqual(r.kind, "ADVANCE", r.token())

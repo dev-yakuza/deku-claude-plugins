@@ -18,7 +18,8 @@ citations, candidate areas). You decide; the explorer only gathered.
   `ac` (its own acceptance criteria, as strings) and `drops` (each broader part it leaves out, one short line each).
   When exactly one reading is nested in all the others, keeps the Issue's AC and touches nothing irreversible, the
   engine takes it without asking and records `drops` as follow-up candidates — so never claim nesting you are not
-  sure of.
+  sure of. It does so only when every open dimension is `partial` with `about_readings: true`, and it checks the
+  Issue's own AC lines against the reading's `ac` itself: copy each AC the Issue states into the reading's `ac`.
 - `human_answers` (when present): a person already chose a reading. List THAT reading among `interpretations` with
   the id `person-reading` (exactly this id, for that reading only) and the summary the line gives, set `chosen` to
   `person-reading`, and write `areas`, `ui_surface`, `cast`, `work_type` and the AC for it — not for the reading you
@@ -29,7 +30,9 @@ citations, candidate areas). You decide; the explorer only gathered.
   `{cite: "path:line", quote}` (a repo file line the engine re-reads; quote must be on those lines ±3)
   or `{source: "issue"|"charter"|"plan", quote}` (an exact substring). Nothing breaks the tie →
   `unclear`. Doubt → `unclear`. For every non-clear dimension write `choice_needed` (the question a
-  person would answer).
+  person would answer). Set `about_readings: true` on a non-clear dimension only when its `choice_needed` IS
+  the choice between your `interpretations` (which reading to build) — any other open question (an order, a
+  wording, a value) is `false`; the engine takes the narrowest nested reading unasked only for such dimensions.
 - `plan_decisions`: for each decision line, the dimension it settles and `fit` — `requires_reinterpretation`
   when applying it needs its words read in another sense (measured failure #555). A line settles ITS
   question, not every gap in the dimension.

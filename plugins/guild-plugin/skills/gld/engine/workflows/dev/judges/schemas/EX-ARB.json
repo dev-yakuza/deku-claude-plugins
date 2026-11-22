@@ -60,6 +60,9 @@
       "items": {
        "type": "string"
       }
+     },
+     "security": {
+      "type": "boolean"
      }
     }
    }

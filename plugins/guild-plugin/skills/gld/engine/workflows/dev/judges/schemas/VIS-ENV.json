@@ -1,7 +1,8 @@
 {
  "type": "object",
  "required": [
-  "verdict"
+  "verdict",
+  "security_concern"
  ],
  "properties": {
   "verdict": {
@@ -13,6 +14,12 @@
    ]
   },
   "why": {
+   "type": "string"
+  },
+  "security_concern": {
+   "type": "boolean"
+  },
+  "security_reason": {
    "type": "string"
   }
  }

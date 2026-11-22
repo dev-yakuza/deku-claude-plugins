@@ -146,12 +146,13 @@ def judge_test(acs, verdict="effective", overall=None, covered_by=None):
     return decision(overall or ("all_effective" if verdict == "effective" else "gap"),
                     {"ac": [{"id": a, "covered_by": covered_by or ["test/a_test.dart::t"], "verdict": verdict,
                              "why": "w"} for a in acs], "visual_rows": [],
-                     "overall": overall or ("all_effective" if verdict == "effective" else "gap")})
+                     "overall": overall or ("all_effective" if verdict == "effective" else "gap"),
+                     "security_concern": False})                # 0.102.8: TEST carries the field (schema-valid)
 
 
 def judge_qa(verdict="pass", defects=(), checklist=(), bar="yes"):
     return decision(verdict, {"defects": list(defects), "checklist": list(checklist), "quality_bar_met": bar,
-                              "verdict": verdict})
+                              "verdict": verdict, "security_concern": False})
 
 
 def dump(o):

@@ -2,7 +2,8 @@
  "type": "object",
  "required": [
   "ac",
-  "overall"
+  "overall",
+  "security_concern"
  ],
  "properties": {
   "ac": {
@@ -76,6 +77,12 @@
    "items": {
     "type": "string"
    }
+  },
+  "security_concern": {
+   "type": "boolean"
+  },
+  "security_reason": {
+   "type": "string"
   }
  }
 }

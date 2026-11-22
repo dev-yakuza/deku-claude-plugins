@@ -3,7 +3,8 @@
  "required": [
   "verdict",
   "applies",
-  "out_of_scope"
+  "out_of_scope",
+  "security_concern"
  ],
  "properties": {
   "applies": {
@@ -50,6 +51,12 @@
     "out_of_scope",
     "unsure"
    ]
+  },
+  "security_concern": {
+   "type": "boolean"
+  },
+  "security_reason": {
+   "type": "string"
   }
  }
 }

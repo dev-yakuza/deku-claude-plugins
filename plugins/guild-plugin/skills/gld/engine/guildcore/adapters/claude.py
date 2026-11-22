@@ -402,6 +402,7 @@ class Stream(object):
             tu = by_id.get(d.get("tool_use_id")) or {}
             out.append({"tool_use_id": d.get("tool_use_id"), "tool": d.get("tool_name"),
                         "command": (tu.get("input") or {}).get("command"),
+                        "path": (tu.get("input") or {}).get("file_path"),
                         "reason_type": d.get("decision_reason_type"), "message": d.get("message")})
             seen.add(d.get("tool_use_id"))
         for d in (self.result or {}).get("permission_denials") or []:
@@ -409,6 +410,7 @@ class Stream(object):
                 continue
             out.append({"tool_use_id": d.get("tool_use_id"), "tool": d.get("tool_name"),
                         "command": (d.get("tool_input") or {}).get("command"),
+                        "path": (d.get("tool_input") or {}).get("file_path"),
                         "reason_type": None, "message": None})
         return out
 

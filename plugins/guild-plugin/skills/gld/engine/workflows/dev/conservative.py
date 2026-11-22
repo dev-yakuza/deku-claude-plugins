@@ -777,9 +777,7 @@ def gate(p, spec, raw):
     line = "%s — %s %s 결정을 사람이 정함" % (source_label(p, g), g, spec.step or spec.point or "")
     if security(spec, d):
         # 0.102.7 (review-0102-6 M1): why an unverified group's decision is asked — the security reading named
-        why = (d.fields or {}).get(SECURITY_REASON) if isinstance(getattr(d, "fields", None), dict) else None
-        line += " (보안: %s)" % (" ".join(str(why).split())[:160] if why else "판단의 security_concern 이 false 가 아님"
-                                if concern_of(d) and g in SECURITY_FIELD_GROUPS else "입력에 보안 사안")
+        line += " (보안: %s)" % security_why(spec, d, g)
     q = ASK.Question(KIND, line, [{"token": o, "label": o} for o in opts] + [{"token": "stop", "label": "stop"}],
                      recommended=d.choice, recommended_by=d.by, refs=key, group=g, stakes="high",
                      # K5r11-M1: the neutral wording never carries the group name (`SPLIT` IS the option `split`) —
@@ -825,31 +823,52 @@ SECURITY_INPUTS = {
 }
 SECURITY_FIELD = "security_concern"
 SECURITY_REASON = "security_reason"
-SECURITY_FIELD_GROUPS = ("QA", "DE-ARB", "STAKES", "EX-ARB", "KICKOFF")
-# whole-phrase issue patterns (case-insensitive; `\b` only where the script has word boundaries)
+# 0.102.8 (review-0102-7 m1, lead decision 1): EVERY group whose decision can run post hoc carries the field — every
+# gated group (`GATED`: STAKES · SPLIT · INTEGRATE · TEST · QA · DE-ARB · AN-PO · VIS-ENV · DIRECTIVE · HANDOFF · EX-DWC)
+# and the two not gated here that still proceed on the judge (KICKOFF, EX-ARB); missing / not a boolean → ask
+SECURITY_FIELD_GROUPS = tuple(GATED) + ("KICKOFF", "EX-ARB")
+# whole-phrase issue patterns (case-insensitive; `\b` only where the script has word boundaries).
+# 0.102.8 (review-0102-7 m2): `plain text` / `unencrypted` / `평문` / `平文` are exposure words now (they need a secret
+# noun in the same sentence — "render as plain text instead of HTML" is no issue); `취약` / `脆弱` alone are not
+# (a flaky test, a weak network) — `취약점` / `脆弱性`; injection / authorization-gap phrases in ko / ja, path
+# traversal, IDOR, open redirect and remote code execution are issues
 _SEC_ISSUE = (
-    r"\binsecure(ly)?\b", r"\bvulnerab(le|ility|ilities)\b", r"\bexploit(s|ed|able|ing)?\b", r"\b(xss|csrf|ssrf)\b",
-    r"\bcve-\d", r"\bplain[ -]?text\b", r"\bunencrypted\b", r"\bnot encrypted\b",
-    r"\b(sql|command|code|script|html|shell|ldap|header|template) injection\b", r"\bprivilege escalation\b",
+    r"\binsecure(ly)?\b", r"\bvulnerab(ility|ilities)\b", r"\bvulnerable to\b", r"\bexploit(s|ed|able|ing)?\b",
+    r"\b(xss|csrf|ssrf|idor|rce)\b", r"\bcve-\d", r"\binsecure direct object", r"\b(path|directory) traversal\b",
+    r"\bopen redirects?\b", r"\b(remote|arbitrary) code execution\b",
+    r"\b(sql|command|code|script|html|shell|ldap|header|template|os command) injection\b", r"\bprivilege escalation\b",
     r"\b(auth|authentication|authorization|login|permission|access[- ]control) bypass\b",
     r"\bbypass(es|ed|ing)? (the |a |an )?(auth|authentication|authorization|login|permission|access)",
     r"\bsecurity (issue|problem|hole|flaw|risk|bug|vulnerability|concern|defect|incident)s?\b", r"\(security\)",
     r"\bexposed without\b", r"\bwithout (any )?(auth|authentication|authorization|permission) check",
-    r"\bdata (leak|breach)", r"\bpersonal data (is |are )?(leaked|exposed|logged)",
+    r"\bmissing (an? )?(auth|authorization|permission|access) check", r"\bdata (leak|breach)",
+    r"\bpersonal data (is |are )?(leaked|exposed|logged)",
     # ko
-    "취약", "평문", r"보안\s*(문제|취약|위험|결함|이슈|구멍|사고|우려|상의? 문제)", r"\(보안\)",
-    "권한 ?우회", "인증 ?우회", "암호화되지 않", "암호화 없이", "개인 ?정보 ?(유출|노출)",
+    "취약점", "취약성", r"보안\s*(문제|취약|위험|결함|이슈|구멍|사고|우려|상의? 문제)", r"\(보안\)",
+    "권한 ?우회", "인증 ?우회", "권한 ?상승", "개인 ?정보 ?(유출|노출)",
+    r"(sql|커맨드|명령어?|os ?명령어?|스크립트|html|코드|ldap|헤더|셸|쉘) ?(인젝션|주입)",
+    r"(권한|인가|인증|접근 ?권한|접근 ?제어) ?(검사|체크|확인) ?(누락|없이|빠짐|부재)", r"(인가|권한) ?누락",
+    "경로 ?탐색 ?취약", "오픈 ?리다이렉트", "원격 ?코드 ?실행",
     # ja
-    "脆弱", "平文", r"セキュリティ(上の)?(問題|リスク|欠陥|ホール|事故|懸念)", r"[（(]セキュリティ[)）]",
-    "認証回避", "権限昇格", "暗号化されていない", "個人情報(の)?(漏洩|漏えい|流出)",
+    "脆弱性", r"セキュリティ(上の)?(問題|リスク|欠陥|ホール|事故|懸念)", r"[（(]セキュリティ[)）]",
+    "認証回避", "権限昇格", "個人情報(の)?(漏洩|漏えい|流出)",
+    r"(sql|コマンド|os ?コマンド|スクリプト|html|コード|ldap|ヘッダー?|シェル) ?インジェクション",
+    "認可漏れ", "認証漏れ", r"(権限|認可|アクセス制御)(の)?(チェック|確認)?漏れ", "パストラバーサル",
+    "オープンリダイレクト", "リモートコード実行",
 )
-# a secret noun and an exposure word in the same sentence — `the token leaks`, `password is sent to analytics`
+# a secret noun and an exposure word in the same sentence — `the token leaks`, `password is sent to analytics`.
+# 0.102.8 m2: a bare `token(s)` / `토큰` / `トークン` is a secret noun except as a design / colour / theme token or a
+# token COUNT / limit / usage (an LLM or lexer word); `committed` / `커밋` stay exposure words (a key committed)
 _SEC_NOUN = (r"\b(secrets?|credentials?|passwords?|passcodes?|api[ _-]?keys?|private keys?|(access|refresh|auth|"
-             r"bearer|session|id) tokens?|tokens?|pii)\b|비밀번호|비밀 ?키|시크릿|토큰|자격 ?증명|api ?키|개인 ?키|"
-             r"パスワード|認証情報|トークン|秘密鍵|シークレット|apiキー")
+             r"bearer|session|id|jwt|oauth|api) tokens?|pii)\b|"
+             r"(?<!design )(?<!color )(?<!colour )(?<!theme )\btokens?\b(?! ?(count|counts|limit|limits|usage|budget|cost|costs|"
+             r"window|ids?\b))|"
+             r"비밀번호|비밀 ?키|시크릿|(?<!디자인 )(?<!디자인)(?<!색상 )토큰(?! ?(수|개수|사용량|한도))|자격 ?증명|api ?키|"
+             r"개인 ?키|パスワード|認証情報|(?<!デザイン)トークン(?!数)|秘密鍵|シークレット|apiキー")
 _SEC_EXPOSE = (r"\b(leak(s|ed|ing)?|logged|logs it|printed|exposed|exposes|committed|hard-?coded|in (the )?logs?|"
-               r"analytics|crashlytics|world-readable|publicly)\b|유출|노출|로그에|하드코딩|커밋|외부로|"
-               r"漏洩|漏えい|流出|ログに|ハードコード|露出|公開され")
+               r"analytics|crashlytics|world-readable|publicly|plain[ -]?text|unencrypted|not encrypted)\b|"
+               r"유출|노출|로그에|하드코딩|커밋|외부로|평문|암호화되지 않|암호화 없이|"
+               r"漏洩|漏えい|流出|ログに|ハードコード|露出|公開され|平文|暗号化されていない")
 _SENTENCE = r"[.;\n。！？!?]"
 
 
@@ -908,6 +927,21 @@ def security(spec=None, decision=None, group=None):
         if n in want["text"] and security_text(str(t)):
             return True
     return False
+
+
+def security_why(spec=None, decision=None, group=None):
+    """0.102.8 (review-0102-7 m2): the reason a question line gives for a security decision — from the source that
+    made it one: the judge's `security_reason` only when its `security_concern` is what triggered (never its "none"
+    reason beside a `false`), else the security role or the brief's issue phrase."""
+    g = str(group or getattr(spec, "group", "") or "")
+    if decision is not None and g in SECURITY_FIELD_GROUPS and concern_of(decision):
+        f = getattr(decision, "fields", None)
+        why = f.get(SECURITY_REASON) if isinstance(f, dict) else None
+        return " ".join(str(why).split())[:160] if why else "판단의 security_concern 이 false 가 아님"
+    for n, t in (getattr(spec, "brief_parts", None) or []):
+        if n in (SECURITY_INPUTS.get(g) or {}).get("role", ()) and _role_named(str(t)):
+            return "security 역할의 판단"
+    return "입력에 보안 사안"
 
 
 def posthoc(p, group, spec=None, irreversible=False, decision=None):

@@ -758,7 +758,8 @@ def engine_net_run(p, cx, dev, nb):
 
 CC_TYPES = ("feat", "fix", "refactor", "perf", "docs", "test", "tests", "chore", "build", "ci", "style", "revert")
 # `fix: …`, `feat(kanji): …`, `refactor!: …` — a Conventional Commits type (any case), never any `Word: …`
-CC_PREFIX_RE = re.compile(r"^\s*(?:%s)(?:\([^)]*\))?!?:\s" % "|".join(CC_TYPES), re.I)
+# 0.102.8 (review-0102-7 m4): with or without the space after the colon, and the full-width colon (`fix:x`, `fix：…`)
+CC_PREFIX_RE = re.compile(r"^\s*(?:%s)(?:\([^)]*\))?!?\s*[:：](?!//)" % "|".join(CC_TYPES), re.I)
 PR_TYPE = {"implement": "feat", "debug": "fix", "refactor": "refactor"}
 
 
@@ -912,16 +913,44 @@ def auditor_step(p, cx, attempt):
         found = None
         if res.status in ("DONE", "DONE_WITH_CONCERNS"):
             # 0.102.7 (word_app #1797): the findings are what counts — schema-checked by the runner from out/result.json
-            # or, when the role could not write it, its ```guild-result``` block (`roles.result`). A role that says
-            # DONE_WITH_CONCERNS only because that write failed still audited: its valid findings are used
+            # or, when the role could not write it, its ```guild-result``` block (`roles.result`).
             found = XA.parse_auditor_reply(json.dumps((res.extras or {}).get("findings")))
             if found is not None and res.status != "DONE":
-                B.record_code(p, STAGE, "auditor-result", "accepted", reason=B.one_line(
-                    "auditor %s with schema-valid findings — %s" % (res.status, res.line or "-"), 300))
+                # 0.102.8 (review-0102-7 M3, lead decision 2): a DONE_WITH_CONCERNS is a clean audit ONLY when its
+                # concern is the result-file write failure — the runner saw the role's Write/Edit of out/result.json
+                # refused AND the findings came from the role's own guild-result fence. Any other concern (a partial
+                # read, …) is no clean audit: the auditor is dispatched once more, then a person
+                why = result_write_failed(res)
+                if why:
+                    B.record_code(p, STAGE, "auditor-result", "accepted", reason=B.one_line(
+                        "auditor %s with schema-valid findings from its guild-result block — %s (%s)" % (
+                            res.status, why, res.line or "-"), 300))
+                else:
+                    B.record_code(p, STAGE, "auditor-result", "redispatch" if shot == 1 else "refused",
+                                  reason=B.one_line("auditor %s — the concern is not the result-file write: %s" % (
+                                      res.status, res.line or "-"), 300))
+                    found = None
+                    if shot == 2:
+                        return nh(p, cx, "execute-stage auditor returned DONE_WITH_CONCERNS twice for #%d — %s" % (
+                            p.issue, B.one_line(res.line or "-", 200)), "auditor scan concern")
         if found is not None:
             return found, mb, before["head"], set(before["untracked"])
         if shot == 2:
             return nh(p, cx, "execute-stage auditor returned no usable findings for #%d" % p.issue, "auditor scan failed")
+    return None
+
+
+def result_write_failed(res):
+    """0.102.8: the reason a DONE_WITH_CONCERNS auditor is still a clean audit — or None. Both must hold: the findings
+    were read from the role's own ```guild-result``` fence (`RoleResult.result_source == "fence"`, never a file) and
+    the stream shows a refused Write/Edit of its run dir's `out/result.json` (`RoleResult.denials`)."""
+    if getattr(res, "result_source", None) != "fence":
+        return None
+    for d in getattr(res, "denials", None) or []:
+        tool = str(d.get("tool") or d.get("class") or "")
+        path = str(d.get("path") or d.get("command") or "").replace("\\", "/")
+        if ("Write" in tool or "Edit" in tool) and path.endswith("out/result.json"):
+            return "Write of out/result.json refused"
     return None
 
 
@@ -1010,12 +1039,43 @@ def arbitrate_step(p, cx, attempt, scan, scan_ran, head, untracked, role_trigger
         ex = {k: v for k, v in ex.items() if k in asked}
         route = d.fields.get("developer_route") if dev_route else None
         addendum = d.fields.get("addendum")
+        # 0.102.7 (review-0102-6 M1): a security concern (the judge's `security_concern` not false, the security role
+        # among the triggers, an issue phrase in the findings) is never dismissed without a person: a BLOCKER's
+        # dismiss/dispute is a dispute (a person decides it), a MAJOR's is accepted (fixed, never dropped unasked).
+        # 0.102.8 (review-0102-7 m3): read BEFORE the §10.4 / unverified coercion below (which turned every dismiss
+        # into accept first, so the rule never fired on a real run) and per finding — only the findings the judge marks
+        # `security` (unmarked = security), or whose own text names a security issue; the other BLOCKERs of the batch
+        # follow the coercion as before
+        sec = []
+        sec_on = CONS.security(getattr(cx, "ex_arb_spec", None), d, "EX-ARB")
+        if sec_on:
+            marks = dict((str(f.get("id")), f.get("security")) for f in d.fields.get("findings") or []
+                         if isinstance(f, dict))
+            for k, c in new_bm:
+                if (ex.get(k) or {}).get("verdict") not in ("dismiss", "dispute"):
+                    continue
+                if marks.get(str(k)) is False and not CONS.security_text(
+                        " ".join(str(x or "") for x in (getattr(c, "finding", ""), getattr(c, "why", "")))):
+                    continue
+                sec.append(k)
+                ex[k] = {"verdict": "dispute" if c.severity == "BLOCKER" else "accept", "security": True,
+                         "reason": "security concern — a person decides (%s)" % (ex[k].get("reason") or "-")}
+        if sec_on and route in ("reinvoke", "loop_back"):
+            # 0.102.8 (review-0102-7 M2): the judge's own route for a BLOCKED / NEEDS_CONTEXT developer under a security
+            # concern (re-invoke with its addendum, loop back) is a person's decision, never run unasked
+            B.record_code(p, STAGE, "developer-route", "human", refs=cx.stage_start,
+                          reason=B.one_line("EX-ARB chose %s under a security concern (%s)" % (
+                              route, CONS.security_why(getattr(cx, "ex_arb_spec", None), d, "EX-ARB")), 300))
+            cx.route_security = CONS.security_why(getattr(cx, "ex_arb_spec", None), d, "EX-ARB")
+            route = "human"
         # §10.4: unattended, a BLOCKER/MAJOR dismiss/dispute is forced to accept in the first sprint (and after the
         # go while the `exarb.no_unattended_dismiss` valve holds) — the judge's own pick stays as `would-dismiss`
         would = []
         why = FS.no_dismiss(p, attended=not p.unattended)
         if why:
             for k, _c in new_bm:
+                if k in sec:
+                    continue                                    # a security finding stays with a person
                 if (ex.get(k) or {}).get("verdict") in ("dismiss", "dispute"):
                     would.append(k)
                     # K6 r1 M6: the conservative source is named as the person can act on it (a valve or the
@@ -1025,16 +1085,6 @@ def arbitrate_step(p, cx, attempt, scan, scan_ran, head, untracked, role_trigger
                          "conservative": PF.conservative_label(p, "EX-ARB:dismiss")}.get(
                             why, "exarb.no_unattended_dismiss"),
                         ex[k].get("reason") or "")}
-        # 0.102.7 (review-0102-6 M1): a security concern (the judge's `security_concern` not false, the security role
-        # among the triggers, an issue phrase in the findings) is never dismissed without a person: a BLOCKER's
-        # dismiss/dispute is a dispute (a person decides it), a MAJOR's is accepted (fixed, never dropped unasked)
-        sec = []
-        if CONS.security(getattr(cx, "ex_arb_spec", None), d, "EX-ARB"):
-            for k, c in new_bm:
-                if (ex.get(k) or {}).get("verdict") in ("dismiss", "dispute"):
-                    sec.append(k)
-                    ex[k] = {"verdict": "dispute" if c.severity == "BLOCKER" else "accept",
-                             "reason": "security concern — a person decides (%s)" % (ex[k].get("reason") or "-")}
         extra = {"coerced": "true"} if coerced else {}
         if sec:
             extra.update(coerced="true", security="; ".join(sec))
@@ -1052,8 +1102,10 @@ def arbitrate_step(p, cx, attempt, scan, scan_ran, head, untracked, role_trigger
             cx.reinvoke_addendum = "context the engine adds: %s" % (addendum or "(none given)")
             return "reinvoke"
         if route not in ("loop_back", "reinvoke"):
-            return nh(p, cx, "developer %s for #%d — %s" % (dev_route[0], p.issue, dev_route[1] or ""),
-                      "developer %s" % dev_route[0].lower())
+            sw = getattr(cx, "route_security", None)
+            return nh(p, cx, "developer %s for #%d — %s%s" % (dev_route[0], p.issue, dev_route[1] or "",
+                                                             (" (보안: %s)" % sw) if sw else ""),
+                      "developer %s%s" % (dev_route[0].lower(), (" (보안: %s)" % B.one_line(sw, 100)) if sw else ""))
     vcs = p.vcs
     n_att = XA.attempts_in_invocation(rec, cx.stage_start) + (0 if local_pass else 1)
 

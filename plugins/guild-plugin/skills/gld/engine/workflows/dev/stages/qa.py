@@ -425,6 +425,13 @@ def narrowed_followups(comments):
                 seen.add(t)
                 out.append({"title": t, "rationale": "analyze 가 겹친 해석 중 가장 좁은 해석(%s, %s)을 골라 뺀 부분" % (
                     b.get("auto_narrow"), b.id), "keywords": t})
+        for t in str(b.get("dropped_ac") or "").split(" ;; "):
+            # 0.102.8 (review-0102-7 M4): the AC the narrow reading removed (the judge's chosen reading's)
+            t = t.strip()
+            if t and ("AC: " + t) not in seen:
+                seen.add("AC: " + t)
+                out.append({"title": "AC: " + t, "rationale": "analyze 가 가장 좁은 해석(%s, %s)을 골라 뺀 AC" % (
+                    b.get("auto_narrow"), b.id), "keywords": t})
     return out
 
 
@@ -453,11 +460,13 @@ def _followups(p, cfg, qres, comments, pr):
     has_design = any(p.exists("docs/specs/%d/%s" % (p.issue, f)) for f in DESIGN_ARTIFACTS)
     prev = FU.from_comments(comments)
     carried = [i for i in (prev.items if prev else []) if i.status in ("declined", "filed")]
-    if not has_design:
+    narrowed = narrowed_followups(comments)
+    if not has_design and not narrowed:
         return {"run": False, "items": [], "carried": carried, "line": None, "prev": prev}
     seen = set(i.title for i in carried)
     unfiled, skipped = [], []
-    for it in _followup_items(qres) + narrowed_followups(comments):
+    # 0.102.8 (review-0102-7 m5): an auto-narrowed reading's follow-ups are listed even without design output
+    for it in (_followup_items(qres) if has_design else []) + narrowed:
         if it["title"] in seen:
             continue
         verdict = _dedup(p, it, pr.get("number") if pr else None)

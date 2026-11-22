@@ -27,3 +27,6 @@ personal data. It is NOT a security issue that the Issue builds or touches an au
 logout, a 401 / unauthenticated redirect, a token kept in the keychain / secure storage, encryption added),
 nor a non-security defect that shares a word (dependency injection, a memory leak). Read the inputs in whatever
 language they are written. Doubt → `true` (a person decides it); the engine reads a missing value as `true`.
+When `security_concern` is true, mark each finding with `security` (true|false): true when THAT finding is the
+security issue. A security BLOCKER you would dismiss or dispute goes to a person; a security MAJOR is fixed; a
+finding without `security` counts as one. With a security concern the developer route goes to a person.

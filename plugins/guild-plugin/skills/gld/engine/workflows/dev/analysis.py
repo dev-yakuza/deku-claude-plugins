@@ -333,6 +333,7 @@ class Kickoff(object):
         self.anchors = {}             # dim → anchor (verified) | None
         self.choice_needed = {}       # dim → text
         self.high = set()             # dims whose stakes are fixed high (premise / reinterpretation)
+        self.about_readings = set()   # 0.102.8: open dims whose `choice_needed` IS the choice between the readings
         self.coerced = []             # human-readable coercion notes (decision log `coerced_by: rule`)
         self.ac = []                  # [{id, text, priority, tag}]
         self.interpretations = []     # [{id, summary, orig}] — id = engine token, canonical order (K5r4-m1)
@@ -393,6 +394,8 @@ def coerce_kickoff(fields, root, sources, net_lines, plan_lines, premise_unmet_d
             k.anchors[dim] = anchor
         k.readiness[dim] = rating
         k.choice_needed[dim] = to_tokens(str(r.get("choice_needed") or ""), k.token_map)
+        if r.get("about_readings") is True:
+            k.about_readings.add(dim)
     plan_dims = {}
     for pl in plan_lines:
         plan_dims.setdefault(pl.dim, []).append(pl)
@@ -482,7 +485,70 @@ def coerce_kickoff(fields, root, sources, net_lines, plan_lines, premise_unmet_d
 NARROW_POST_HOC = "auto-narrow KICKOFF"
 
 
-def narrowest(k, capture, root, irreversible_any, security_concern, globs=None):
+# 0.102.8 (review-0102-7 M1/M4/M5, lead decision 3): auto-narrow is the INTERPRETATION choice only — it never clears a
+# security concern of any judgment (KICKOFF, every STAKES of the open dimensions, an issue phrase in what it drops or
+# keeps), an `unclear` dimension, or an open dimension whose question is not the choice between the readings
+# (`about_readings`); and it never drops an AC the Issue itself states — the engine checks the Issue's own AC lines
+# (`issue_ac_lines`) against the narrow reading's AC (`ac_covered`), not the judge's `keeps_issue_ac` alone.
+ISSUE_AC_HEADING_RE = re.compile(r"^\s{0,3}#{1,6}\s*(.*?)\s*#*\s*$")
+ISSUE_AC_TITLE_RE = re.compile(r"acceptance|\bac\b|criteria|definition of done|done when|受け入れ|受入|完了条件|"
+                               r"수용 ?기준|인수 ?조건|완료 ?조건|합격 ?기준|승인 ?기준", re.I)
+ISSUE_LIST_RE = re.compile(r"^\s*(?:[-*+]|\d+[.)])\s+(?:\[[ xX]\]\s*)?(.+?)\s*$")
+
+
+def issue_ac_lines(body):
+    """The acceptance criteria the Issue body itself states (quotes excluded): `AC #n: …` lines anywhere, and the list
+    items under a heading that names acceptance criteria (en / ko / ja) until the next heading."""
+    out = []
+    under = False
+    for ln in unquoted(body or "").split("\n"):
+        h = ISSUE_AC_HEADING_RE.match(ln)
+        if h and ln.lstrip().startswith("#"):
+            under = bool(ISSUE_AC_TITLE_RE.search(h.group(1)))
+            continue
+        m = AC_LINE_RE.match(ln)
+        if m and m.group(4).strip():
+            out.append(m.group(4).strip())
+            continue
+        if under:
+            li = ISSUE_LIST_RE.match(ln)
+            if li and li.group(1).strip():
+                out.append(li.group(1).strip())
+    seen, uniq = set(), []
+    for a in out:
+        if _norm_ac(a) and _norm_ac(a) not in seen:
+            seen.add(_norm_ac(a))
+            uniq.append(a)
+    return uniq
+
+
+def _norm_ac(t):
+    return re.sub(r"[\W_]+", "", str(t or "").casefold())
+
+
+def _bigrams(t):
+    return set(t[i:i + 2] for i in range(len(t) - 1)) or ({t} if t else set())
+
+
+def ac_covered(issue_ac, acs):
+    """An Issue AC is kept when one of `acs` contains it (normalised — case, spaces, punctuation) or carries ≥ 85 % of
+    its character bigrams (a light rewording); anything less is a dropped AC."""
+    ni = _norm_ac(issue_ac)
+    if not ni:
+        return True
+    bi = _bigrams(ni)
+    for a in acs or ():
+        na = _norm_ac(a)
+        if not na:
+            continue
+        if ni in na:
+            return True
+        if len(bi & _bigrams(na)) >= 0.85 * len(bi):
+            return True
+    return False
+
+
+def narrowest(k, capture, root, irreversible_any, security_concern, globs=None, issue_acs=()):
     """(token, own entry, drops) of the reading the engine takes without asking, or (None, None, why)."""
     if len(k.interpretations) < 2 or not capture:
         return None, None, "fewer than two readings"
@@ -490,6 +556,7 @@ def narrowest(k, capture, root, irreversible_any, security_concern, globs=None):
         return None, None, "irreversible area"
     if security_concern:
         return None, None, "security concern"
+    from workflows.dev import conservative as CONS
     owns = getattr(k, "own_footprints", {}) or {}
     cap = dict((e.get("token"), e) for e in capture)
     norm = lambda x: str(x or "").strip().casefold()                  # noqa: E731
@@ -522,13 +589,32 @@ def narrowest(k, capture, root, irreversible_any, security_concern, globs=None):
         found.append((i["id"], dict(raw, ac=own_ac), drops))
     if len(found) != 1:
         return None, None, "no single strictly narrowest reading" if not found else "two narrowest readings"
-    return found[0]
+    tok, own, drops = found[0]
+    # 0.102.8: what it drops or keeps names a security issue → a person (the judge's field is the primary signal)
+    if any(CONS.security_text(x) for x in list(drops) + list(own.get("ac") or [])):
+        return None, None, "security issue phrase in the narrow reading's drops / AC"
+    kept = narrow_acs(k, tok, own)
+    lost = [a for a in issue_acs or () if not ac_covered(a, kept)]
+    if lost:
+        return None, None, "an Issue AC is not kept by %s: %s" % (tok, "; ".join(x[:80] for x in lost[:3]))
+    return tok, own, drops
+
+
+def narrow_acs(k, token, own):
+    """The AC texts the run will carry when `token` is taken (its own AC when it is not the judge's `chosen`, plus the
+    safety-net AC) — what `take_narrowest` sets."""
+    if token == k.chosen:
+        return [a["text"] for a in k.ac]
+    net = [a["text"] for a in k.ac if a.get("tag") == "safety net"]
+    have = set(_norm(t) for t in net)
+    return [t for t in own.get("ac") or [] if _norm(t) not in have] + net
 
 
 def take_narrowest(k, capture, token, own, root, widen=(), globs=None):
     """Make the narrowest reading THIS run's KICKOFF result: its footprint (`apply_reading` — the question-time
     capture) and, when it was not the judge's `chosen`, its own AC (the safety-net AC kept)."""
     was = k.chosen
+    before = [a["text"] for a in k.ac]
     apply_reading(k, capture, token, root, widen=widen, globs=globs)
     if token != was:
         net = [a for a in k.ac if a.get("tag") == "safety net"]
@@ -537,6 +623,9 @@ def take_narrowest(k, capture, token, own, root, widen=(), globs=None):
             [dict(a) for a in net]
         k.ac = [dict(a, id="AC #%d" % (n + 1)) for n, a in enumerate(acs)]
     k.coerced.append("reading = the narrowest %s (nested in every other reading; auto-narrow)" % token)
+    # 0.102.8 (review-0102-7 M4): the AC the replacement removed (the judge's chosen reading's) — recorded, never silent
+    after = [a["text"] for a in k.ac]
+    return [t for t in before if not ac_covered(t, after)]
 
 
 # ---- K6 r3 M1 / K6 r4: the person's reading, carried as the reading itself -----------------------------------------
@@ -1038,7 +1127,7 @@ def readiness_line(readiness, note=""):
     return "Readiness: %s%s" % (toks, (" (%s)" % note) if note else "")
 
 
-def render_output(issue, k, chosen_summary, note, trace, assumptions, po_line=None, extra=()):
+def render_output(issue, k, chosen_summary, note, trace, assumptions, po_line=None, extra=(), followups=()):
     """analyze:output (A4). Machine lines ASCII; every free value through markers.value."""
     v = markers.value
     out = [markers.open_tag("analyze:output"), "## Guild analyze — #%d" % int(issue), "",
@@ -1060,6 +1149,9 @@ def render_output(issue, k, chosen_summary, note, trace, assumptions, po_line=No
         tag = " (safety net)" if a["tag"] == "safety net" else ""
         pr = (" [%s]" % v(a["priority"])) if a["priority"] else ""
         out.append("- %s%s: %s%s" % (a["id"], tag, v(a["text"]), pr))
+    if followups:
+        # 0.102.8 (review-0102-7 M4): what an auto-narrowed reading left out — the broader parts and the AC it removed
+        out += ["", "### 후속 Issue 후보"] + ["- %s" % v(x) for x in followups]
     if k.split_hint:
         out += ["", "분할 힌트: design 에서 분할 여부를 판단"]
     if po_line:
