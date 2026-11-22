@@ -46,6 +46,8 @@ def need_tools():
 
 
 class E2ECase(StudioTestCase):
+    harness_answers = None  # init's answers beyond make_harness.ANSWERS
+
     def setUp(self):
         need_tools()
         super().setUp()
@@ -54,7 +56,8 @@ class E2ECase(StudioTestCase):
         os.symlink(sys.executable, os.path.join(pybin, "python3"))
         self.env = dict(os.environ)
         self.env["PATH"] = pybin + os.pathsep + self.env.get("PATH", "")
-        self.repo = make_harness.make(os.path.join(self.tmp, "site"), env=self.env, s2v=FAKE_ROOT)
+        self.repo = make_harness.make(os.path.join(self.tmp, "site"), env=self.env, s2v=FAKE_ROOT,
+                                      answers=self.harness_answers)
         machine.write(self.repo, FAKE_ROOT)
         self.scen = os.path.join(self.tmp, "scenario.json")
         self.scenario({})

@@ -43,9 +43,10 @@ ANSWERS = {"language": "ko", "project_name": "Sandbox", "purpose": "sandbox", "p
 
 
 def make(repo, env=None, studio_root="studio", husky=False, overlay=(), s2v="/nonexistent/script2video",
-         python=None):
+         python=None, answers=None):
     """A harness made by setup.py's own init (m1-plan §5.1: make_harness is a thin wrapper), committed once outside
-    any session. `python` is kept for older callers (the hook runs python3 from PATH)."""
+    any session. `python` is kept for older callers (the hook runs python3 from PATH); `answers` adds or replaces
+    init's answers (kinds, platforms, public_domains)."""
     env = dict(os.environ if env is None else env)
     from stdo import writes
     from stdo.setup import initcmd
@@ -66,7 +67,8 @@ def make(repo, env=None, studio_root="studio", husky=False, overlay=(), s2v="/no
         with open(os.path.join(repo, "package.json"), "w") as f:
             f.write('{"name": "sandbox", "devDependencies": {"husky": "9.1.7"}}\n')
         _git(repo, env, "config", "core.hooksPath", ".husky/_")
-    answers = dict(ANSWERS, studio_root=studio_root, s2v_path=s2v, husky=husky)
+    answers = dict(ANSWERS, **(answers or {}))
+    answers.update(studio_root=studio_root, s2v_path=s2v, husky=husky)
     saved = dict(os.environ)
     os.environ.clear()
     os.environ.update(env)  # STUDIO_HOME and friends: the marker and the overlay sha go to the test's folders

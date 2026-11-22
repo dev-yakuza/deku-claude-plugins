@@ -269,6 +269,58 @@ person's gates stay behind everything listed here.
   - In auto mode nobody sees a prompt, so a later `state.py ask-before` that removes a pause you asked for is not shown
     to you (in the `default` mode it keeps its prompt).
 
+## Captures of web pages (0.2.3–0.2.6)
+
+- `capture.py` runs without a prompt (above): the agent at the source stage (`source`, and `recheck` before the
+  video commit) and the visual director at board (`shot`). Each run loads a web page from this machine — network
+  access you do not approve call by call.
+- What limits it is `capture.py` itself, not the guard (the guard reads no setting for it):
+  - hosts: `public_domains` for a source, a recheck and an internal video's shots; also `capture.hosts` for a public
+    video's shots (both lists change only with your `설정` answer); https only, a host name (no IP literal), no user
+    and no port; the final address must be on the asked host (a redirect to any other host, even `www.`, is not
+    usable);
+  - a shot's address has no query or fragment (also when percent-encoded) and a path of at most 200 characters; a
+    selector has at most 200 characters from ASCII letters, digits, spaces and `_#.,:>+~*()[]=-` and does not start
+    with `-`; a value still percent-encoded after three rounds of decoding is refused;
+  - every address and selector is checked against the internal overlay: its hosts (a public domain itself excepted),
+    its terms and video and actor ids of 4 characters or more (case-folded, after percent-decoding and without
+    invisible characters; a term in ASCII matches only as a whole word — `acme` is not found in `acmecorp` or
+    `acme2`, but is in `acme-plan` and `acme_plan`; shorter terms are not checked), and its internal source pages
+    (that page and every page under it, compared without the query, `;params`, letter case, repeated `/` and a
+    trailing `index.html`, `index.htm` or `/`); a required overlay that is missing stops every capture;
+  - `S2V_CAPTURE_NO_SANDBOX` is refused by `capture.py` and by the guard (G-ENV), and `s2v capture` run directly in
+    a Studio repository is refused (G-WRAP: use `capture.py`);
+  - the guard refuses agents' writes to a video's `assets/`, `work/captures/`, `work/captures.json` and
+    `work/source-diff.txt` (with the gaps below).
+- Not stopped (residual risk):
+  - an intranet on a public address that this machine can reach: only the host lists stop it;
+  - WebSockets and other requests the page makes to the hosts it may load from (its own host and
+    `capture.allow_hosts`);
+  - text in an address that is not an overlay term (a term inside a longer ASCII word, a term under 4 characters): a
+    shot's path still carries up to 200 characters, a source's address its path;
+  - other addresses a site serves for an internal source page: another index name (`default.aspx`, `index.php`), an
+    extension (`/internal/memo.html`), a rewrite to another path, a short link on the same host — only the overlay's
+    host and term lists catch those;
+  - an overlay host written in Unicode does not match its punycode form in an address, and the reverse;
+  - the page's text is data the source analyst reads: an instruction inside it is handled by the agents'
+    instructions and the person's gates, not by the guard;
+  - s2v run through `npm exec` or `npm x` (listed below).
+- How a board capture is judged:
+  - an in-house term anywhere in the page's text (the same matching: whole words in ASCII, 4 characters or more)
+    makes the capture internal, also when it is outside the selected element (s2v's text has no position) — strict
+    on purpose; an inside picture's alt text counts only inside the captured area;
+  - background images set by CSS are not in s2v's picture list, so they do not lower a capture's floor: the person
+    and the ③ auditor see them in the picture;
+  - frames, canvases, embeds and videos inside the area make the capture `unknown`, never internal: their content is
+    not read.
+- The guard's protection of these files does not see a write after `cd` into a protected folder (`cd
+  studio/videos/v1/assets && touch a.png`, also in `work/source/`: the normal prompt, not a refusal), a video id built
+  by an expansion in `work/source` (`rm -rf studio/videos/$(echo v)/work/source`), and protected names after an
+  unknown value in another letter case (`rm -rf $X/VIDEOS/v/assets` on a volume that ignores case). What such a write
+  can change is bounded: ③ binds each used capture's bytes, `check_commit.py --stage` stages a picture only when its
+  bytes are the ones its approved CREDITS entry names, and a source copy whose files differ from its record is
+  refused.
+
 ## What the guard does not see
 
 ### Programs and settings that run commands the guard does not model

@@ -9,6 +9,12 @@ folder, renders and copy stay under `studio/local/` on this machine (backed up, 
 are in `.claude/studio/formats/<kind>.md` (`sns`, `onboarding` and `explainer` are added with `/std update`; without
 the file the brief stops); the brief may name only platforms whose file says the kind's `audience`.
 
+Platforms and outputs: the brief maps each platform of `.claude/studio/platforms/` to an output; platforms that take
+the same shape share one output and one render (an `sns` video for `youtube-shorts` and another 9:16 platform renders
+one 9:16 video), and every output plays the whole script. Board, render and their gates ③ and ④a run per output; copy
+and ④b per platform. A platform file a person has not checked (`checked` empty) fails every copy for it: before the
+copy stage, ask the person to run `/std platform refresh <name>` (or `/std platform add <name>` for a new platform).
+
 Rules: one command per Bash call, literal values (replace every `<…>` before the call), never a variable in command
 position. Shared rules: `atoms/_contract.md`.
 Run Studio commands exactly as written: no `| head`, `; echo $?`, `2>&1 | …`, variables or `&&` chains (only
@@ -28,8 +34,11 @@ short `setup.py doc <stage>` below; never open it with Read) and do exactly what
    `python3 .claude/studio/scripts/state.py ask-before <video> <steps|none>`.
 2. `setup.py doc source` → `setup.py doc brief` → `setup.py doc script` → `setup.py doc verify` (gate ①).
 3. The voice section below: cast → tts → audition → gate ②.
-4. `setup.py doc board` (board with the credits, visual-check, gate ③).
-5. `setup.py doc render` (render, gate ④a) → `setup.py doc copy` (copy, gate ④b).
+4. `setup.py doc board` (board with the credits and any board captures, visual-check, gate ③) — per output.
+5. `setup.py doc render` (render, gate ④a) per output → `setup.py doc copy` (copy, gate ④b) per platform. With
+   several outputs or platforms, a gate is shown for each in turn and asked once: the last `shown` prints the hash
+   and one question for all of them, and one approval approves all. The ③ and ④a block names only the last output's
+   stills folder or mp4: after the block, name every output's in the question.
 6. The video's commit (below), then `state.py done`; an internal video ends without a commit (below).
 
 **Always**

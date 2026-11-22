@@ -32,7 +32,11 @@ gates are approved by the person again; the wrapper then renders without the wat
 2. `python3 .claude/studio/scripts/state.py shown <video> 4a --output youtube` right as you open the mp4, the
    thumbnail and the chapters (`open <path>`) — it prints `hash12 <h12>` and the `question` block:
    `[<video>] ④a 최종 — <mp4 path> · hash <h12>` and a line asking the person to play the video and check sound,
-   subtitles and pictures together (the auditor cannot play it), up to `end of question`.
+   subtitles and pictures together (the auditor cannot play it), up to `end of question`. With several outputs, run
+   it for each one once all are rendered: each but the last prints `shown <output> (other scopes not shown yet)`, and
+   the last prints `hash12` and the block — one question and one `approve` (with any output) approve every output.
+   The block's first line names only the last output's mp4: after the block, name every output's mp4 (and its
+   thumbnail and chapters, when it has them) in the question.
 3. Ask with AskUserQuestion: the question is **the block pasted unchanged**, then the auditor's findings (quote file
    paths rather than retyping long Japanese terms); options `승인 <video> <h12>` and "고칠 곳이 있다". Then, alone as your next tool call, in the same turn, right after the answer —
    do not wait for the person; never in the same assistant message as the question — run

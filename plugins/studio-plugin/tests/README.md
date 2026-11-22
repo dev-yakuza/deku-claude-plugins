@@ -534,3 +534,19 @@ Review 1: a commit through a clean filter (a fake git-lfs pointer in the index) 
 `public_domains` asks a capture's credit again at board and is refused at the commit (③ binds the floor); a term
 with a soft hyphen or zero-width space in the page's text, title or alt is found; bidi controls are dropped from the
 ③ line.
+
+**0.2.6** (`SCRIPTS_VERSION` 33, m2-plan M2g): `test_e2e_m2.py` — what pilot 4 does, end to end with the fake s2v (its
+`capture` too: no network, no browser) and the real guard, hooks and git, every gate and credit by a person: the person
+checks the shipped `youtube-shorts` rules (`setup.py platform preview` / `apply` through a refresh draft) and adds
+`reels` (`platform add`: the agent's draft, every preview line and the hash in the `플랫폼` question; at most 60 s) sharing
+the 9:16 output `shorts`; an `sns` video from a page on the site's own domain (`begin --url`, `capture.py source`, the
+`원본 페이지 캡처` line in the ① question, the page picture `assets/src-<sha12>.png` classed and credited); the script lines
+for `shorts` (`maxDuration` 60 = the smaller limit; reels allows 60 s, Shorts 180 s); board with one capture of the page
+in place of a picture (`capture.py shot`, ten credit lines with its `source` and `captured_at`, the `화면 캡처` line in ③);
+one render; copy for both platforms (Shorts with the source link line, reels without title or link) and one ④b question
+for both (the first `shown` prints `other scopes not shown yet`); `capture.py recheck` and the `record-recheck` line it
+prints; the commit (both pictures, no `work/`), `done`. The fake's calls show three captures, all of the page, none
+without the sandbox. `make_harness.make(answers=…)` takes init's kinds, platforms and public domains. Every call goes
+through the guard and must not be refused; which calls it allows without a prompt is not checked here (a call that would
+prompt runs as if allowed) — that is `test_guard_autoallow`'s.
+Review 1: reels allows 60 s, so the shared output's `maxDuration` is 60 (no longer the format's 90).

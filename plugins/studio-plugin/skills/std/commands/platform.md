@@ -65,8 +65,9 @@ existing one again (also how a shipped file gets its first `checked`).
    `open` the draft for the person, and in your message before the question show the body: for `refresh`, the diff
    of the draft against the current file (`diff -u .claude/studio/platforms/<name>.md
    .claude/studio/local/drafts/platforms/<name>.md`); for `add`, the whole body. The person approves the body too.
-4. Ask with AskUserQuestion: the question shows **every line of `lines`, pasted unchanged** (the guard compares each
-   character) and states that the person compared them with the sources; options: the fixed label `플랫폼 <h12>` and
+4. Ask with AskUserQuestion: the question shows the preview's `h12` and **every line of `lines`, pasted unchanged**
+   (the guard compares each character) and states that the person compared them with the sources; options: the fixed
+   label `플랫폼 <h12>` and
    "그만두기". Then, alone as your next tool call, in the same turn, right after the answer — do not wait for the
    person; never in the same assistant message as the question — run
    `python3 "<<SKILL_DIR>>/scripts/setup.py" platform apply <name> --expect <h12>`. It writes the platform file with

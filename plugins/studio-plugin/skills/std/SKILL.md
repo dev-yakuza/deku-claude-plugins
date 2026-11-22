@@ -1,6 +1,6 @@
 ---
 name: std
-description: "Studio installs a video production harness into a repository and runs a per-repo production organization (producer, source analyst, content strategist, script writer, fact-checker, visual director, distributor, plus conditional casting director, actor designer, translator) that turns writing already in the repo into narrated videos with script2video, checks every fact against the source, takes each video through four human review gates (script, audition, stills, final) and drafts platform copy. Commands not built yet say so."
+description: "Studio installs a video production harness into a repository and runs a per-repo production organization (producer, source analyst, content strategist, script writer, fact-checker, visual director, distributor, plus conditional casting director, actor designer, translator) that turns writing already in the repo, or a public page of its site, into narrated videos with script2video (four kinds: youtube and sns public, onboarding and explainer internal; wide, vertical or square outputs from the platform rules it manages; web page captures as pictures), checks every fact against the source, takes each video through four human review gates (script, audition, stills, final) and drafts platform copy. Commands not built yet say so."
 argument-hint: "<command> [video-id|args]"
 user-invocable: true
 allowed-tools:

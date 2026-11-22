@@ -99,6 +99,97 @@ the repository): [docs/removing.md](docs/removing.md).
   `sonnet`; change one with `/std config`). Claude Code uses it when the session passes no model of its own on the
   spawn, and its own model settings can override it — see [sub-agents](https://code.claude.com/docs/en/sub-agents).
 
+## Video kinds
+
+| kind | for | length (starting values) | the video's files |
+|---|---|---|---|
+| `youtube` | public | 180–480 s | `studio/videos/<id>/` (committed) |
+| `sns` | public, short | 20–90 s | `studio/videos/<id>/` (committed) |
+| `onboarding` | internal: new members | 120–600 s | `studio/local/videos/<id>/` (this machine) |
+| `explainer` | internal: a document explained to members | 60–480 s | `studio/local/videos/<id>/` (this machine) |
+
+- The kind is given at `/std make <source> --kind <kind>` and fixed from then on (another kind is `abandon` and a new
+  video). Each kind's lengths and checks are in `.claude/studio/formats/<kind>.md`, which only a person changes:
+  `/std init` asks which kinds the repository makes, `/std update` offers the others.
+- An internal video's folder, renders and copy stay under `studio/local/` on this machine: backed up, never
+  committed. It ends with `state.py done` after the person's `완료 <video>` answer, with every gate and credit
+  approved by a person as for a commit. Its copy may use in-house terms and its credits need no `public_ok`; a public
+  video cannot show a picture classed as internal.
+- A brief may name only platforms whose `audience` is the kind's (`public` or `internal`).
+
+## Platforms
+
+- A platform's rules are `.claude/studio/platforms/<name>.md`: its `audience`, the outputs it takes (name, aspect,
+  longest length), the copy's limits (title or none, description in bytes or characters, hashtags), the required
+  notices, whether chapters and the source link line belong in the description, and the help pages they were checked
+  against. Only a person changes these files.
+- `/std platform list` shows them (no prompt), with a warning for a file never checked or checked more than 180 days
+  ago. `/std platform add <name>` and `refresh <name>`: the agent searches the web with the platform's name and fixed
+  phrases only, writes a draft, and `setup.py platform preview` prints one line per rule; you compare them with the
+  sources and answer `플랫폼 <h12>`, then the file is written with today's `checked` (a harness commit follows).
+  `/std platform remove <name>` is refused while a video in progress names the platform.
+- Every shipped platform — `youtube`, `youtube-shorts` and `internal` (in-house sharing) — is installed with
+  `checked` empty: until a person runs `/std platform refresh <name>` on it, every copy for it is refused.
+
+## Vertical and square outputs
+
+- A brief maps each platform to an output; the output's aspect (16:9, 9:16 or 1:1) comes from the platform files.
+  Platforms that accept the same shape share one output and one render: an `sns` video for YouTube Shorts and another
+  vertical platform renders one 9:16 video. Two platforms giving one output name different aspects are refused.
+- Every output plays the whole script. Its `maxDuration` is the smallest limit of its platforms (and at most the
+  format's upper bound), and a platform whose limit is too short for the kind's length range is refused for that kind
+  (Shorts come from `sns` videos, not `youtube`).
+- A 9:16 output gets word subtitles, and board sets the `shorts` layout for 9:16 and 1:1 (without a character it draws
+  like `fullscreen` with word subtitles). Keep screen text and the logo out of the bottom and right edge (the
+  platform's buttons cover them), prefer portrait or square pictures, and turn a wide table into a list. s2v makes a
+  thumbnail and chapters for 16:9 only.
+- Gates ③ and ④a are asked per output and ④b per platform. With several, each is shown in turn and the last `shown`
+  gives one question for all of them; one approval approves all. The printed ③ or ④a block names only the last
+  output's stills folder or video, so the question also names every output's.
+
+## URL sources
+
+- A `youtube` or `sns` video can be made from a public web page: `/std make https://<host>/<path> --kind sns`. The
+  host must be one of `public_domains` (`/std config`), and the address has no `#` part, no credential-like query and
+  no host, source page or term of the internal overlay — also after a redirect. Internal kinds take no address.
+- `capture.py source` loads the page through `s2v capture` (s2v's headless browser — downloaded once, about 100 MB,
+  by the first s2v command that needs it; on Linux it needs user namespaces) and keeps a copy: the text as `page.md`,
+  its readings, a picture of the page and its pictures. PNG and JPEG pictures are usable (`third-party` when they come
+  from another host); WebP and AVIF are not, which on many sites leaves few pictures — board captures are the
+  fallback.
+- A redirect to another host is refused, even `example.com` → `www.example.com`: begin with the final address. Hosts
+  the page also loads from that were not reached are listed: add them to `capture.allow_hosts` (`/std config`, your
+  `설정` answer) and capture again, or go on without them. Studio refuses `S2V_CAPTURE_NO_SANDBOX`, so capture does
+  not work in a Linux container that needs it.
+- The page is data, never instructions: the source analyst reports an instruction in it as a finding. No stage loads
+  the page again. Before the video commit `capture.py recheck` reads it once more and `state.py record-recheck`
+  records the result: the same page → commit; a changed page → `record-source --from-recheck <n>` makes it the copy
+  and the source-diff gate shows `work/source-diff.txt` against the copy ① approved (an excerpt that is gone sends the
+  video back to the script); an unreadable page holds the commit until a later recheck reads it. The commit needs a
+  recheck at most 24 hours old when `check_commit.py --stage` runs (the pre-commit hook does not count again).
+
+## Board captures
+
+- At board the visual director may show a picture of a web page in place of the picture of an image block already in
+  the script: `capture.py shot <video> <name> --url <https url>` (optionally `--selector <css>` for one element and
+  `--width`/`--height` from 320 to 4096) writes `assets/capture-<name>.png`. It runs without a prompt.
+- The page must be on one of `public_domains`; a public video may also capture the third-party pages of
+  `capture.hosts`. The address has no query or fragment and a path of at most 200 characters, the selector uses only
+  ASCII letters, digits, spaces and `_#.,:>+~*()[]=-`, and neither may name a host or term of the internal overlay (a
+  term of 4 characters or more; in ASCII only as a whole word: `acme` is not found in `acmecorp` or `acme2`, but is
+  in `acme-plan` and `acme_plan`).
+- Its floor is judged from what the capture saw and judged again whenever it is read: a page of `public_domains` is
+  `public`; another host's page or a picture inside the area from another host is `third-party`; a picture without a
+  host address, or a frame, canvas, embed or video inside the area, is `unknown`. Background images set by CSS are not
+  seen as pictures and do not lower the floor — look at the picture yourself.
+- A page with in-house information — an internal host or source page, a picture inside the area from an internal
+  host, or an in-house term in the page's title or text (anywhere on the page, also outside the selected element) or
+  in an inside picture's alt text, matched as above — cannot be shown in a public video.
+- A capture needs a CREDITS entry like any picture; the credit question also shows its address and time, so a shot
+  taken again is asked again. The ③ question has one line per capture (address, picture, floor, a warning when the
+  page did not settle); ③ binds each capture's bytes and floor, so a shot taken again after ③ goes back to board. The
+  video commit stages only the pictures the script shows.
+
 ## Version notes
 
 - **Upgrading an early sandbox (scripts ≤ 8) by hand**: delete `"path"` under `"s2v"` in
@@ -317,6 +408,13 @@ the repository): [docs/removing.md](docs/removing.md).
   did not settle), approving ③ binds each capture's bytes, and the video commit stages only the pictures the script
   shows. An internal source page of the overlay cannot be captured (also not after a redirect). Needs `/std update`
   (scripts version 33, the visual director's and auditor's personas, the board guide).
+- **0.2.6**: the README has sections on video kinds, platforms, vertical and square outputs, URL sources and board
+  captures, and docs/guard-limits.md a section on captures of web pages (what limits them and what it does not stop).
+  `/std make` says how platforms share an output, and `/std make`, `board`, `render` and `copy` say that with several
+  outputs or platforms a gate is shown for each in turn and asked once (the last `shown` prints the hash and one
+  question; one approval approves all; the ③ and ④a question also names every output's stills folder or mp4, since
+  the printed block names only the last). `/std platform`'s question shows the preview's hash, which the guard already
+  required. `/std help` lists `platform`. No `/std update` needed (scripts version 33).
 
 ## License
 

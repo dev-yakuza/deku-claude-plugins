@@ -37,7 +37,9 @@ files to the person with `open <path>` only (never `code`, `vim` or another edit
    prints `hash12 <h12>` and `in the question: 근거: "<sentence>" ← "<excerpt>"` lines (one per fact of the copy, or one
    `④b 근거 목록 파일: …` line when there are many — open that file for the person), then the `question` block:
    `[<video>] ④b 배포용 글 — <copy path> · hash <h12>` with the lines of every platform of the brief, up to
-   `end of question`.
+   `end of question`. With several platforms, run it for each one once all their copy stages are done: each but the
+   last prints `shown <platform> (other scopes not shown yet)`, and the last prints `hash12`, the lines and the
+   block — one question and one `approve` (with any platform of the brief) approve every platform.
 2. Ask with AskUserQuestion: the question is **the block between `question (…):` and `end of question`, pasted
    unchanged** — never retype a line (the guard compares each character) — with the auditor's findings after it;
    options

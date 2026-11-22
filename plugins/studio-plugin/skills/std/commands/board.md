@@ -81,7 +81,11 @@ files to the person with `open <path>` only (never `code`, `vim` or another edit
    `hash12 <h12>` and the `question` block: `[<video>] ③ 정지 화면 — <stills folder> · hash <h12>`, then one
    `화면 캡처 <name>: <address> · png <sha12> · <floor>` line per board capture the script uses (with a warning when
    the page did not settle and the count of blocked hosts), up to `end of question`. `approve` refuses an answer
-   whose question lacks one of those lines (`gate-lines-not-shown`: paste the block again).
+   whose question lacks one of those lines (`gate-lines-not-shown`: paste the block again). With several outputs, the
+   snapshot of each but the last prints `shown <output> (other scopes not shown yet)`; the last prints `hash12` and
+   the block with every output's capture lines — one question and one `approve` (with any output) approve every
+   output. The block's first line names only the last output's stills folder: after the block, name every output's
+   stills folder in the question.
 3. Ask with AskUserQuestion: the question is **the block pasted unchanged**, then the auditor's findings (quote file
    paths rather than retyping long Japanese terms); options `승인 <video> <h12>` and "고칠 곳이 있다". Then, alone as your next tool call, in the same turn, right after the answer —
    do not wait for the person; never in the same assistant message as the question — run

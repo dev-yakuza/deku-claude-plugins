@@ -31,8 +31,8 @@
     {
       "name": "studio-plugin",
       "source": "./plugins/studio-plugin",
-      "description": "Studio - a per-repo video production organization: turns writing that already exists in a repository into narrated videos with script2video, with fact checks against the source, four human review gates and platform copy",
-      "version": "0.2.5"
+      "description": "Studio - a per-repo video production organization: turns writing that already exists in a repository, or a public page of its site, into narrated public or internal videos with script2video (wide, vertical or square outputs per platform, web page captures as pictures), with fact checks against the source, four human review gates and platform copy",
+      "version": "0.2.6"
     }
   ]
 }
