@@ -29,6 +29,7 @@ import json
 import os
 import re
 
+from guildcore import config as CF
 from guildcore import checks as CH
 from guildcore import state as ST
 from guildcore.checks import visual as V
@@ -168,7 +169,7 @@ def run(p, only=None, config_present=True, diff_paths=None):
     inputs = {"issue.md": issue_md,
               "test-output.md": test_out.body if test_out else "(none)",
               "pr-body.md": pr_body if pr_body is not None else "(no open PR found)",
-              "e2e.txt": str((cfg.get("commands") or {}).get("e2e")),
+              "e2e.txt": str(CF.command_text((cfg.get("commands") or {}).get("e2e"))),   # 0.102.16: str or list
               "visual-available.txt": "yes" if V.visual_available(cfg) else "no",
               "unattended.txt": "yes — never run a real-dependency smoke" if p.unattended else "no"}
     qres = p.run_role(B.RoleCall("qa", "run", STAGE, "Q1", inputs=inputs, schema=QA_RUN_SCHEMA,
@@ -365,9 +366,9 @@ def honesty_lines(p, cfg, qres, items, ui=True):
     unattended, the human's visual judgment; then the human-QA count."""
     ran = [str(x) for x in qres.extras.get("ran") or []]
     not_run = [str(x) for x in qres.extras.get("not_run") or []]
-    e2e = (cfg.get("commands") or {}).get("e2e")
-    if e2e and not any(str(e2e) in r for r in ran):
-        not_run.append("`commands.e2e`(%s)" % e2e)
+    e2e = CF.command_list((cfg.get("commands") or {}).get("e2e"))       # 0.102.16: str or list
+    if e2e and not all(any(c in r for r in ran) for c in e2e):
+        not_run.append("`commands.e2e`(%s)" % CF.command_text(e2e))
     if p.unattended:
         not_run.append("실의존 스모크 — 무인 실행이라 수행 안 함")
     if ui:

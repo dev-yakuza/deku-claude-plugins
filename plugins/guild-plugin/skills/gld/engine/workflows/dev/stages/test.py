@@ -22,6 +22,7 @@
 import os
 import re
 
+from guildcore import config as CF
 from guildcore import ask as ASK
 from guildcore import checks as CH
 from guildcore.checks import visual as V
@@ -50,9 +51,7 @@ def cfg_dict(p):
 
 
 def commands_list(v):
-    if not v:
-        return []
-    return list(v) if isinstance(v, (list, tuple)) else [v]
+    return CF.command_list(v)                       # 0.102.16: the one reader (guildcore.config)
 
 
 def case_ids(text):
@@ -209,6 +208,7 @@ def run(p, only=None, config_present=True):
     if not r.passed and bic:                         # K2r6-B1: env, never a loop-back
         return B.build_inputs_changed(bic, "suite", p.suite_warm, p.suite_warm_detail)
     summ = CH.parse_summary(r.raw, runner, (cfg.get("commands") or {}).get("test_summary"))
+    runner_red = None
     if summ is None and not r.timed_out and not r.passed:
         # 0.102.12 (review-0102-11 M4, japanlifeinfo #227): the package manager could not be fetched offline — an
         # environment stop naming the cache, never a runner-format question
@@ -219,17 +219,27 @@ def run(p, only=None, config_present=True):
         if PMC.offline_fetch_failure(r.raw):
             line = PMC.offline_line("test suite", r.raw, p.root)
             return B.pause(p, STAGE, "env", line, "engine-env-package-manager-offline", env_key="other")
-        if PMC.runner_missing(r.raw):                                  # 0.102.15 (#227): the runner is not installed
+        rm = PMC.runner_missing(r.raw)
+        if rm and B.runner_inputs_changed(p):
+            # 0.102.16 (review-0102-15 m5): the change touched what decides the runner — red, the developer's (loop-back)
+            runner_red = "the test runner did not start: %s (the change touched %s)" % (
+                rm, ", ".join(B.runner_inputs_changed(p)[:4]))
+        elif rm:                                                       # 0.102.15 (#227): the runner is not installed
             line = PMC.runner_missing_line("test suite", r.raw, p.root)
             return B.pause(p, STAGE, "env", line, "engine-env-deps-missing", env_key="other")
-    if summ is None and not r.timed_out:
+    if runner_red:
+        raw_green = False
+    elif summ is None and not r.timed_out:
         d = p.judge(JG.spec(p, "RUNNER", [("raw", r.raw[-4000:])], STAGE, "T2.3"))
         if d.choice not in ("green", "red"):
             return B.pause(p, STAGE, "env", RUNNER_PAUSE, "test summary unreadable", env_key="other")
         raw_green = d.choice == "green" and r.passed
     else:
         raw_green = bool(r.passed and not r.timed_out and (summ is None or summ.green))
-    s_line = r.red_line() or summary_line(r.raw, summ)
+    s_line = r.red_line() or runner_red or summary_line(r.raw, summ)
+    if not r.passed and not r.timed_out and summ is not None and summ.failed == 0:
+        # 0.102.16 (word_app #1797): rc ≠ 0 with no failing test counted — how the failing step ended, not "0 failed"
+        s_line = "rc %s with no failing test counted — %s" % (r.rc, CH.red_tail(r.raw))
     flake = getattr(r, "flake", None)
     from workflows.dev import flake as FL
     if flake and FL.off(p):
@@ -240,6 +250,16 @@ def run(p, only=None, config_present=True):
         FL.record(p, STAGE, flake)
         raw_green = True
         s_line = FL.line(flake)
+    from workflows.dev import base_red as BR
+    br, br_new = getattr(r, "base_red", None), None
+    if br and br.get("excluded") and not raw_green and not r.timed_out and not BR.off(p, cfg):
+        # 0.102.16 (lead decision 3): failures red on the base too, in unchanged test files — the engine env's, left
+        # out (a grading-sheet row); only the NEW ones count
+        BR.record(p, STAGE, br)
+        if not br.get("new"):
+            raw_green, s_line = True, BR.line(br)
+        else:
+            br_new, s_line = list(br["new"]), BR.red_reason(br)
 
     t = _tester(p, cfg, tc_rel, r, s_line, deferred, visual_cases, vrun)
     if isinstance(t, B.StageResult):
@@ -270,7 +290,7 @@ def run(p, only=None, config_present=True):
     pending, env_suspect, images = False, None, []
     if raw_green:
         shown = structured_summary(r, summ, runner, cited_literals(p, covers)) if copy_list else r.raw
-        if flake and flake.get("green"):
+        if (flake and flake.get("green")) or (br and br.get("excluded") and not br_new):
             shown = "%s\n[engine] %s" % (shown, s_line)
         out = _judge_coverage(p, cfg, test_cases, covers, shown, ledger, visual_cases, tc_rel, deferred)
         if isinstance(out, B.StageResult):
@@ -283,13 +303,16 @@ def run(p, only=None, config_present=True):
         elif images:
             env_suspect = _vis_env(p, cfg, images)
     failed_names = list(summ.failed_names) if summ else []
+    if br_new is not None:
+        failed_names = br_new                        # 0.102.16: only the new failures count
     uncovered_all = sorted(set(uncovered + rows_unc))
     passed = raw_green and not uncovered_all and gap is None
     orphans = (tdec or {}).get("orphans") or []
 
     # test:output (Step 2 — before any return that follows)
     ran = cmds
-    not_run = {"e2e": (cfg.get("commands") or {}).get("e2e") or "없음", "more": []}
+    # 0.102.16 (japanlifeinfo #227): commands.e2e may be a list — rendered as one line
+    not_run = {"e2e": CF.command_text((cfg.get("commands") or {}).get("e2e")) or "없음", "more": []}
     vis = cfg.get("visual") or {}
     if (vis.get("tests") or vis.get("baselines")) and vis.get("runnable") is not True:
         not_run["more"].append(R.VRT_NOT_RUN_T % (vis.get("env") or "visual.env"))
@@ -366,7 +389,7 @@ def _tester(p, cfg, tc_rel, r, s_line, deferred, visual_cases, vrun, addendum=No
     inputs = {"raw-output.txt": r.raw, "suite-summary.txt": s_line,
               "visual.txt": "VISUAL_CASES = %s\nVISUAL_RUN = %s\ncommands.vrt = %s\nvisual.env = %s\n" % (
                   "yes" if visual_cases else "no", "yes" if vrun else "no",
-                  (cfg.get("commands") or {}).get("vrt"), (cfg.get("visual") or {}).get("env")),
+                  CF.command_text((cfg.get("commands") or {}).get("vrt")), (cfg.get("visual") or {}).get("env")),
               "safety-net-deferred.txt": "\n".join(deferred) or "none",
               "test-cases-path.txt": tc_rel}
     res = p.run_role(B.RoleCall("tester", task, STAGE, "T1", inputs=inputs, addendum=addendum))

@@ -68,3 +68,35 @@ def commit(cwd, message, paths=None):
     if paths:
         run(cwd, "add", "--", *paths)
     return run(cwd, "commit", "-m", message)
+
+
+def standalone_repo(tree, names, timeout=600):
+    """0.102.16 (one-man-company #687, lead decision 2): an INDEPENDENT git repository in an engine temp tree — a
+    pristine copy has no `.git`, and a test that runs `git rev-parse` / `git ls-files` in it (a full-sweep scanner)
+    failed outside a work tree. `git init`, then exactly `names` (repo-relative paths of regular files / links present in
+    the tree — the worktree's tracked files) added and committed once. No remote, alternates, commondir or any link to
+    another repository; no template (no hook samples), hooks off for the commit and in the repo's own config, no
+    signing, no auto maintenance / gc. The environment is the engine's with every GIT_* dropped and an empty global and
+    no system config, so nothing of the person's or the main repo's git config is read. Returns the number of paths
+    committed. Raises GitError on a git failure."""
+    e = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+    e.update({"GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": os.devnull, "GIT_TERMINAL_PROMPT": "0",
+              "GIT_LITERAL_PATHSPECS": "1", "GIT_CEILING_DIRECTORIES": os.path.dirname(os.path.abspath(tree))})
+    ident = ["-c", "user.name=engine", "-c", "user.email=engine@guild.invalid", "-c", "commit.gpgsign=false",
+             "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", "-c", "init.defaultBranch=main"]
+
+    def g(*args, inp=None):
+        p = subprocess.run(["git"] + ident + list(args), cwd=tree, env=e, input=inp, stdout=subprocess.PIPE,
+                           stderr=subprocess.PIPE, timeout=timeout)
+        if p.returncode != 0:
+            raise GitError("git %s: %s" % (args[0], p.stderr.decode("utf-8", "replace").strip()[:300]))
+        return p.stdout
+    g("init", "-q", "--template=", ".")
+    for k, v in (("core.hooksPath", "/dev/null"), ("maintenance.auto", "false"), ("gc.auto", "0"),
+                 ("commit.gpgsign", "false"), ("user.name", "engine"), ("user.email", "engine@guild.invalid")):
+        g("config", "--local", k, v)
+    names = [n for n in names if n]
+    if names:
+        g("add", "-f", "--pathspec-from-file=-", "--pathspec-file-nul", inp="\0".join(names).encode("utf-8") + b"\0")
+    g("commit", "-q", "--no-verify", "--allow-empty", "-m", "engine: temp tree")
+    return len(names)

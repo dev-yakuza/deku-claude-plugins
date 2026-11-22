@@ -98,7 +98,8 @@ def test_output(issue, steps, raw, verify_line, claim_line, coverage, ran, not_r
         out.append("- %s: %s — %s%s" % (v(ac), verdict, v(", ".join(tests) or "인용 없음"),
                                        (" — " + v(why)) if why else ""))
     out += ["", "### 검증 범위", "- (a) 실행함(증거 있음): %s" % v(", ".join("`%s`" % c for c in ran) or "없음")]
-    out.append("- (b) 실행 안 함: %s" % "; ".join([NOT_RUN_T % v(not_run_extra.get("e2e") or "없음")] +
+    from guildcore import config as CF                   # 0.102.16 (japanlifeinfo #227): a list-valued commands.e2e
+    out.append("- (b) 실행 안 함: %s" % "; ".join([NOT_RUN_T % v(CF.command_text(not_run_extra.get("e2e")) or "없음")] +
                                                [v(x) for x in not_run_extra.get("more", [])]))
     if verbatim or diff_paths:
         out.append("- (c) 기준 이미지 ledger·safety-net 증거 (execute 증거에서 그대로):")
@@ -108,7 +109,7 @@ def test_output(issue, steps, raw, verify_line, claim_line, coverage, ran, not_r
             out.append("- 시각 diff: %s" % v(d))
     else:
         out.append("- (c) 기준 이미지 ledger 없음 (visual 설정 없음)")
-    out.append("- (d) %s" % v(e2e))
+    out.append("- (d) %s" % v(CF.command_text(e2e) or ""))
     if loopback:
         out += loopback_lines(*loopback)
     out.append(markers.close_tag(TEST))

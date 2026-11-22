@@ -87,7 +87,7 @@ class ShimRun(unittest.TestCase):
     def test_a_wrapper_script_flutter_test_gets_no_pub(self):
         r, rd, _t, shim = self._run('flutter test --concurrency=8 --file-reporter "json:$TMPDIR/rep.json"')
         self.assertTrue(r.passed, r.raw)
-        self.assertEqual(shim, "flutter,fvm")
+        self.assertEqual(shim, "flutter,fvm,git")         # 0.102.16: + the git shim
         a = _argv(rd)
         self.assertEqual(a[:3], ["test", "--no-pub", "--concurrency=8"], a)
         self.assertEqual(a.count("--no-pub"), 1)
@@ -155,7 +155,7 @@ class ShimRun(unittest.TestCase):
         rd = _run_dir(self)
         fb = _fakebin(self, ("flutter",))
         env, shim = PO.offline_shims(rd, {"PATH": fb + ":/usr/bin:/bin"})
-        self.assertEqual(shim, "flutter")
+        self.assertEqual(shim, "flutter,git")              # 0.102.16: + the git shim
         sdir = os.path.join(rd, PO.SHIM_DIR)
         self.assertTrue(env["PATH"].startswith(sdir + os.pathsep))
         text = open(os.path.join(sdir, "flutter")).read()
@@ -169,9 +169,13 @@ class ShimRun(unittest.TestCase):
     def test_no_flutter_on_path_no_shim(self):
         rd = _run_dir(self)
         env, shim = PO.offline_shims(rd, {"PATH": "/usr/bin:/bin"})
+        # 0.102.16: git is shimmed whenever it is on PATH; no flutter / fvm shim without the binaries
+        self.assertEqual(shim, "git")
+        self.assertFalse(os.path.exists(os.path.join(rd, PO.SHIM_DIR, "flutter")))
+        empty = tmpdir(self)
+        env, shim = PO.offline_shims(_run_dir(self), {"PATH": empty})
         self.assertIsNone(shim)
-        self.assertEqual(env["PATH"], "/usr/bin:/bin")
-        self.assertFalse(os.path.exists(os.path.join(rd, PO.SHIM_DIR)))
+        self.assertEqual(env["PATH"], empty)
 
     def test_a_link_planted_at_the_shim_dir_is_refused(self):
         rd = _run_dir(self)
@@ -191,7 +195,7 @@ class SuiteInTree(unittest.TestCase):
         res = PO.suite_in_tree(r, None, ["bash tool/hooks/run_tests_judged.sh"], "developer", 60, run_dir, env,
                                warm=False)
         self.assertTrue(res.passed, res.raw)
-        self.assertEqual(res.offline_shim, "flutter,fvm")
+        self.assertEqual(res.offline_shim, "flutter,fvm,git")          # 0.102.16: + git
         a = _argv(run_dir)
         self.assertEqual(a[:3], ["test", "--no-pub", "--concurrency=8"])
         env_seen = open(os.path.join(run_dir, "tmp", "env-flutter")).read()
@@ -199,7 +203,7 @@ class SuiteInTree(unittest.TestCase):
         self.assertIn("PYENV_DIR=<unset>", env_seen)
         PO.keep_raw(run_dir, ["bash tool/hooks/run_tests_judged.sh"], res)
         raw = open(os.path.join(run_dir, "out", "raw.txt")).read()
-        self.assertIn("\nshim: flutter,fvm\nrc: 0", raw)
+        self.assertIn("\nshim: flutter,fvm,git\nrc: 0", raw)
 
     @unittest.skipUnless(MAC, "sandbox-exec only on macOS")
     def test_the_suite_cannot_rewrite_the_shim(self):

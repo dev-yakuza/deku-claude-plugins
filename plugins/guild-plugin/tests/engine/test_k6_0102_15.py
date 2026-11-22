@@ -115,10 +115,14 @@ class B1AllowShape(unittest.TestCase):
         self.assertEqual((alt.status, alt.text), ("DONE", "concerns — effectively macOS-only"))
 
     def test_a_done_word_line_is_done(self):
+        # 0.102.16 (review-0102-15 B1): never for a gate reviewer (the specialist schema) — another role's schema here
+        tl = {"type": "object", "required": ["skeleton"]}
         for ln in ("Done.", "done — review written", "**Done**: all set", "DONE, nothing found", "done"):
-            alt = self._alt("Review written. Something failed once.\n>>> RESULT <<<\n" + ln)
+            alt = self._alt("Review written. Something failed once.\n>>> RESULT <<<\n" + ln, {"skeleton": "s.md"},
+                            schema=tl)
             self.assertIsNotNone(alt, ln)
             self.assertEqual(alt.status, "DONE", ln)
+            self.assertIsNone(self._alt("Review written.\n>>> RESULT <<<\n" + ln), ln)
 
     def test_everything_else_is_the_repair_session(self):
         for reply in (">>> RESULT <<<\nAll set", ">>> RESULT <<<\nLGTM", ">>> RESULT <<<\nDONE_WITH_CONCERNS",
@@ -139,8 +143,10 @@ class B1AllowShape(unittest.TestCase):
         self.assertEqual((res.status, len(self.spawn.calls)), ("BLOCKED", 2))
 
     def test_the_runner_takes_one_session_for_a_done_word(self):
+        # 0.102.16 (review-0102-15 B1): a gate reviewer's `Done.` is its verdict line — the repair session decides
         res = self._run("Review written.\n>>> RESULT <<<\nDone.")
-        self.assertEqual((res.status, len(self.spawn.calls)), ("DONE", 1))
+        self.assertEqual((res.status, len(self.spawn.calls)), ("BLOCKED", 2))
+        # (another role's schema still takes one session — `test_a_done_word_line_is_done`)
 
     def test_no_whole_reply_scan_any_more(self):
         self.assertFalse(hasattr(R, "blocking_token"))
@@ -279,7 +285,7 @@ class m2VscodeKeys(unittest.TestCase):
         b = SC.integrity(wt)
         git(wt, "config", "--local", "branch.main.vscode-merge-base", "origin/main")
         self.assertEqual(SC.integrity(wt), b)
-        self.assertEqual(SC.INTEGRITY_FORMAT, 3)
+        self.assertGreaterEqual(SC.INTEGRITY_FORMAT, 3)       # 0.102.16: 4 (the info hash)
 
 
 class m4Redaction(unittest.TestCase):
@@ -494,7 +500,7 @@ class B227Pnpm(unittest.TestCase):
             self.assertFalse(os.path.exists(os.path.join(root, marker)))
         self.assertFalse(os.path.lexists(os.path.join(root, "node_modules")))
         self.assertEqual(os.listdir(os.path.join(rd, "tmp")).count("pnpm-fetch"), 0)   # its dir is removed
-        self.assertIn("pnpm fetch --ignore-scripts --store-dir", " ".join(s["cmd"] for s in r.steps))
+        self.assertIn("pnpm fetch --ignore-scripts --ignore-pnpmfile --store-dir", " ".join(s["cmd"] for s in r.steps))
 
     def test_deps_main_fetches_and_links_no_npm_install(self):
         root = self._workspace()

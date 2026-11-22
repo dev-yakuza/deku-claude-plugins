@@ -22,6 +22,7 @@ import os
 import re
 import tempfile
 
+from guildcore import config as CF
 from guildcore import ask as ASK
 from guildcore import checks as CH
 from guildcore.checks import visual as V
@@ -433,7 +434,8 @@ def _inputs(p, cx, retry_note):
     if cx.variant == "refactor":
         prev = RN.render_block(cx.net_prev) if cx.net_prev else "none"
         ins["net.md"] = ("SAFETY_NET = %s\nearlier net:\n%s\nrunnable here: %s\nmerge base: %s\nbranch: %s\n" % (
-            cx.net_mode, prev, (cfg_dict(p).get("commands") or {}).get("test"), p.vcs.merge_base(p.base), p.branch)
+            cx.net_mode, prev, CF.command_text((cfg_dict(p).get("commands") or {}).get("test")), p.vcs.merge_base(p.base),
+            p.branch)
             if cx.net_mode != "none" else "SAFETY_NET = none")
     return ins
 
@@ -581,8 +583,7 @@ def local_step(p, cx):
 # ---- X2 evidence ------------------------------------------------------------------------------------
 
 def suite_cmds(p):
-    cmds = (cfg_dict(p).get("commands") or {}).get("test")
-    return list(cmds) if isinstance(cmds, (list, tuple)) else ([cmds] if cmds else [])
+    return CF.command_list((cfg_dict(p).get("commands") or {}).get("test"))     # 0.102.16: the one reader
 
 
 def evidence_step(p, cx, dev, attempt):
@@ -630,11 +631,17 @@ def evidence_step(p, cx, dev, attempt):
         if not r.passed and PMC.offline_fetch_failure(r.raw):
             line = PMC.offline_line("execute suite", r.raw, getattr(p, "root", None))
             return env_pause(p, line, "engine-env-package-manager-offline", "X2.3")
-        if not r.passed and PMC.runner_missing(r.raw):              # 0.102.15 (#227): `Command "turbo" not found`
+        rm = PMC.runner_missing(r.raw) if not r.passed else None
+        if rm and B.runner_inputs_changed(p):
+            # 0.102.16 (review-0102-15 m5): the change touched what decides the runner — the developer's, a loop-back
+            green, reason = False, "suite red — the test runner did not start: %s (the change touched %s)" % (
+                rm, ", ".join(B.runner_inputs_changed(p)[:4]))
+        elif rm:                                                     # 0.102.15 (#227): `Command "turbo" not found`
             line = PMC.runner_missing_line("execute suite", r.raw, getattr(p, "root", None))
             return env_pause(p, line, "engine-env-deps-missing", "X2.3")
-        return env_pause(p, "테스트 요약 형식을 읽지 못함 — commands.test_summary 를 설정하세요",
-                         "테스트 요약 형식을 읽지 못함", "X2.3")
+        else:
+            return env_pause(p, "테스트 요약 형식을 읽지 못함 — commands.test_summary 를 설정하세요",
+                             "테스트 요약 형식을 읽지 못함", "X2.3")
     else:
         green = bool(r.passed and summ.green)
         flake = getattr(r, "flake", None)
@@ -644,8 +651,21 @@ def evidence_step(p, cx, dev, attempt):
             # re-ran green — green, with a flake note (a grading-sheet row)
             FL.record(p, STAGE, flake)
             green, cx.flake_line = True, FL.line(flake)
-        if not green:
-            reason = ("suite red — %d failed" % summ.failed) if copy_ignored_list(p) else \
+        from workflows.dev import base_red as BR
+        br = getattr(r, "base_red", None)
+        if not green and br and br.get("excluded") and not BR.off(p, cfg_dict(p)):
+            # 0.102.16 (lead decision 3): failures red on the base too, in test files the change did not touch, are
+            # the engine env's — left out (a grading-sheet row); only the NEW ones count and reach the retry note
+            BR.record(p, STAGE, br)
+            if not br.get("new"):
+                green, cx.flake_line = True, BR.line(br)
+        else:
+            br = None
+        if not green and not br and summ.failed == 0 and not r.passed:
+            # 0.102.16 (word_app #1797): the runner counted no failing test but the command failed — say how it ended
+            reason = "suite red — rc %s with no failing test counted — %s" % (r.rc, CH.red_tail(r.raw))
+        elif not green:
+            reason = BR.red_reason(br) if br else ("suite red — %d failed" % summ.failed) if copy_ignored_list(p) else \
                 "suite red — %s" % (r.red_line() or ("failed: %s" % ", ".join(summ.failed_names[:3])
                                                       if summ.failed_names else "failed"))
     if dep_reason:

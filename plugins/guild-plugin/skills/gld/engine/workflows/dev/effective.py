@@ -995,6 +995,7 @@ class TempTree(object):
         self.linked = []
         self.dep_skipped = []                 # 0.102.15: dep dirs not linked (pnpm node_modules, parent absent)
         self.warm = None
+        self.git = None                       # 0.102.16: the tree's own git repo (`make_git`)
 
     def copy_listed(self, paths):
         """The repo's opt-in `engine.effective.copy_ignored` (K2 r3): explicit relative paths of
@@ -1198,6 +1199,55 @@ class TempTree(object):
                 continue
             self.linked.append(real)
 
+    def to_base(self, paths):
+        """0.102.16 (`base_red`): every path of the change back to `self.base` — present at the base → the base's
+        blob (regular files only, else ValueError), absent there → removed. The tree then holds the base's files where
+        the change touched them (it was warmed at the base, so its caches fit)."""
+        for f in paths:
+            n = os.path.normpath(f)
+            dst = self._inside(n)
+            if dst is None:
+                raise ValueError("path escapes the temp tree: %s" % f)
+            if G.ok(self.root, "cat-file", "-e", "%s:%s" % (self.base, n)):
+                self._put(self.base, n, dst)
+            elif os.path.lexists(dst):
+                if os.path.isdir(dst) and not os.path.islink(dst):
+                    raise ValueError("a directory where the base has nothing: %s" % f)
+                os.remove(dst)  # fs-ok: path checked by self._inside() (realpath inside the temp tree, K2-B4)
+        self.rev = self.base
+
+    def make_git(self, rev=None):
+        """0.102.16 (one-man-company #687, lead decision 2): the temp tree becomes its OWN git repository
+        (`G.standalone_repo`) holding exactly the worktree's tracked files present in the tree (`rev` given: that rev's
+        files — the base re-run of `base_red`). A test that runs `git rev-parse --is-inside-work-tree` / `git ls-files`
+        (a full-sweep scanner) sees a work tree instead of failing. Outside the sandbox, after the overlay and the
+        ignored entries; a `.git` already there (an earlier call) is replaced. Never a link to the real repository.
+        Records `self.git` ("ok(<n> files)" | "failed(<why>)") — a failure never stops the suite."""
+        try:
+            if rev:
+                out = G.run(self.root, "ls-tree", "-r", "-z", "--name-only", rev)
+            else:
+                out = G.run(self.root, "ls-files", "-z")
+            names = []
+            for n in sorted(set(x for x in out.decode("utf-8", "replace").split("\0") if x)):
+                rel = os.path.normpath(n)
+                if rel.startswith("..") or os.path.isabs(rel) or rel.split(os.sep)[0] == ".git":
+                    continue
+                dst = self._inside(rel)
+                if dst is None or not os.path.lexists(dst) or (os.path.isdir(dst) and not os.path.islink(dst)):
+                    continue
+                names.append(n)
+            gd = os.path.join(self.path, ".git")
+            if os.path.lexists(gd):
+                if os.path.islink(gd) or not os.path.isdir(gd):
+                    os.remove(gd)  # fs-ok: the engine's own temp tree root entry (lstat'ed: never followed)
+                else:
+                    shutil.rmtree(gd, True)  # fs-ok: the engine's own temp tree; rmtree never follows links
+            self.git = "ok(%d files)" % G.standalone_repo(self.path, names)
+        except (G.GitError, OSError, ValueError) as e:
+            self.git = "failed(%s)" % str(e).split("\n")[0][:160]
+        return self.git
+
     def __exit__(self, *exc):
         if self.path:
             _LINKED.pop(os.path.realpath(self.path), None)
@@ -1267,6 +1317,7 @@ def prepared_tree(root, base, files, warm=None, copy_list=(), overlay=False, bui
                 tt.advance(target)
             tt.finish_ignored()
         tt.copy_listed(copy_list or [])
+        info["tree_git"] = tt.make_git()             # 0.102.16: the tree's own git repo (lead decision 2)
         yield tt, info
 
 

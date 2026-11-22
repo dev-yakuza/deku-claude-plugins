@@ -141,6 +141,33 @@ def _tree_hash(root):
     return h.hexdigest()
 
 
+# 0.102.16 (japanlifeinfo #227 on 0.102.15 — lead decision): `.git/info/` also holds files git itself rewrites as
+# bookkeeping — `info/refs` (`git update-server-info`, run after a fetch / gc) and `info/packs` — and the whole-dir hash
+# read such a rewrite before the run as a late change (paused "developer not started — 1 late change(s): info …").
+# The info hash covers only what changes execution: `exclude`, `attributes`, `sparse-checkout` (an allow-list; any
+# other file there is not hashed). INTEGRITY_FORMAT 4 (a format-only difference is re-taken silently).
+INFO_FILES = ("attributes", "exclude", "sparse-checkout")
+
+
+def _info_hash(root):
+    """The hash of the execution-relevant files of a git dir's `info/` (`INFO_FILES`), or None when there is no
+    `info/` dir."""
+    if not root or not os.path.isdir(root):
+        return None
+    h = hashlib.sha1()
+    for f in INFO_FILES:
+        fp = os.path.join(root, f)
+        if not os.path.lexists(fp):
+            continue
+        h.update(f.encode())
+        h.update((_hash(fp) or "").encode())
+        try:
+            h.update(oct(os.lstat(fp).st_mode).encode())
+        except OSError:
+            pass
+    return h.hexdigest()
+
+
 # 0.102.13 (review-0102-12 M3, japanlifeinfo #227 — lead decision): a person's ordinary branch bookkeeping in the main
 # checkout (`branch -D`, `checkout -b --track`, `push -u`, VS Code's `vscode-merge-base`) rewrites `.git/config` but
 # changes nothing a role's or check's execution reads. The integrity hash covers only execution-relevant keys — every
@@ -178,13 +205,15 @@ def _config_hash(args, cwd):
 # snapshot. 0.102.13 changed the git-config hashes (execution-relevant keys only), so a baseline written by 0.102.12
 # read as two late config changes on resume. A baseline of another (or no) format whose ONLY late items are these
 # config hashes is re-taken silently (`config_format_only`, journal `rebaseline-format`) — never a drift question.
-INTEGRITY_FORMAT = 3
-CONFIG_ITEM_PREFIXES = ("git config ", "config file ")
+INTEGRITY_FORMAT = 4
+# 0.102.16: the info hash changed format too (`_info_hash`) — a late `info …` item of another format is re-taken alike
+CONFIG_ITEM_PREFIXES = ("git config ", "config file ", "info ")
 
 
 def config_format_only(baseline, late):
     """True when `baseline` was written in another integrity format (or none) and every late item is a git-config
-    hash — nothing else differs, so the difference is the hash format, not a change."""
+    hash (0.102.16: or a git dir's info hash) — nothing else differs, so the difference is the hash format, not a
+    change."""
     if not late or (baseline or {}).get("integrity_format") == INTEGRITY_FORMAT:
         return False
     return all(any(x.startswith(p) for p in CONFIG_ITEM_PREFIXES) for x in late)
@@ -201,7 +230,7 @@ def integrity(worktree, watch_files=()):
         out["git config " + scope] = _config_hash([scope], worktree)
     for k in sorted(set(gp.values())):
         out["hooks " + k] = _tree_hash(os.path.join(k, "hooks"))
-        out["info " + k] = _tree_hash(os.path.join(k, "info"))
+        out["info " + k] = _info_hash(os.path.join(k, "info"))
         cf = os.path.join(k, "config")
         out["config file " + k] = _config_hash(["--file", cf], worktree) if os.path.isfile(cf) else _hash(cf)
     for f in watch_files or ():
@@ -580,6 +609,8 @@ def revert_writes(worktree, paths, cap=1200, keep_dir=None, after=None):
         if keep_dir and not row.get("error") and not via:
             try:
                 if kind == "file":
+                    if behind_link(worktree, p):          # 0.102.16 (m2): parents re-checked right before the read
+                        raise OSError("not copied: a parent became a symlink (%s)" % behind_link(worktree, p))
                     data = _read_regular(full, COPY_CAP)
                     if data is None:
                         raise OSError("not copied (no regular file any more, or larger than %d bytes)" % COPY_CAP)
@@ -610,6 +641,8 @@ def revert_writes(worktree, paths, cap=1200, keep_dir=None, after=None):
                 text = "(behind the symlink %s — never opened)" % row.get("link_at")
             elif kind == "link":
                 text = "(symlink to %s)" % row.get("link")
+            elif kind == "file" and behind_link(worktree, p):
+                text = "(a parent became a symlink — never opened)"            # 0.102.16 (m2)
             elif kind == "file":
                 data = _read_regular(full, 8192)
                 if data is not None and b"\0" in data:
@@ -624,7 +657,7 @@ def revert_writes(worktree, paths, cap=1200, keep_dir=None, after=None):
             text = ""
         if row["tracked"]:
             if kind == "link":
-                _unlink_as(full, "link", row)  # removes the role's link itself (never followed) before git restores HEAD
+                _unlink_as(full, "link", row, worktree, p)  # removes the role's link itself (never followed) before git restores HEAD
             G.run(worktree, "reset", "-q", "HEAD", "--", p, check=False)     # a staged rename / deletion side
             G.run(worktree, "checkout", "HEAD", "--", p)              # the git adapter: the one mutating door
         elif kind == "behind-link":
@@ -635,7 +668,7 @@ def revert_writes(worktree, paths, cap=1200, keep_dir=None, after=None):
             G.run(worktree, "reset", "-q", "HEAD", "--", p, check=False)
             G.run(worktree, "rm", "-q", "--cached", "--ignore-unmatch", "--", p, check=False)
             if os.path.lexists(full) and (row.get("copy") or row.get("link") is not None or not keep_dir):
-                _unlink_as(full, kind, row)
+                _unlink_as(full, kind, row, worktree, p)
         out.append((p, " ".join(text.split())[:cap]))
     if keep_dir and any(r.get("unlink") for r in rows):
         try:                                              # the unlink notes too (best effort — the copies are kept)
@@ -645,10 +678,14 @@ def revert_writes(worktree, paths, cap=1200, keep_dir=None, after=None):
     return out
 
 
-def _unlink_as(full, kind, row):
+def _unlink_as(full, kind, row, worktree=None, rel=None):
     """Unlink `full` only while it is still the recorded kind (a link / regular file) and no parent is a link; a path
     that changed meanwhile (an earlier `checkout` turned a link back into a directory) or an unlink that fails is
     recorded on the row (`unlink`), never raised (0.102.15 review-0102-13 M1)."""
+    via = behind_link(worktree, rel) if worktree and rel else None
+    if via:                                       # 0.102.16 (review-0102-15 m2): parents re-checked right before
+        row["unlink"] = "skipped: behind the symlink %s now" % via
+        return
     now, _st = _lkind(full)
     if now != kind or kind not in ("link", "file"):
         row["unlink"] = "skipped: now %s (was %s)" % (now, kind)

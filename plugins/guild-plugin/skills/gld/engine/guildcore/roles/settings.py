@@ -353,6 +353,10 @@ def role_sandbox(role_key, worktree, run_dir, issue=None, homes=(), config_dir=N
         deny_r.append(os.path.abspath(config_dir))
     if role_key in WRITER_ROLES or toolchain:
         allow_w += list(tool_writes)
+    # 0.102.16 (review-0102-15 S1): the engine's pnpm store and the user's own are never writable — by a role, a suite,
+    # a flake / effective re-run or the refactor net (only the engine's networked `pnpm fetch` lifts the engine one)
+    from guildcore.checks import pmcache as PMC
+    deny_w += [x + "/**" for x in PMC.protected_stores()]
     deny_w = list(dict.fromkeys(deny_w))
     deny_r = list(dict.fromkeys(deny_r))
     weaker_net = (role_key in WRITER_ROLES and bool(worktree)
@@ -525,7 +529,10 @@ def flutter_sdk(worktree):
 TOOLCHAIN_CACHES = {
     "pubspec.yaml": (".pub-cache", ".dart-tool", ".dartServer", ".flutter", ".flutter-devtools",
                      ".config/flutter", "fvm", "Library/Caches/flutter_engine"),
-    "package.json": (".npm", ".yarn", "Library/Caches/Yarn", "Library/pnpm", ".cache/node-gyp"),
+    # 0.102.16 (review-0102-15 S1): no `Library/pnpm` — the engine installs pnpm dependencies itself (offline, from its
+    # own store); a suite or a role writing a pnpm store would poison every later install (the user's, outside any
+    # sandbox, too). Every pnpm store is denyWrite in every sandbox (`role_sandbox`).
+    "package.json": (".npm", ".yarn", "Library/Caches/Yarn", ".cache/node-gyp"),
     "pyproject.toml": (".cache/pip", "Library/Caches/pip", ".cache/uv"),
     "requirements.txt": (".cache/pip", "Library/Caches/pip"),
     "go.mod": ("go/pkg/mod", "Library/Caches/go-build"),

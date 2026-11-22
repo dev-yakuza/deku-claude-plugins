@@ -57,6 +57,22 @@ class ConfigError(Exception):
     pass
 
 
+def command_list(v):
+    """0.102.16 (japanlifeinfo #227): a `commands.*` value is a string OR a list of strings (`"e2e": ["pnpm build:e2e",
+    "pnpm --filter visa-home test:e2e"]`) — [] / [str, …]. The one reader for every place that runs or compares one."""
+    if v is None or v == "" or v is False:
+        return []
+    if isinstance(v, (list, tuple)):
+        return [str(x) for x in v if x is not None and str(x).strip()]
+    return [str(v)]
+
+
+def command_text(v):
+    """A `commands.*` value as ONE line for a person / a role input (a list → `a && b`), or None when unset."""
+    xs = command_list(v)
+    return " && ".join(xs) if xs else None
+
+
 class Config(object):
     def __init__(self, raw, root, warnings):
         self.raw = raw

@@ -32,6 +32,7 @@ import time
 import uuid
 
 from guildcore import cost as COST
+from guildcore import gitshim as GS
 from guildcore import ratelimit as RL
 from guildcore.adapters import claude as C
 from guildcore.adapters import git as G
@@ -593,6 +594,12 @@ class Runner(object):
         if tools:
             # non-setuid ps first on PATH — setuid binaries cannot run in the sandbox (K1r5)
             gitenv["PATH"] = tools + os.pathsep + env.get("PATH", "")
+        # 0.102.16 (one-man-company #687, lead decision 1): the engine's git shim first on the role's PATH too — a
+        # test the role runs that strips GIT_* gets the rendered global config back instead of the denied ~/.gitconfig
+        # (in/ is denyWrite for the role; the shim execs the real git by absolute path)
+        gshim = GS.write(run_dir, os.path.join("in", "engine-shim"), env, run_dir)
+        if gshim:
+            gitenv["PATH"] = gshim + os.pathsep + gitenv.get("PATH", env.get("PATH", ""))
         # user decision (2026-11-18): the role's commit hook reads <base>'s lefthook config; <base>
         # unknown → LEFTHOOK=0 (fail closed, K4r2-m2 — never the branch's config)
         lh = S.base_lefthook_env(spec.worktree, rendered.meta.get("project_base_sha") if spec.base else None,

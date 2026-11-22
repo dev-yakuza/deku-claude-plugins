@@ -843,3 +843,38 @@ def own_children_or_stop(p, stage, include_withdrawn=False):
         if ex.kind == "ambiguous":
             return None, unknown_create(p, stage, line, ex)
         return None, fail(p, stage, line, "transient" if ex.kind == "transient" else "defect")
+
+
+# 0.102.16 (review-0102-15 m5): a runner that is not installed is an environment stop only when the change touched none
+# of the files that decide which runner runs (manifests and their scripts, lockfiles, workspace / runner configs);
+# otherwise it is the developer's (`"test": "vitestt run"` → `sh: vitestt: command not found`) — a loop-back with the line.
+import re as _re
+RUNNER_INPUT_RE = _re.compile(r"^(package\.json|package-lock\.json|npm-shrinkwrap\.json|yarn\.lock|pnpm-lock\.yaml|"
+                              r"pnpm-workspace\.yaml|bun\.lockb?|\.npmrc|\.yarnrc(\.yml)?|\.nvmrc|\.node-version|"
+                              r"turbo\.json|nx\.json|lerna\.json|"
+                              r"(vitest|jest|vite|playwright|karma|mocha|ava)\.config\.[A-Za-z.]+|\.mocharc\.[A-Za-z]+|"
+                              r"pubspec\.(yaml|lock)|pubspec_overrides\.yaml|dart_test\.yaml|"
+                              r"pytest\.ini|tox\.ini|setup\.cfg|pyproject\.toml|requirements[\w.-]*\.txt|"
+                              r"go\.(mod|sum)|Cargo\.(toml|lock)|Makefile)$")
+
+
+def runner_inputs_changed(p):
+    """The paths of the change (`base...HEAD` + the worktree's uncommitted ones) that decide the runner — [] when none
+    (or the change cannot be read)."""
+    from guildcore.adapters import git as G
+    root = getattr(p, "root", None)
+    base = getattr(p, "base", None)
+    if not root or not os.path.isdir(root) or not G.ok(root, "rev-parse", "--git-dir"):
+        return []
+    names = set()
+    try:
+        if base:
+            mb = G.run(root, "merge-base", base, "HEAD", check=False).decode().strip()
+            if mb:
+                names.update(x for x in G.run(root, "diff", "--name-only", "-z", "--no-renames", mb, "HEAD",
+                                              check=False).decode("utf-8", "replace").split("\0") if x)
+        names.update(x for x in G.run(root, "ls-files", "-z", "-m", "-o", "--exclude-standard",
+                                      check=False).decode("utf-8", "replace").split("\0") if x)
+    except Exception:                                  # noqa: BLE001 — unreadable → the env stop as before
+        return []
+    return sorted(f for f in names if RUNNER_INPUT_RE.match(os.path.basename(f)) or f.startswith("scripts/"))

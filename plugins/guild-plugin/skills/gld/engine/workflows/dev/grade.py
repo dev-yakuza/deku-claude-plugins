@@ -96,6 +96,7 @@ def _engine_made(b):
 
 FLAKE_POINT = "flake"            # 0.102.6 M5: the code's flake note (`flake.record`) — a sheet row of its own
 FLAKE_GROUP = "flake"
+BASE_RED_GROUP = "base-red"      # 0.102.16: the code's base-red note (`base_red.record`) — a sheet row of its own
 
 
 def code_trigger_row(b):
@@ -685,8 +686,9 @@ def apply_judgments(common, rows, repo, version, irreversible=lambda row: False,
         if gi == "wrong":
             st["streak"][g] = 0
             ph = (row.get("mode") or "") == POSTHOC_MODE
-            if g == FLAKE_GROUP:
+            if g in (FLAKE_GROUP, BASE_RED_GROUP):
                 ph = True                          # 0.102.6 M5: a masked real failure — flakes are no longer taken
+                #                                    (0.102.16: base-red alike — `group.base-red.conservative`)
             if g in st["watch"] or g in IRREVERSIBLE or irreversible(row) or ph:
                 # 0.102.5: a confirmed wrong on a decision that ran unasked (post-hoc) puts the group back on the
                 # asking path at once (user decision 2026-11-22)

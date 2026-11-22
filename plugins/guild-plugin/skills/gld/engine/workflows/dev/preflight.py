@@ -123,9 +123,11 @@ TOOL_OUTPUT_RE = re.compile(r"(^|/)flutter_\d+\.log$|^[^/]+\.log$|(^|/)(build|\.
 
 
 def _named(raw, rel):
-    """`raw` names `rel` path-bounded (a `/`, space, quote or `(` before it; end, `/`, space, quote, `:`, `)`, `,`, `.`
-    after it)."""
-    return re.search(r"(^|[/\s'\"(])%s(?=$|[/\s'\":),.])" % re.escape(rel), raw, re.M) is not None
+    """`raw` names `rel` path-bounded (a space, quote or `(` before it — 0.102.16 (review-0102-15 m1): no longer a `/`,
+    so a component of another absolute path (`/private/tmp/claude-502/…` for a root `tmp/`) is no mention; the temp
+    tree's and the checkout's own prefixes are stripped first by `missing_ignored`; end, `/`, space, quote, `:`, `)`,
+    `,`, `.` after it)."""
+    return re.search(r"(^|[\s'\"(])%s(?=$|[/\s'\":),.])" % re.escape(rel), raw, re.M) is not None
 
 
 def missing_ignored(raw, root, skipped, tree=None):
@@ -134,10 +136,14 @@ def missing_ignored(raw, root, skipped, tree=None):
     still lacks it after the run and the main checkout holds it as a git-ignored file, tool outputs
     (`flutter_N.log`, a root `*.log`, `build/`, `.dart_tool/`, `coverage/`) never."""
     raw = raw or ""
+    named = raw
+    for b in [x for x in (tree, root) if x]:            # 0.102.16 (m1): `<tree>/tmp/x` names `tmp` — relative first
+        for pre in sorted(set([os.path.realpath(b).rstrip("/") + "/", b.rstrip("/") + "/"]), key=len, reverse=True):
+            named = named.replace(pre, "")
     cands = []
     for x in skipped or []:
         rel = x.rstrip("/")
-        if rel and _named(raw, rel) and rel not in cands:
+        if rel and _named(named, rel) and rel not in cands:
             cands.append(rel)
     found = []
     for rx in MISSING_PATH_RES:

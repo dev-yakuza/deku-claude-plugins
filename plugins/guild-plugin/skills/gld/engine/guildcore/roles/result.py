@@ -97,7 +97,10 @@ def _status_of(line):
     B1). (None, None) when it is no status line."""
     m = _STATUS_RE.match(line)
     if m:
-        return m.group(1) or m.group(3), (m.group(2) if m.group(1) else m.group(4)) or None
+        st, tx = m.group(1) or m.group(3), (m.group(2) if m.group(1) else m.group(4)) or None
+        if st == "DONE" and tx and _DONE_THEN_STATUS_RE.match(tx):
+            return None, None                   # 0.102.16 (review-0102-15 B1): `DONE: BLOCKED: x` → repair
+        return st, tx
     m = _LOOSE_RE.match(line)
     if m:
         status = m.group(1)
@@ -106,6 +109,8 @@ def _status_of(line):
         else:
             text = (m.group(2) or "").strip()
         text = text or None
+        if status == "DONE" and text and _DONE_THEN_STATUS_RE.match(text):
+            return None, None                   # 0.102.16 (review-0102-15 B1): `DONE — BLOCKED: x` is no DONE → repair
         if status != "DONE" and not text:
             m = None
         else:
@@ -127,6 +132,15 @@ _BLOCKING_LINE_RE = re.compile(r"^[*`_\s]*(?:status\s*[:：=]?\s*)?[*`_]*(blocke
 # `done — …`, `**done**`), never `done_with_concerns`. A deny-list of blocking words (0.102.13) leaves every other
 # spelling of a refusal (`REJECTED: …`, `CHANGES_REQUESTED`, a Japanese refusal, no marker at all) open.
 _DONE_WORD_RE = re.compile(r"^[*`_\s]*done(?![A-Za-z0-9_])", re.I)
+# 0.102.16 (review-0102-15 B1 — lead decision: k6-notes user-decision candidate 5 "done, but blocked" → DONE is
+# REJECTED): shape (b) counts only when its line holds no OTHER status word of the enum (or of a reviewer's verdict) —
+# `done — BLOCKED: …`, `Done, but FAIL: …`, `Done reviewing — REJECTED: …`, `done: NOT approved — CHANGES_REQUESTED`
+# take the repair session (0.102.13 / 0.102.14 did; 0.102.15 read them DONE — a gate reviewer's block lost).
+_OTHER_STATUS_RE = re.compile(r"(?<![A-Za-z0-9])(blocked|fail(?:ed|s|ure)?|needs[_ -]?context|halted|rejected|"
+                              r"changes[_ -]?requested|done_with_concerns)(?![A-Za-z0-9])", re.I)
+# a DONE line whose text starts with another status of the enum (upper case, as the enum writes it)
+_DONE_THEN_STATUS_RE = re.compile(r"^[*`_\s]*(BLOCKED|FAIL|NEEDS_CONTEXT|DONE_WITH_CONCERNS|HALTED|REJECTED|"
+                                  r"CHANGES_REQUESTED)(?![A-Za-z0-9])")
 
 
 def _filled(v):
@@ -161,6 +175,9 @@ def structured_pres(pres, obj, allowed=STATUSES, reply="", schema=None):
     repair session (once, then INVALID). No whole-reply word scan any more (review-0102-13 m1)."""
     if pres is None or pres.ok:
         return None
+    if schema is not None and schema == RESULT_SCHEMAS["specialist"]:
+        return None                             # 0.102.16 (review-0102-15 B1): a gate reviewer's verdict IS its status
+        #                                         line — never the result.json stand-in (a refusal in any wording)
     if (reply or "").count(SENTINEL) != 1 or pres.violation not in ("narrowed", "invalid"):
         return None
     if not required_filled(obj, schema):
@@ -171,6 +188,8 @@ def structured_pres(pres, obj, allowed=STATUSES, reply="", schema=None):
         return None
     if "DONE" not in allowed or not _DONE_WORD_RE.match(_after_sentinel(reply)):
         return None
+    if _OTHER_STATUS_RE.search(_after_sentinel(reply)):
+        return None                             # 0.102.16 (review-0102-15 B1): another status word on the line
     st = obj.get("status")
     if isinstance(st, str) and st.strip() and st.strip().upper() != "DONE":
         return None

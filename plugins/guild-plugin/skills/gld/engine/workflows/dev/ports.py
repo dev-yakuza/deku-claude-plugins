@@ -19,6 +19,7 @@ import subprocess
 
 from guildcore import capture as CAP
 from guildcore import fsafe as FS
+from guildcore import gitshim as GS
 from guildcore import checks as CH
 from guildcore.adapters import claude as C
 from guildcore.adapters import git as G
@@ -266,8 +267,8 @@ def _shim_text(name, real):
 
 
 def offline_shims(run_dir, env):
-    """0.102.14: (env with `<run_dir>/engine-shim` first on PATH, "flutter,fvm" — the shims written) for an OFFLINE
-    suite run; (env, None) when neither binary is on the env's PATH. The real binaries are resolved NOW, on the PATH
+    """0.102.14: (env with `<run_dir>/engine-shim` first on PATH, "flutter,fvm,git" — the shims written) for an OFFLINE
+    suite run; (env, None) when none of them is on the env's PATH. 0.102.16: `git` (`guildcore.gitshim`). The real binaries are resolved NOW, on the PATH
     without the shim dir, to absolute paths."""
     import shutil
     env = dict(env if env is not None else os.environ)
@@ -283,6 +284,10 @@ def offline_shims(run_dir, env):
         FS.write_text(os.path.abspath(run_dir), os.path.join(SHIM_DIR, name),
                       _shim_text(name, os.path.abspath(real)), mode=0o755)
         made.append(name)
+    # 0.102.16 (one-man-company #687, lead decision 1): `git` too — a test helper that strips every GIT_* variable
+    # dropped the engine's GIT_CONFIG_GLOBAL / GIT_CONFIG_NOSYSTEM and git aborted on the denied ~/.gitconfig (rc 128)
+    if GS.write(run_dir, SHIM_DIR, dict(env, PATH=search), run_dir):
+        made.append(GS.NAME)
     if not made:
         return env, None
     env["PATH"] = sdir + os.pathsep + search
@@ -290,7 +295,7 @@ def offline_shims(run_dir, env):
 
 
 def suite_in_tree(worktree, base, cmds, owner, timeout_s, run_dir, env, copy_list=(), issue=None,
-                  extra_roots=(), journal=None, warm=True):
+                  extra_roots=(), journal=None, warm=True, base_red=True, summary_config=None):
     """K2r4-M2 / K2r5-B1: the main suite in a temp tree prepared exactly like the effective re-runs
     (`effective.prepared_tree`): pristine <base> warmed in place under the deps proxy (unless the
     build inputs changed or there is no base) → HEAD + the worktree's uncommitted non-ignored files
@@ -380,6 +385,24 @@ def suite_in_tree(worktree, base, cmds, owner, timeout_s, run_dir, env, copy_lis
             r.tree_kb = int(du.stdout.split()[0]) if du.stdout else None
         except (OSError, subprocess.SubprocessError, ValueError):
             r.tree_kb = None
+        r.tree_git = info.get("tree_git")            # 0.102.16: the tree's own git repo (lead decision 2)
+        r.base_red = None
+        if base_red and base and not r.passed and not r.timed_out and not r.flake and not r.build_inputs_changed:
+            # 0.102.16 (lead decision 3): the failing test files the change did not touch, once more on the base in this
+            # tree / sandbox / env — LAST (it moves the tree to the base); only a tree warmed at the base (`none`)
+            from workflows.dev import base_red as BR
+            kind = info["build_inputs"]
+            if kind is None:
+                extra = [x for x in G.run(worktree, "ls-files", "-m", check=False).decode("utf-8", "replace").split("\n")
+                         if x]
+                kind = EFF.build_inputs(worktree, base, extra, EFF.uses_build_runner(cmds))[0]
+            if kind == "none":
+                def _base_one(c):
+                    return CH.run_command([c], timeout_s, cwd=tt.path, env=env, journal=journal,
+                                          who="check-%s" % owner, sandbox=sb, tmp=os.path.join(run_dir, "tmp"))
+                r.base_red = BR.check(r, cmds, worktree, base, tt, _base_one,
+                                      (tt.path, os.path.realpath(tt.path), worktree, os.path.realpath(worktree)),
+                                      config=summary_config, env=env)
         r.raw = r.raw.replace(os.path.realpath(tt.path), worktree).replace(tt.path, worktree)
         r.warm = info["warm"] or ("skipped(no base)" if not base else None)
         r.warm_detail = info.get("warm_detail")
@@ -573,29 +596,38 @@ def install_check_tools(worktree, run_dir, env, mans, tools, copy_list=(), issue
 # * no node_modules is linked into a pnpm temp tree (`effective.TempTree`), the npm suite install is not made;
 # * an offline install failure (lockfile drift, a package not in the store) is `env` (`engine-env-deps-offline`).
 # The store is passed as --store-dir explicitly (`~/.npmrc` is denyRead). The npm path is unchanged for other repos.
-PNPM_FETCH = "pnpm fetch --ignore-scripts --store-dir %s"
+PNPM_FETCH = "pnpm fetch --ignore-scripts --ignore-pnpmfile --store-dir %s"     # 0.102.16 (m4): + --ignore-pnpmfile
 PNPM_OFFLINE = "pnpm install --offline --frozen-lockfile --ignore-scripts --ignore-pnpmfile --store-dir %s"
 PNPM_INPUTS = ("pnpm-lock.yaml", "pnpm-workspace.yaml")
 
 
-def pnpm_fetch(worktree, run_dir, env, copy_list=(), issue=None, timeout_s=1800):
-    """The networked half for a pnpm repo → (CheckResult, proxy). The worktree's lockfile (+ workspace file) only —
-    regular files, never through a link — in a fresh dir under the run's tmp."""
+def pnpm_fetch(worktree, run_dir, env, copy_list=(), issue=None, timeout_s=1800, base=None):
+    """The networked half for a pnpm repo → (CheckResult, proxy). The worktree's lockfile only — a regular file, never
+    through a link — and (0.102.16, review-0102-15 m4) the BASE commit's pnpm-workspace.yaml (never the role-written
+    one), in a fresh dir under the run's tmp. 0.102.16 (S1): an empty engine store is first seeded from the user's
+    store (a clone copy outside any sandbox — `PMC.seed_pnpm_store`); the result carries `.notes`."""
     import shutil as _sh
     import tempfile
     from guildcore.checks import pmcache as PMC
     store = PMC.pnpm_store()
     os.makedirs(store, exist_ok=True)  # fs-ok: the engine's pnpm store (engine cache, outside every role's allowWrite)
+    notes = []
+    sn = PMC.seed_pnpm_store(store=store, resolve=lambda: _user_pnpm_store_path(worktree, env))
+    if sn:
+        notes.append(sn)
     os.makedirs(os.path.join(run_dir, "tmp"), exist_ok=True)  # fs-ok: this deps run dir's tmp/ (engine-owned)
     tmp = tempfile.mkdtemp(prefix="pnpm-fetch-", dir=os.path.join(run_dir, "tmp"))
     try:
         have = False
-        for f in PNPM_INPUTS:
-            src = os.path.join(worktree, f)
-            if os.path.isfile(src) and not os.path.islink(src):
-                with open(src, "rb") as fh:
-                    FS.write_bytes(tmp, f, fh.read())
-                have = have or f == "pnpm-lock.yaml"
+        src = os.path.join(worktree, "pnpm-lock.yaml")
+        if os.path.isfile(src) and not os.path.islink(src):
+            with open(src, "rb") as fh:
+                FS.write_bytes(tmp, "pnpm-lock.yaml", fh.read())
+            have = True
+        if base:
+            ws = G.run(worktree, "show", "%s:pnpm-workspace.yaml" % base, check=False)
+            if ws:
+                FS.write_bytes(tmp, "pnpm-workspace.yaml", ws)
         if not have:
             r = CH.CheckResult(False, None, False, "pnpm: no pnpm-lock.yaml at the repository root — nothing to fetch\n",
                                [], 0)
@@ -609,11 +641,27 @@ def pnpm_fetch(worktree, run_dir, env, copy_list=(), issue=None, timeout_s=1800)
         fs = sb["filesystem"]
         fs["allowWrite"] = list(fs["allowWrite"]) + [tmp + "/**", store + "/**"]
         fs["readOnlyAllow"] = list(fs["readOnlyAllow"]) + [tmp + "/**", store + "/**"]
+        # the ONE step that writes the engine store (every other sandbox denies it — S1)
+        fs["denyWrite"] = [d for d in fs.get("denyWrite") or [] if d != store + "/**"]
         r, px = CH.deps_step([PNPM_FETCH % shlex.quote(store)], tmp, sb, os.path.join(run_dir, "tmp"), env=env,
                              hosts=REGISTRY_HOSTS["package.json"], timeout_s=timeout_s)
+        r.notes = notes
         return r, px
     finally:
         _sh.rmtree(tmp, True)  # fs-ok: the engine's fetch dir under this run's tmp/ (rmtree never follows links)
+
+
+def _user_pnpm_store_path(worktree, env):
+    """`pnpm store path` resolved OUTSIDE any sandbox from the user's HOME (the user's own config — never the worktree,
+    whose role-written `.npmrc` could name a store; offline Corepack) — or None."""
+    try:
+        from guildcore.checks import pmcache as PMC
+        p = subprocess.run(["pnpm", "store", "path"], cwd=os.path.expanduser("~"), env=PMC.env_for(env, True),
+                           stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=30)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    out = p.stdout.decode("utf-8", "replace").strip().split("\n")[-1].strip() if p.returncode == 0 else ""
+    return out if out and os.path.isabs(out) else None
 
 
 def pnpm_offline_install(tree, run_dir, env, sb, journal=None, owner="suite", timeout_s=1800):
@@ -644,6 +692,11 @@ def check_env(root_env, worktree, run_dir):
     """0.102.2: every engine-run command in a check sandbox (deps · suite · warm-up · net · checks · local_dev · gate)
     gets the rendered global git config — ~/.gitconfig is denyRead there and flutter/npm/git abort on it (rc 128)."""
     env = C.child_env(root_env, {}, role_dir=run_dir)
+    # 0.102.16 (review-0102-15 m3): a check never calls the CLI — the CLI's own credentials (and any other
+    # ANTHROPIC_* / Claude credential) never reach code a role wrote (turbo's loose env mode passes the env through)
+    for k in list(env):
+        if k in C.CLI_AUTH_KEYS or k.startswith("ANTHROPIC_") or (k.startswith("CLAUDE") and C._SECRET_NAME.search(k)):
+            env.pop(k, None)
     env.update(S.render_gitconfig(worktree, os.path.join(run_dir, "in", "gitconfig")))
     return env
 
@@ -681,8 +734,16 @@ def deps_main(worktree, run_dir, env, copy_list=(), issue=None, timeout_s=1800, 
         if PMC.is_pnpm(worktree):
             # 0.102.15 (lead decision 6): pnpm — `pnpm fetch` of the lockfile into the engine store; the suite's
             # node_modules is installed offline in each temp tree (`pnpm_offline_install`), never linked here
-            rb, pxb = pnpm_fetch(worktree, run_dir, env, copy_list, issue, timeout_s)
-            notes.append("pnpm: fetch into %s — %s" % (PMC.pnpm_store(), "ok" if rb.passed else "failed"))
+            rb, pxb = pnpm_fetch(worktree, run_dir, env, copy_list, issue, timeout_s, base=base)
+            notes += list(getattr(rb, "notes", None) or [])
+            if rb.passed:
+                notes.append("pnpm: fetch into %s — ok" % PMC.pnpm_store())
+            else:
+                # 0.102.16 (review-0102-15 F1): a fetch failure (a `file:` dependency the fetch dir does not hold …) is a
+                # note only — the verdict is the temp tree's offline install (`engine-env-deps-offline`)
+                notes.append("pnpm: fetch into %s failed (a note — the offline install decides): %s"
+                             % (PMC.pnpm_store(), PMC.pnpm_failure_line(rb.raw)))
+                rb = CH.CheckResult(True, 0, False, "", [], 0)
         else:
             rb, pxb, bin_b = install_check_tools(worktree, run_dir, env, branch_mans, (), copy_list, issue,
                                                  timeout_s, kind="suite")
@@ -746,6 +807,11 @@ def keep_raw(run_dir, cmds, r):
         fl = getattr(r, "flake_tried", None)
         if fl:
             text += "\n\n--- flake re-run: %s\n" % json.dumps(fl, ensure_ascii=False, sort_keys=True)
+        br = getattr(r, "base_red", None)
+        if br:                                          # 0.102.16: the base re-run of the failing files
+            text += "\n\n--- base re-run: %s\n" % CH.redact_lines(json.dumps(br, ensure_ascii=False, sort_keys=True))
+        if getattr(r, "tree_git", None):
+            text += "\n\n--- tree git: %s\n" % r.tree_git
         FS.write_text(os.path.join(run_dir, "out"), "raw.txt", text)
     except Exception:                                   # noqa: BLE001 — a log, never a failure
         pass
@@ -803,8 +869,11 @@ def live(issue, worktree, base, branch, config, clock, gh, writer, decisions, ru
     def suite(cmds, owner, timeout_s):
         """K2r5-B1: `suite_in_tree` — never in the checkout (no ignored original is reachable)."""
         run_dir = RR.new_run_dir(RR.run_root(worktree, issue, root_env), "check", owner)
+        from workflows.dev import base_red as BR
+        raw_cfg = getattr(config, "raw", None) or (config if isinstance(config, dict) else {})
         r = suite_in_tree(worktree, base, cmds, owner, timeout_s, run_dir, check_env(root_env, worktree, run_dir),
-                          _copy_list(), issue, journal=journal)
+                          _copy_list(), issue, journal=journal, base_red=BR.enabled(config),
+                          summary_config=(raw_cfg.get("commands") or {}).get("test_summary"))
         keep_raw(run_dir, cmds, r)
         runner.rebaseline(worktree, issue)
         return r

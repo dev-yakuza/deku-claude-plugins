@@ -61,6 +61,17 @@ _LAST_TEST_RES = (
 )
 
 
+_TAIL_SIGNAL_RE = re.compile(r"\b(RESULT|FAIL(?:ED|URE)?|ERROR|Error)\b")
+
+
+def red_tail(raw, n=2):
+    """0.102.16 (word_app #1797 on 0.102.15 "suite red — 0 failed"): what a red run whose runner counted no failing test
+    ended with — of its last five non-empty lines the ones that say RESULT / FAIL / ERROR (else the last), redacted."""
+    lines = [" ".join(x.split()) for x in (raw or "").split("\n") if x.strip()][-5:]
+    pick = [x for x in lines if _TAIL_SIGNAL_RE.search(x)] or lines[-1:]
+    return redact_lines(" / ".join(pick[-n:]))[:300]
+
+
 def last_running(raw):
     for ln in reversed((raw or "").splitlines()):
         for rx in _LAST_TEST_RES:
@@ -268,7 +279,10 @@ def run_command(cmd, timeout_s=UNATTENDED_CEILING_S, cwd=".", env=None, journal=
         # 0.102.14 (one-man-company #687): the engine's own PWD / PYENV_DIR (pyenv's `python3` shim exports PYENV_DIR =
         # the dir the engine was started in — the main checkout, denyRead here) must not reach the check: pyenv
         # aborted `cannot change working directory`. PWD is the check's cwd; pyenv then reads it.
-        env["PWD"] = os.path.abspath(cwd)
+        # 0.102.16 (word_app #1797 on 0.102.15 — a 0.102.14 regression): the REALPATH — tools report realpaths
+        # (flutter's json `.suite.path` under /private/var/…), a script's `$(pwd)` must match them (the command's cwd
+        # is the realpath too, below)
+        env["PWD"] = os.path.realpath(cwd)
         for k in ("PYENV_DIR", "OLDPWD"):
             env.pop(k, None)
         deny = listening_ports()                       # once, before any command of this check starts
@@ -278,7 +292,8 @@ def run_command(cmd, timeout_s=UNATTENDED_CEILING_S, cwd=".", env=None, journal=
     for c in cmds:
         left = timeout_s - (time.time() - t0)
         start = time.time()
-        p = subprocess.Popen(["/bin/sh", "-c", c], cwd=cwd, env=env, stdout=subprocess.PIPE,
+        p = subprocess.Popen(["/bin/sh", "-c", c], cwd=os.path.realpath(cwd) if cwd else cwd, env=env,
+                             stdout=subprocess.PIPE,
                              stderr=subprocess.STDOUT, start_new_session=True)
         pg = os.getpgid(p.pid)
         rec = {"pid": p.pid, "pgid": pg, "start_time": process_start(p.pid)}

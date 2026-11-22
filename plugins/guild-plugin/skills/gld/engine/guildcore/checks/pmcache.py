@@ -192,15 +192,74 @@ def is_pnpm(root):
     return os.path.isfile(os.path.join(root, "pnpm-lock.yaml"))
 
 
+def user_pnpm_stores(user_home=None):
+    """The user's own pnpm store locations (pnpm's defaults; `pnpm store path` is read only by `seed_pnpm_store`)."""
+    uh = user_home or os.path.expanduser("~")
+    return [os.path.join(uh, "Library", "pnpm", "store"), os.path.join(uh, ".local", "share", "pnpm", "store"),
+            os.path.join(uh, ".pnpm-store")]
+
+
+def _under(path, roots):
+    rp = os.path.realpath(path)
+    return any(rp == os.path.realpath(r) or rp.startswith(os.path.realpath(r).rstrip("/") + "/") for r in roots)
+
+
 def pnpm_store(env=None):
-    """0.102.15 (lead decision 6): the ENGINE's pnpm store — `<engine cache>/pnpm-store` (`GLD_ENGINE_PNPM_STORE`
-    overrides: tests, a person's own store). Filled only by the networked deps step (`pnpm fetch`); every offline
-    install reads it (read-only in the sandbox). Passed as `--store-dir` explicitly — `~/.npmrc` is denyRead."""
+    """0.102.15 (lead decision 6): the ENGINE's pnpm store — `<engine cache>/pnpm-store`. Filled only by the networked
+    deps step (`pnpm fetch`, after a one-time seed from the user's store — `seed_pnpm_store`); every offline install
+    reads it (read-only in every sandbox). Passed as `--store-dir` explicitly — `~/.npmrc` is denyRead.
+    0.102.16 (review-0102-15 S1): `GLD_ENGINE_PNPM_STORE` (tests) never points at a user store — such a value is
+    ignored (the user's store is never the engine's)."""
     e = os.environ if env is None else env
-    if e.get("GLD_ENGINE_PNPM_STORE"):
-        return os.path.abspath(e["GLD_ENGINE_PNPM_STORE"])
+    ov = e.get("GLD_ENGINE_PNPM_STORE")
+    if ov and not _under(ov, user_pnpm_stores(e.get("HOME"))):
+        return os.path.abspath(ov)
     base = e.get("GLD_ENGINE_RUNS") or os.path.join(e.get("HOME") or os.path.expanduser("~"), ".cache", "guild-engine")
     return os.path.join(base, "pnpm-store")
+
+
+def protected_stores(env=None):
+    """Every pnpm store no sandbox may write: the engine's and the user's defaults."""
+    e = os.environ if env is None else env
+    out = [pnpm_store(e)] + user_pnpm_stores(e.get("HOME"))
+    return list(dict.fromkeys(os.path.abspath(x) for x in out))
+
+
+def seed_pnpm_store(env=None, user_home=None, store=None, resolve=None):
+    """0.102.16 (review-0102-15 S1 — lead decision): when the engine store is empty and the user's store exists, copy
+    the user's `v3` into the engine store ONCE, OUTSIDE any sandbox, the user's store only read: an APFS clone
+    (`cp -c -R` — instant, no extra space), else a plain copy. → a note, or None (not empty / no user store).
+    `resolve()` → the user's `pnpm store path` (default: pnpm's default locations only)."""
+    import subprocess
+    store = store or pnpm_store(env)
+    dest = os.path.join(store, "v3")
+    if os.path.isdir(dest) and os.listdir(dest):
+        return None
+    cands = []
+    if resolve is not None:
+        try:
+            got = resolve()
+        except Exception:                               # noqa: BLE001 — best effort
+            got = None
+        if got:
+            cands.append(got)
+    cands += [os.path.join(s, "v3") for s in user_pnpm_stores(user_home)]
+    src = next((c for c in cands if c and os.path.isdir(c) and not os.path.islink(c)
+                and os.path.basename(c.rstrip("/")) == "v3" and not _under(c, [store])), None)
+    if not src:
+        return None
+    os.makedirs(store, exist_ok=True)  # fs-ok: the engine's pnpm store (engine cache, denyWrite in every sandbox)
+    tmp = dest + ".seed-tmp"
+    shutil.rmtree(tmp, True)  # fs-ok: a half copy of an earlier seed in the engine's own store
+    for cmd in (["cp", "-c", "-R", src, tmp], ["cp", "-R", src, tmp]):
+        p = subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+        if p.returncode == 0:
+            if os.path.isdir(dest):
+                shutil.rmtree(dest, True)  # fs-ok: the engine store's empty v3 (checked above)
+            os.replace(tmp, dest)  # fs-ok: the engine's own pnpm store
+            return "pnpm: seeded the engine store from %s (%s)" % (src, "clone" if "-c" in cmd else "copy")
+        shutil.rmtree(tmp, True)  # fs-ok: a failed seed copy in the engine's own store
+    return "pnpm: seeding the engine store from %s failed: %s" % (src, p.stderr.decode("utf-8", "replace").strip()[:200])
 
 
 def pnpm_failure_line(raw):
