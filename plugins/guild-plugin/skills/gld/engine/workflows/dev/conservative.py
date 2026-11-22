@@ -843,32 +843,62 @@ _SEC_ISSUE = (
     r"\bexposed without\b", r"\bwithout (any )?(auth|authentication|authorization|permission) check",
     r"\bmissing (an? )?(auth|authorization|permission|access) check", r"\bdata (leak|breach)",
     r"\bpersonal data (is |are )?(leaked|exposed|logged)",
+    # 0.102.9 (review-0102-8 m1): another user's data reachable
+    r"\b(read|see|view|access|modify|edit|delete|fetch)(s|ed|ing)? (the )?(data|records?|\w+) of (another|other) users?\b",
+    r"\b(another|other) users'?s? (data|records?|private|personal|\w+ (is|are) (readable|visible|accessible))",
+    r"\b(can|could) (read|see|view|access|modify|delete) (another|other) users'?",
     # ko
     "취약점", "취약성", r"보안\s*(문제|취약|위험|결함|이슈|구멍|사고|우려|상의? 문제)", r"\(보안\)",
     "권한 ?우회", "인증 ?우회", "권한 ?상승", "개인 ?정보 ?(유출|노출)",
     r"(sql|커맨드|명령어?|os ?명령어?|스크립트|html|코드|ldap|헤더|셸|쉘) ?(인젝션|주입)",
     r"(권한|인가|인증|접근 ?권한|접근 ?제어) ?(검사|체크|확인) ?(누락|없이|빠짐|부재)", r"(인가|권한) ?누락",
     "경로 ?탐색 ?취약", "오픈 ?리다이렉트", "원격 ?코드 ?실행",
+    r"(다른|타) ?(사용자|유저|회원|계정)(의|가)? ?[^.。\n]{0,30}(읽을 수|볼 수|보인다|보이는|조회할 수|조회된다|접근할 수|접근된다|"
+    r"수정할 수|삭제할 수|노출)",
     # ja
     "脆弱性", r"セキュリティ(上の)?(問題|リスク|欠陥|ホール|事故|懸念)", r"[（(]セキュリティ[)）]",
     "認証回避", "権限昇格", "個人情報(の)?(漏洩|漏えい|流出)",
     r"(sql|コマンド|os ?コマンド|スクリプト|html|コード|ldap|ヘッダー?|シェル) ?インジェクション",
     "認可漏れ", "認証漏れ", r"(権限|認可|アクセス制御)(の)?(チェック|確認)?漏れ", "パストラバーサル",
     "オープンリダイレクト", "リモートコード実行",
+    r"(他|ほか)の?(ユーザー?|利用者|会員|アカウント)の[^。\n]{0,30}(見え|閲覧でき|読め|参照でき|アクセスでき|編集でき|削除でき|取得でき)",
 )
 # a secret noun and an exposure word in the same sentence — `the token leaks`, `password is sent to analytics`.
 # 0.102.8 m2: a bare `token(s)` / `토큰` / `トークン` is a secret noun except as a design / colour / theme token or a
 # token COUNT / limit / usage (an LLM or lexer word); `committed` / `커밋` stay exposure words (a key committed)
 _SEC_NOUN = (r"\b(secrets?|credentials?|passwords?|passcodes?|api[ _-]?keys?|private keys?|(access|refresh|auth|"
              r"bearer|session|id|jwt|oauth|api) tokens?|pii)\b|"
-             r"(?<!design )(?<!color )(?<!colour )(?<!theme )\btokens?\b(?! ?(count|counts|limit|limits|usage|budget|cost|costs|"
-             r"window|ids?\b))|"
-             r"비밀번호|비밀 ?키|시크릿|(?<!디자인 )(?<!디자인)(?<!색상 )토큰(?! ?(수|개수|사용량|한도))|자격 ?증명|api ?키|"
-             r"개인 ?키|パスワード|認証情報|(?<!デザイン)トークン(?!数)|秘密鍵|シークレット|apiキー")
+             r"비밀번호|비밀 ?키|시크릿|(액세스|리프레시|인증|세션|api|jwt) ?토큰|자격 ?증명|api ?키|"
+             r"개인 ?키|パスワード|認証情報|(アクセス|リフレッシュ|認証|セッション)トークン|秘密鍵|シークレット|apiキー")
+# 0.102.9 (review-0102-8 m1): a BARE token is a secret noun only when its sentence has no design-system context — a
+# semantic / spacing / colour token committed or exposed through ThemeData is no secret
+_SEC_TOKEN = (r"\btokens?\b(?! ?(count|counts|limit|limits|usage|budget|cost|costs|window|ids?\b))|"
+              r"토큰(?! ?(수|개수|사용량|한도))|トークン(?!数)")
+_DESIGN_CTX = (r"\b(design|colou?rs?|theme|themedata|semantic|spacing|typography|palette|elevation|radius|radii|motion|"
+               r"shadow|font|sizing|style)\b|디자인|컬러|색상|팔레트|테마|간격|타이포|시맨틱|デザイン|カラー|配色|テーマ|"
+               r"パレット|余白|タイポ|セマンティック")
+# personal data is a secret-like noun only beside a LOG / analytics output (UI '노출' of a privacy link is no issue)
+_PII_NOUN = r"\b(personal (data|information)|user data)\b|개인 ?정보|사용자 ?정보|個人情報|ユーザー情報"
+_SEC_LOG = (r"\b(logged|logs it|printed to (the )?(log|console)|in (the )?logs?|to (the )?logs?|analytics|crashlytics)\b|"
+            r"로그로|로그에|로그 ?출력|ログ出力|ログに|ログへ|ログで")
 _SEC_EXPOSE = (r"\b(leak(s|ed|ing)?|logged|logs it|printed|exposed|exposes|committed|hard-?coded|in (the )?logs?|"
-               r"analytics|crashlytics|world-readable|publicly|plain[ -]?text|unencrypted|not encrypted)\b|"
-               r"유출|노출|로그에|하드코딩|커밋|외부로|평문|암호화되지 않|암호화 없이|"
-               r"漏洩|漏えい|流出|ログに|ハードコード|露出|公開され|平文|暗号化されていない")
+               r"analytics|crashlytics|world-readable|publicly|unencrypted|not encrypted|bundled|in the (app )?bundle|"
+               r"shipped in)\b|"
+               r"유출|노출|로그에|로그로|로그 ?출력|하드코딩|커밋|외부로|암호화되지 않|암호화 없이|번들에 포함|앱에 포함|"
+               r"漏洩|漏えい|流出|ログに|ログ出力|ハードコード|露出|公開され|暗号化されていない|バンドルに含|同梱")
+# 0.102.9 (review-0102-8 m1): `plain text` / `평문` / `平文` expose a secret except where a show-password control is
+# what the sentence is about (an eye icon, a show / reveal toggle) — that is the feature, not a leak
+_SEC_PLAIN = r"\bplain[ -]?text\b|평문|平文"
+_SHOW_UI = (r"\beye icon\b|\b(show|reveal|unmask)(ing|s)? (the )?password\b|\b(visibility|show|reveal) toggle\b|"
+            r"\btoggle\b|보기 ?토글|보기 ?버튼|눈 ?아이콘|표시 ?토글|토글|目のアイコン|表示切り?替|トグル")
+# 0.102.9 (review-0102-8 m1): a mobile OS permission (camera / microphone / location …) missing or unchecked is a
+# feature defect, not an authorization gap — those phrases are taken out before the issue patterns run
+_DEVICE_PERM = (r"\b(camera|microphone|mic|location|notification|photos?|storage|bluetooth|contacts?|calendar|media|"
+                r"gallery|recording|audio|runtime|android|ios|os) permissions?\b|"
+                r"(카메라|마이크|위치|알림|사진|저장소|저장 ?공간|블루투스|연락처|캘린더|미디어|갤러리|녹음|오디오|런타임|"
+                r"안드로이드|android|ios|os|기기|단말) ?권한|"
+                r"(カメラ|マイク|位置情報|通知|写真|ストレージ|ブルートゥース|bluetooth|連絡先|カレンダー|メディア|録音|"
+                r"オーディオ|ランタイム|android|ios|os|端末)(の|へのアクセス)?権限")
 _SENTENCE = r"[.;\n。！？!?]"
 
 
@@ -876,11 +906,17 @@ def security_text(text):
     """0.102.7: the EXTRA content trigger — an issue phrase (`_SEC_ISSUE`), or a secret noun with an exposure word in
     one sentence. Never the primary signal (that is the judge's `security_concern`)."""
     import re
-    t = text or ""
+    t = re.sub(_DEVICE_PERM, "device-permission", text or "", flags=re.I)
     if any(re.search(rx, t, re.I) for rx in _SEC_ISSUE):
         return True
     for sent in re.split(_SENTENCE, t):
-        if re.search(_SEC_NOUN, sent, re.I) and re.search(_SEC_EXPOSE, sent, re.I):
+        noun = re.search(_SEC_NOUN, sent, re.I) or (re.search(_SEC_TOKEN, sent, re.I)
+                                                     and not re.search(_DESIGN_CTX, sent, re.I))
+        expose = re.search(_SEC_EXPOSE, sent, re.I) or (re.search(_SEC_PLAIN, sent, re.I)
+                                                        and not re.search(_SHOW_UI, sent, re.I))
+        if noun and expose:
+            return True
+        if re.search(_PII_NOUN, sent, re.I) and re.search(_SEC_LOG, sent, re.I):
             return True
     return False
 

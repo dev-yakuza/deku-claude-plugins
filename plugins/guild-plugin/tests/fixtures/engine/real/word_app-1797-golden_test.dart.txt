@@ -1,0 +1,64 @@
+import 'package:flutter/material.dart';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:get/get.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:word_app/controller/settings_controller.dart';
+import 'package:word_app/env/env.dart';
+import 'package:word_app/features/review_screen/widgets/quiz_dropdown.dart';
+import 'package:word_app/features/setting_screen/widgets/setting_in_quiz_screen_section.dart';
+import 'package:word_app/helpers/constants.dart';
+
+import '../../../features/kanji_detail_modal/support/hanzi_modal_support.dart';
+import '../../../test_helper.dart';
+
+Future<void> _shoot(
+  WidgetTester tester, {
+  required String name,
+  required List<QuizType> Function(List<QuizType> available) select,
+  bool dark = false,
+}) async {
+  ENV.hasExample = true;
+  SharedPreferences.setMockInitialValues({if (dark) 'isLightTheme': false});
+  Get.delete<SettingsController>(force: true);
+  Get.put(SettingsController());
+  useTestViewSize(tester, const Size(414, 900));
+
+  await tester.pumpWidget(
+    const TestWidget(
+      child: SingleChildScrollView(child: SettingInQuizScreenSection()),
+    ),
+  );
+  await tester.runAsync(
+    () => Future<void>.delayed(const Duration(milliseconds: 100)),
+  );
+  SettingsController.to.selectedQuizTypes(
+    select(QuizDropdown.availableQuizTypes),
+  );
+  await tester.pumpAndSettle();
+
+  await expectLater(
+    find.byType(TestWidget),
+    matchesGoldenFile('goldens/setting_in_quiz_screen_section_$name.png'),
+  );
+}
+
+void main() {
+  group('문제 유형 항목 기준 이미지', () {
+    testWidgets('요약이 유형 1개 이름이다', (tester) async {
+      await _shoot(tester, name: 'quiz_type_single', select: (a) => [a.first]);
+    }, tags: ['golden']);
+
+    testWidgets('요약이 N개 선택이다', (tester) async {
+      await _shoot(
+        tester,
+        name: 'quiz_type_count_dark',
+        select: (a) => a.take(3).toList(),
+        dark: true,
+      );
+    }, tags: ['golden']);
+
+    testWidgets('요약이 전체이다', (tester) async {
+      await _shoot(tester, name: 'quiz_type_all', select: (a) => a);
+    }, tags: ['golden']);
+  });
+}

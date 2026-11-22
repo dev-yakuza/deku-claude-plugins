@@ -308,6 +308,61 @@ def has_assertion(snippet, runner):
     return False, None
 
 
+# 0.102.9 (word_app #1797 D26/D40): a golden test whose body is one call of a same-file helper
+# (`await _shoot(tester, …)` → `await expectLater(find…, matchesGoldenFile(…))`) has its assertion in the helper — the
+# static check follows calls of functions DEFINED IN THE SAME FILE (transitively, each once) before it calls the test
+# assertion-free. A helper imported from elsewhere is not read (the check stays as strict as before for it).
+CALL_RE = re.compile(r"(?<![\w.$])([A-Za-z_$][\w$]*)\s*(?:<[^<>()]*>)?\s*\(")
+NOT_HELPERS = frozenset(("if", "for", "while", "switch", "catch", "return", "await", "function", "test", "testWidgets",
+                         "group", "it", "describe", "setUp", "tearDown", "setUpAll", "tearDownAll", "main", "print"))
+
+
+def _helper_body(code, name, runner):
+    """The body of a function `name` DEFINED in `code` (dart / js / ts: `name(<params>) [async] {` or `=>`), or None."""
+    for m in re.finditer(r"(?<![\w.$])%s\s*(?:<[^<>()]*>)?\s*\(" % re.escape(name), code):
+        end = _balanced_end(code, m.end() - 1, runner)
+        if not end:
+            continue
+        tail = code[end:end + 40]
+        b = re.match(r"\s*(?:async\*?|sync\*)?\s*(\{|=>)", tail)
+        if not b:
+            continue
+        if b.group(1) == "{":
+            open_ = end + b.start(1)
+            close = _balanced_end(code, open_, runner)
+            return code[open_:close] if close else None
+        semi = code.find(";", end)
+        return code[end:semi if semi >= 0 else len(code)]
+    return None
+
+
+def helper_assertion(text, snippet, runner, depth=3):
+    """(bool, line_offset|None): an assertion inside a same-file helper the test calls (line = the call's line)."""
+    if runner not in ("flutter", "dart", "jest", "vitest") or not text or not snippet:
+        return False, None
+    code = masked(text, runner)
+    body = masked(snippet, runner)
+    seen = set()
+    todo = [(body, None, 0)]
+    while todo:
+        cur, line0, d = todo.pop(0)
+        for m in CALL_RE.finditer(cur):
+            name = m.group(1)
+            if name in NOT_HELPERS or name in seen or re.match(r"^(expect|fail)", name):
+                continue
+            seen.add(name)
+            hb = _helper_body(code, name, runner)
+            if not hb:
+                continue
+            line = line0 if line0 is not None else body.count("\n", 0, m.start())
+            ok, _o = has_assertion(hb, runner)
+            if ok:
+                return True, line
+            if d + 1 < depth:
+                todo.append((hb, line, d + 1))
+    return False, None
+
+
 # ---- the exact single-test command and its verdict -----------------------------------------------
 
 def rx_escape(s):
@@ -1084,6 +1139,8 @@ def static_check(p, cfg, ac, covers):
         if tb is None:
             return CheckOutcome(ac, cv.get("test"), "unsure", "cited test body not found (name required)"), []
         ok, off = has_assertion(tb[0], runner)
+        if not ok:
+            ok, off = helper_assertion(text, tb[0], runner)
         if not ok:
             return CheckOutcome(ac, cv.get("test"), "fail", "no reachable non-trivial assertion in the cited test"), []
         items.append((cv, path, name, "%s:%d" % (path, tb[1] + off)))

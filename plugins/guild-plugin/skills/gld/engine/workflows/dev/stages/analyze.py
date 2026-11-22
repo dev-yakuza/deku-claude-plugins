@@ -473,6 +473,9 @@ def run(p, only=None, config_present=True):
     recorders, high, cons = [], [], False
     auto = None                    # 0.102.7 m5: (token, drops, dropped AC, judge's chosen) — taken without a person
     stakes_dec = {}                # 0.102.8 (review-0102-7 M1): dim → the STAKES decision (its own security_concern)
+    # 0.102.9 (review-0102-8 M1, lead decisions 1–2): the Issue's own AC (strict parse) — auto-narrow's check, and the
+    # kept / dropped line of an unverified KICKOFF's grading-sheet row
+    ac_section, issue_acs = AN.issue_ac_section(body)
 
     def auto_narrow():
         """0.102.7 (review-0102-6 m5): take the narrowest of nested readings (`analysis.narrowest`) — True if taken.
@@ -494,7 +497,7 @@ def run(p, only=None, config_present=True):
             why = "a STAKES judgment names a security concern"
         tok, own, drops = (None, None, why) if why else AN.narrowest(
             k, capture, p.root, bool(irr), CONS_.concern_of(d), p.engine_cfg("irreversible_globs"),
-            issue_acs=AN.issue_ac_lines(body))
+            issue_acs=issue_acs, issue_ac_unread=ac_section and not issue_acs)
         if tok is None:
             if getattr(p, "journal", None) is not None:
                 p.journal.append("event", what="auto-narrow-refused", why=drops)
@@ -608,6 +611,9 @@ def run(p, only=None, config_present=True):
     if a6 is None and CONS.posthoc(p, "KICKOFF", irreversible=bool(irr), decision=d):
         # 0.102.5: the unverified KICKOFF ran without a person's confirmation — its decision is a grading-sheet row
         kextra["post_hoc"] = "unverified KICKOFF"
+        # 0.102.9 (lead decision 2): never a stop — the Issue AC the judge's chosen reading keeps / drops goes on the row
+        kextra["issue_ac"] = AN.issue_ac_check(issue_acs, [a["text"] for a in k.ac],
+                                               unread=ac_section and not issue_acs)[:1500]
     if auto is not None:
         # 0.102.7 m5: the engine took the narrowest nested reading — a post-hoc grading-sheet row, and the broader parts
         # it dropped are follow-up candidates (the analyze output, QA's follow-up list)

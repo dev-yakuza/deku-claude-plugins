@@ -310,7 +310,34 @@ def run(p, only=None, config_present=True):
         p.capture("verify-gap", STAGE, "tester", reason, s_line, area, False)
     if not p.unattended:
         return ask_loopback(p, STAGE, R.TEST, reason, sig, "tests not green / AC gap — %s" % reason)
-    return LP.run(p, STAGE, "test", reason, sig)
+    # 0.102.9 (word_app #1797 — two loop-backs spent, "loop-back cap reached" after $8): when no test file (nor the
+    # test-cases document) changed since an earlier loop-back that already named this whole gap, another loop-back
+    # cannot change the outcome — stop now with what happened, never burn the cap
+    same = LP.unchanged_since(p, "test", sig, is_test_path)
+    if same is not None:
+        line = ("loop-back would repeat loop-back %d — no test file changed since it (%s..HEAD) and the same gap "
+                "remains: %s" % (same[0], same[1][:12], B.one_line(reason, 300)))
+        return B.pause(p, STAGE, "defect", line, "loop-back without test change")
+    return LP.run(p, STAGE, "test", reason, sig, head=_head(p))
+
+
+TEST_PATH_RE = re.compile(r"(^|/)(tests?|spec|specs|__tests__|integration_test|test_driver|testing)/|"
+                          r"(_test|\.test|\.spec|_spec)\.\w+$|(^|/)test_[^/]*\.py$|(^|/)docs/specs/\d+/test-cases\.md$")
+
+
+def is_test_path(path):
+    """0.102.9: a test file, a golden under a test dir, or the Issue's test-cases document."""
+    return bool(TEST_PATH_RE.search(str(path or "").replace("\\", "/")))
+
+
+def _head(p):
+    from guildcore.adapters import git as G
+    try:
+        if p.root and os.path.isdir(p.root) and G.ok(p.root, "rev-parse", "--git-dir"):
+            return G.run(p.root, "rev-parse", "HEAD", check=False).decode().strip() or None
+    except Exception:                                 # a head we cannot read is simply not recorded
+        return None
+    return None
 
 
 def _unsure_derived(tdec):
@@ -385,12 +412,20 @@ def merge_covers(old, new, weak):
     return keep + [c for c in (new or []) if c.get("ac") in weak]
 
 
-def _judge_once(p, cfg, tc_rel, test_cases, covers, ledger, raw, attempt):
+def units_line(acs, members):
+    """0.102.9 (#1797): the ids the judge rules on — one verdict per id, the cases folded into each AC named."""
+    return "Judge exactly these ids (one `ac[]` entry each, no other id): " + "; ".join(
+        "%s (cases %s)" % (a, ", ".join(members[a])) if members.get(a) else a for a in acs)
+
+
+def _judge_once(p, cfg, tc_rel, test_cases, covers, ledger, raw, attempt, acs=(), members=None):
     from guildcore.judges.runner import BriefTooLarge
     for tool_mode in (False, True):
-        brief = [("ac", "AC / test cases (%s):\n%s" % (tc_rel, test_cases or "(test-cases.md missing)")),
-                 ("covers", "Tester covers:\n" + "\n".join("- %s ← %s (%s)" % (c.get("ac"), c.get("test"), c.get("kind"))
-                                                           for c in covers)),
+        brief = [("ac", "AC / test cases (%s):\n%s\n\n%s" % (tc_rel, test_cases or "(test-cases.md missing)",
+                                                          units_line(acs, members or {}))),
+                 ("covers", "Tester covers:\n" + "\n".join("- %s ← %s (%s)%s" % (
+                     c.get("ac"), c.get("test"), c.get("kind"), (" [case %s]" % c.get("case")) if c.get("case") else "")
+                     for c in covers)),
                  ("excerpts", ("Read these test blocks with the Read tool:\n" if tool_mode else "") +
                   _excerpts(p, covers, cfg, tool_mode)),
                  ("visual", "Visual ledger:\n%s" % (ledger.text if ledger else "none")),
@@ -404,7 +439,10 @@ def _judge_once(p, cfg, tc_rel, test_cases, covers, ledger, raw, attempt):
 
 
 def _judge_coverage(p, cfg, test_cases, covers, raw, ledger, visual_cases, tc_rel, deferred):
-    acs = [a for a in CS.case_ids(test_cases) if a not in deferred]
+    # 0.102.9 (#1797 D25/D26/D32/D33): ONE id set — a case that names an AC (its `— AC #n` tag / row / heading) is
+    # folded into that AC; the tester's covers are re-keyed to it, so the judge, the checks and the gap use the same ids
+    acs, members, amap = CS.judged_units(test_cases, deferred)
+    covers = CS.rekey_covers(covers, amap)
     ac_source = "test-cases"
     if not acs:                 # B2: legacy proceeds; the design→execute gap is recorded, not a stop
         acs = sorted(set(c.get("ac") for c in covers if c.get("ac")) - set(deferred))
@@ -417,18 +455,21 @@ def _judge_coverage(p, cfg, test_cases, covers, raw, ledger, visual_cases, tc_re
         o = B.role_outcome(p, STAGE, "tester", rep)
         if o is not None:
             return o
-        covers = rep.extras.get("covers") or []
+        covers = CS.rekey_covers(rep.extras.get("covers") or [], amap)
         acs = sorted(set(c.get("ac") for c in covers if c.get("ac")) - set(deferred))
         if not acs:
             return _no_mapping(p, "%s has no case ids and the tester mapped none" % tc_rel)
     attempt, weak, outcomes, meta, d = 0, [], {}, {}, None
     while True:
         attempt += 1
-        d, tool_mode = _judge_once(p, cfg, tc_rel, test_cases, covers, ledger, raw, attempt)
+        d, tool_mode = _judge_once(p, cfg, tc_rel, test_cases, covers, ledger, raw, attempt, acs, members)
         if d is None:
             return B.fail(p, STAGE, "brief too large for TEST")
-        per = {a.get("id"): a for a in d.fields.get("ac") or []}
-        verdicts = {ac: (per.get(ac) or {}).get("verdict", "unsure") for ac in acs}
+        per = {}
+        for a in d.fields.get("ac") or []:
+            if isinstance(a, dict):
+                per.setdefault(CS.ac_key(a.get("id")) if members else a.get("id"), a)
+        verdicts = {ac: _unit_verdict(ac, per, members) for ac in acs}
         rows = [r_ for r_ in d.fields.get("visual_rows") or [] if isinstance(r_, dict)]
         if d.choice == "gap" and verdicts and all(v == "effective" for v in verdicts.values()) and \
                 not (visual_cases and any(r_.get("verdict") != "covered" for r_ in rows)):
@@ -448,13 +489,15 @@ def _judge_coverage(p, cfg, test_cases, covers, raw, ledger, visual_cases, tc_re
         _record_test(p, d, acs, verdicts, outcomes, meta, ac_source, attempt, tool_mode)
         if weak and attempt == 1:
             rep = p.run_role(B.RoleCall("tester", "repair-mapping", STAGE, "T3.4", attempt=2,
-                                        inputs={"weak-acs.txt": "\n".join(weak)},
+                                        inputs={"weak-acs.txt": "\n".join(
+                                            "%s (cases %s)" % (w, ", ".join(members[w])) if members.get(w) else w
+                                            for w in weak)},
                                         addendum="Map these AC ids to the tests that cover them (or say none "
                                                  "does): %s. Re-write covers only — do not re-run the suite." % ", ".join(weak)))
             o = B.role_outcome(p, STAGE, "tester", rep)
             if o is not None:
                 return o
-            covers = merge_covers(covers, rep.extras.get("covers"), set(weak))
+            covers = merge_covers(covers, CS.rekey_covers(rep.extras.get("covers"), amap), set(weak))
             continue
         break
     vac = [ac for ac, v in verdicts.items() if v == "vacuous"]
@@ -480,6 +523,22 @@ def _mismatch_field(m):
                                             ",".join(m.get("diff_only") or []) or "none")
 
 
+VERDICT_ORDER = ("not_covering", "vacuous", "unsure", "effective")
+
+
+def _unit_verdict(ac, per, members):
+    """0.102.9: the judge's verdict on `ac`; when it answered the AC's CASES instead (an older brief's habit), the AC's
+    verdict is the weakest of them, and only when every case has one — never a silent `uncovered` for an id mismatch."""
+    v = (per.get(ac) or {}).get("verdict")
+    if v:
+        return v
+    cs = (members or {}).get(ac) or []
+    got = [(per.get(c) or {}).get("verdict") for c in cs]
+    if cs and all(g in VERDICT_ORDER for g in got):
+        return min(got, key=VERDICT_ORDER.index)
+    return "unsure"
+
+
 def _record_test(p, d, acs, verdicts, outcomes, meta, ac_source, attempt, tool_mode):
     """K2-M3: every SJ-TEST call is a decision block; per AC the cited test, its assertion line,
     the re-run command and class (§9.5 citation material); `unverified` checks flag the
@@ -487,7 +546,10 @@ def _record_test(p, d, acs, verdicts, outcomes, meta, ac_source, attempt, tool_m
     eff = sorted(ac for ac, v in verdicts.items() if v == "effective")
     unc = sorted(ac for ac, v in verdicts.items() if v != "effective")
     unver = [o for o in outcomes.values() if o.result in ("unverified", "unsure")]
-    detail = ";".join("%s|%s|%s|%s|%s" % (o.ac, o.test, o.line, o.cmd, o.kind) for o in outcomes.values())
+    # 0.102.9 (#1797 D32/D33 `AC #n|None|None|None|None`): the detail carries the check's reason (`why`) — an `unsure`
+    # never goes on record without it
+    detail = ";".join("%s|%s|%s|%s|%s|%s" % (o.ac, o.test, o.line, o.cmd, o.kind, " ".join(str(o.why or "-").split())[:160])
+                      for o in outcomes.values())
     B.record_judgment(p, STAGE, "TEST" if attempt == 1 else "TEST:repair", "T-AC-COVER,T-VACUOUS,T-VISUAL-COV", d,
                       choice="effective:%s;uncovered:%s" % (",".join(eff) or "none", ",".join(unc) or "none"),
                       reason=d.fields.get("reason"),

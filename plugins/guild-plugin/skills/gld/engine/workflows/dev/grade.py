@@ -390,6 +390,13 @@ def _narrow_note(b):
         one(b.get("dropped_ac"))[:600] or "none")
 
 
+def _issue_ac_note(b):
+    """0.102.9 (lead decision 2): an unverified KICKOFF ran unasked — its row names the Issue AC its reading kept /
+    dropped (checked by code, verbatim), so the grader sees a dropped AC without the journal."""
+    v = " ".join(str(b.get("issue_ac") or "").split())
+    return "; Issue AC: %s" % v[:800] if v else ""
+
+
 def posthoc_rows(blocks, issue):
     """0.102.5: every decision an unverified group ran WITHOUT a person (`post_hoc` on its block) → one grading-sheet
     row (`mode: post-hoc`, `choice` = what ran), open — holding the group's §10.2-6 release — until the person imports
@@ -407,7 +414,7 @@ def posthoc_rows(blocks, issue):
                     "reason": "post-hoc: %s — the engine ran the judge's %s without a person%s%s" % (
                         b.get("post_hoc"), " ".join(str(b.get("choice") or "").split())[:160],
                         "; effectiveness check unsure: %s" % b.get("check_unsure") if b.get("check_unsure") else "",
-                        _narrow_note(b)),
+                        _narrow_note(b) + _issue_ac_note(b)),
                     "given_info": "",
                     "evidence": "post-hoc verdict — grade the engine's decision on the evidence (ok = it was right, "
                                 "wrong = it was not; a wrong puts %s back on the asking path)" % g})

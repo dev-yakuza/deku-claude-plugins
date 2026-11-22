@@ -478,7 +478,8 @@ class AuditorOut(unittest.TestCase):
         dwc = RoleResult("DONE_WITH_CONCERNS", "out/result.json 쓰기 권한이 거부되어 guild-result 블록으로 제출",
                          {"findings": [finding("MINOR")]}, result_source="fence",
                          denials=[{"role": "auditor", "command": "Write", "class": "tool:Write", "tool": "Write",
-                                   "path": "/runs/020-execute-auditor-scan/out/result.json"}])
+                                   "path": "/runs/020-execute-auditor-scan/out/result.json"}],
+                         run_dir="/runs/020-execute-auditor-scan")         # 0.102.9 (m2): its own run dir
         h = XHarness(self, roles=[dev(), K3.TL_DONE, dwc], suites=[K3.GREEN])
         r = X.run(h.p, "implement")
         self.assertEqual(r.kind, "ADVANCE", r.token())

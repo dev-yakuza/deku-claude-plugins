@@ -135,3 +135,114 @@ def case_ids(text, dropped=None):
                 add(b.group(1))
         i += 1
     return out
+
+
+# ---- 0.102.9 (word_app #1797 loop-back cap): ONE id set for the TEST judge and the checks -------------------------
+# #1797's test-cases.md lists cases `C1`…`C32` under `### … (AC #n)` headings, each line tagged `— AC #n`. `case_ids`
+# returned BOTH sets (the heading's `AC #n` and the bullets' `C<k>`), the tester mapped its covers by case id, the judge
+# answered some ids of one set and none of the other — every run "uncovered" the other half (D25: C-ids effective, every
+# AC uncovered; D32/D33: the reverse), the effectiveness check found no cover for the AC ids (`unsure` with no detail),
+# and the loop-back cap was spent on the engine's own id mismatch. Now the AC tags are the source of truth: a case that
+# names an AC (on its own line / row, else the nearest heading above it) is FOLDED into that AC — the judge, the covers,
+# the checks and the gap all speak AC ids; a case naming no AC stays its own unit.
+AC_TAG = re.compile(r"\bAC ?#? ?-?(\d+)\b")
+
+
+def ac_key(x):
+    """`AC #3` / `AC3` / `AC 3` / `AC#3` → `AC #3`; anything else unchanged."""
+    m = re.match(r"^\s*AC ?#? ?-?(\d+)\s*$", str(x or ""))
+    return "AC #%s" % m.group(1) if m else " ".join(str(x or "").split())
+
+
+def _line_case(ln, section):
+    """The case id a line MARKS (bullet / table first cell / heading), or None."""
+    if ln.lstrip().startswith("|"):
+        cs = cells(ln)
+        if cs and (CASE_CELL.match(cs[0]) or (ID_CELL.match(cs[0]) and not NUM.match(cs[0]))):
+            return cs[0]
+        return None
+    h = HEADING.match(ln)
+    if h:
+        m = H_MARKED.match(h.group(2).strip())
+        return (m.group(1) or m.group(2) or m.group(3)) if m else None
+    b = BULLET_ID.match(ln)
+    return b.group(1) if b else None
+
+
+def ac_map(text):
+    """{case id: [AC keys]} for every case of `case_ids(text)` that names an AC — on its own line (a table row, a
+    bullet, a heading) or, failing that, in the nearest open heading that names one."""
+    ids = set(case_ids(text))
+    out = {}
+    section = []
+    for ln in (text or "").split("\n"):
+        h = HEADING.match(ln)
+        cid = _line_case(ln, section)
+        if h:
+            level = len(h.group(1))
+            while section and section[-1][0] >= level:
+                section.pop()
+        if cid and cid in ids and not AC_TAG.match(cid) and cid not in out:
+            own = ["AC #%s" % n for n in AC_TAG.findall(ln[ln.find(cid) + len(cid):])]
+            if not own:
+                for _l, t in reversed(section):
+                    own = ["AC #%s" % n for n in AC_TAG.findall(t)]
+                    if own:
+                        break
+            if own:
+                out[cid] = list(dict.fromkeys(own))
+        if h:
+            section.append((len(h.group(1)), h.group(2).strip()))
+    return out
+
+
+def judged_units(text, deferred=()):
+    """(ids the TEST judge rules on, {AC id: [its cases]}, {case id: [AC ids]}) — AC ids (in document order) with the
+    cases that name them folded in, plus every case naming no AC as its own unit. A deferred case leaves its AC's case
+    list; a deferred AC leaves the set."""
+    ids = case_ids(text)
+    amap = ac_map(text)
+    if not amap:                                   # no case names an AC — the ids as before
+        return [x for x in ids if x not in set(deferred or ())], {}, {}
+    deferred = set(deferred or ()) | set(ac_key(x) for x in deferred or ())
+    units, members = [], {}
+    for x in ids:
+        k = ac_key(x)
+        if AC_TAG.match(x):
+            if k not in deferred and k not in units:
+                units.append(k)
+                members.setdefault(k, [])
+            continue
+        if x in deferred:
+            continue
+        acs = amap.get(x)
+        if not acs:
+            if x not in units:
+                units.append(x)
+            continue
+        for a in acs:
+            if a in deferred:
+                continue
+            if a not in units:
+                units.append(a)
+            members.setdefault(a, []).append(x)
+    return units, members, amap
+
+
+def rekey_covers(covers, amap):
+    """The tester's covers in the judged id set: a cover of a case that names an AC counts for each such AC (the case
+    kept as `case`); `AC3` / `AC #3` forms → `AC #3`. No mapping (no case names an AC) → the covers as they are."""
+    if not amap:
+        return list(covers or [])
+    out = []
+    for c in covers or []:
+        if not isinstance(c, dict):
+            continue
+        a = c.get("ac")
+        k = ac_key(a)
+        if a in (amap or {}):
+            for x in amap[a]:
+                out.append(dict(c, ac=x, case=a))
+        else:
+            out.append(dict(c, ac=k) if k != a else c)
+    return out

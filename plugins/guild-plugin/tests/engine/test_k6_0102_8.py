@@ -125,8 +125,9 @@ WRITE_DENIED = [{"role": "auditor", "command": "Write", "class": "tool:Write", "
 
 
 def _dwc(line, source="fence", denials=WRITE_DENIED, findings=()):
+    # 0.102.9 (review-0102-8 m2): the refused path is the auditor's OWN run dir's out/result.json
     return RoleResult("DONE_WITH_CONCERNS", line, {"findings": list(findings)}, result_source=source,
-                      denials=list(denials))
+                      denials=list(denials), run_dir="/runs/018-execute-auditor-scan")
 
 
 class M3AuditorConcern(unittest.TestCase):
@@ -175,8 +176,9 @@ class M3AuditorConcern(unittest.TestCase):
         runs = os.path.join(tmpdir(self), "runs")
         text = (">>> RESULT <<<\nDONE_WITH_CONCERNS: out/result.json 쓰기 권한 거부 — guild-result 블록으로 제출\n"
                 "```guild-result\n{\"findings\": []}\n```")
+        # 0.102.9 (m2): the Write the CLI refused is of THIS run dir's out/result.json (the runner's first run dir)
         st = stream_lines(texts=[text], tool_uses=[{"id": "t1", "name": "Write",
-                                                    "input": {"file_path": runs + "/x/out/result.json",
+                                                    "input": {"file_path": runs + "/001-execute-auditor-scan/out/result.json",
                                                               "content": "{}"}}],
                           denials=[{"tool_use_id": "t1", "message": "denied"}])
         r = RR.Runner(journal=T6.EvJournal(), parent_env={"PATH": os.environ["PATH"]}, spawn=FakeSpawn([{"stream": st}]),
@@ -231,7 +233,10 @@ class M4NarrowRecord(unittest.TestCase):
         body = ("> ## Acceptance criteria\n> - quoted\n\n### 受け入れ条件\n1. 一覧に表示される\n- [x] 保存できる\n"
                 "### 背景\n- no\nAC #3: last one\n")
         self.assertEqual(AN.issue_ac_lines(body), ["一覧に表示される", "保存できる", "last one"])
-        self.assertTrue(AN.ac_covered("The entry point shows the type.", ["the entry point shows the type"]))
+        # 0.102.9 (review-0102-8 M2, lead decision 1): verbatim only — whitespace / markdown / numbering may differ,
+        # case and punctuation may not
+        self.assertTrue(AN.ac_covered("**The entry point** shows `the type`.", ["1. The entry  point shows the type."]))
+        self.assertFalse(AN.ac_covered("The entry point shows the type.", ["the entry point shows the type"]))
         self.assertFalse(AN.ac_covered("the fix keeps the summary right", ["the entry point shows the type"]))
 
 
@@ -356,7 +361,9 @@ class m3ExArbUnderCoercion(unittest.TestCase):
         self.assertEqual(r.cause, "disputed auditor BLOCKER", r.token())
 
     def test_without_a_concern_every_dismiss_is_coerced_to_accept(self):
-        h, r = self._run(False)
+        # 0.102.9 (review-0102-8 m3): a finding marked `security: true` is security even under a top-level false —
+        # so "no concern anywhere" is the top-level false AND no finding marked
+        h, r = self._run(False, sec_mark=False)
         ex = [b for b in _blocks(h) if b.get("point") == "EX-ARB"][0]
         self.assertEqual(ex.get("choice"), "F1:accept,F2:accept")
         self.assertIsNone(ex.get("security"))

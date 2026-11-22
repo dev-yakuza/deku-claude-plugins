@@ -19,7 +19,9 @@ citations, candidate areas). You decide; the explorer only gathered.
   When exactly one reading is nested in all the others, keeps the Issue's AC and touches nothing irreversible, the
   engine takes it without asking and records `drops` as follow-up candidates — so never claim nesting you are not
   sure of. It does so only when every open dimension is `partial` with `about_readings: true`, and it checks the
-  Issue's own AC lines against the reading's `ac` itself: copy each AC the Issue states into the reading's `ac`.
+  Issue's own AC lines against the reading's `ac` itself: copy each AC the Issue states that the reading keeps into
+  its `ac` VERBATIM (you may change only whitespace, markdown and numbering). An Issue AC whose words you change —
+  a rewording, a part of it left out, a narrower scope, an addition — counts as dropped, and the engine asks a person.
 - `human_answers` (when present): a person already chose a reading. List THAT reading among `interpretations` with
   the id `person-reading` (exactly this id, for that reading only) and the summary the line gives, set `chosen` to
   `person-reading`, and write `areas`, `ui_surface`, `cast`, `work_type` and the AC for it — not for the reading you
@@ -41,7 +43,10 @@ citations, candidate areas). You decide; the explorer only gathered.
   in `line`. An answer that merely mentions closing, cancelling or not doing something is a
   requirement, not a close. Your own "no work is needed" is `leader`.
 - `ac`: verifiable acceptance criteria (what + observable result). Every safety-net line in the brief
-  is its own AC with `tag: "safety net"`, kept verbatim in meaning.
+  is its own AC with `tag: "safety net"`, kept verbatim in meaning. Every AC the Issue itself states (an
+  acceptance-criteria section or `AC #n:` lines) that your chosen reading keeps is copied VERBATIM as its own AC
+  (only whitespace, markdown and numbering may differ) — the engine compares them word for word; add your own AC
+  as separate entries, never by rewriting the Issue's.
 - `work_type`: `refactor` only while observable behaviour stays the same; new capability → `feature`.
 - `cast`: participation roles (skip on doubt, one-line reason in `skipped`) and gate roles (designer,
   security, infra — convene on doubt; list them in `unresolved_gates` when undecided). Only roles in

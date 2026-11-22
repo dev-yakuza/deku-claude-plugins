@@ -2,7 +2,7 @@
 
 Grammar (H§B "Loop-back record — active blocks", C §4.2): headings at column 0 are exactly
 `### loopback <n>` (`^### loopback [0-9]+$`) or `### loopback-reset` (`^### loopback-reset$`);
-keys `from: at: branch: reason: signature: decided: override: consumed: by:` at line start.
+keys `from: at: branch: reason: signature: decided: override: head: consumed: by:` at line start.
 Never count by the prefix `### loopback` — it matches a reset too. Active blocks = the numbered
 blocks after the last reset. `<n>` of a new block = all numbered headings + 1 (an id only).
 """
@@ -94,8 +94,9 @@ def from_comments(comments):
     return LoopbackRecord.parse(markers.body_of(c), c.get("id"))
 
 
-def render_block(n, from_, at, branch, reason, signature, decided=None, override=None):
-    """One new block (H§B step 5). `reason` is redacted (INV5); keys stay ASCII."""
+def render_block(n, from_, at, branch, reason, signature, decided=None, override=None, head=None):
+    """One new block (H§B step 5). `reason` is redacted (INV5); keys stay ASCII. 0.102.9: `head` — the branch HEAD the
+    loop-back was decided at (the next test run reads what changed since)."""
     if from_ not in FROM_VALUES:
         raise ValueError("from must be one of %s" % (FROM_VALUES,))
     sig = signature if isinstance(signature, str) else ",".join(sorted(signature))
@@ -108,6 +109,8 @@ def render_block(n, from_, at, branch, reason, signature, decided=None, override
         lines.append("decided: %s" % decided)
     if override:
         lines.append("override: %s" % override)
+    if head and re.match(r"^[0-9a-f]{7,64}$", str(head)):
+        lines.append("head: %s" % head)
     return markers.assert_own_markers(markers.finish("\n".join(lines)))
 
 

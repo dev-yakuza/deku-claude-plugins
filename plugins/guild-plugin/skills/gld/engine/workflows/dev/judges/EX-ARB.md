@@ -30,3 +30,4 @@ language they are written. Doubt → `true` (a person decides it); the engine re
 When `security_concern` is true, mark each finding with `security` (true|false): true when THAT finding is the
 security issue. A security BLOCKER you would dismiss or dispute goes to a person; a security MAJOR is fixed; a
 finding without `security` counts as one. With a security concern the developer route goes to a person.
+A finding you mark `security: true` is a security finding even if `security_concern` is false — keep them consistent.
