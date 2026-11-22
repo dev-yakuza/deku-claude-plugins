@@ -10,8 +10,11 @@ Now (lead decision M4):
 * `home()` — `~/.cache/guild-engine/corepack`, engine-owned, shared by every repo and run (a role never writes it);
 * the deps step (networked) SEEDS it from the user's existing Corepack cache (read-only source: `$COREPACK_HOME`,
   `$XDG_CACHE_HOME/node/corepack`, `~/.cache/node/corepack`, `~/Library/Caches/node/corepack`) for the version
-  package.json's `packageManager` pins — only a usable install (with its `.corepack` file; #227's user cache held
-  the pre-0.20 layout without one, which Corepack 0.34.5 does not reuse — measured) — then prefetches it
+  package.json's `packageManager` pins — only a usable install (with its `.corepack` file: the `v1/<name>/<version>`
+  layout; a pre-0.20 folder without one is not reused by Corepack 0.34.5 — measured). 0.102.13 (review-0102-12 m7):
+  #227's user cache DOES hold the usable `~/.cache/node/corepack/v1/pnpm/8.15.0/.corepack` (2024-12-07) — the
+  0.102.12 note said otherwise; a seeded copy made read-only runs `pnpm@8.15.0` offline (`COREPACK_ENABLE_NETWORK=0`,
+  measured with 0.34.5, Corepack writes nothing there) — then prefetches it
   (`corepack install`, through the registry-only proxy: Corepack honours HTTP(S)_PROXY) when still missing;
 * every check env carries `COREPACK_HOME=<home>` + `COREPACK_ENABLE_DOWNLOAD_PROMPT=0`, and an OFFLINE one also
   `COREPACK_ENABLE_NETWORK=0` (Corepack fails at once with a clear error instead of trying the registry);
@@ -29,8 +32,10 @@ import shutil
 PM_RE = re.compile(r"^(pnpm|yarn|npm)@(\d+\.\d+\.\d+[^+\s]*)")
 OFFLINE_RE = re.compile(r"Corepack is about to download|COREPACK_ENABLE_NETWORK|Network access disabled by the environment|"
                         r"(?:ENOTFOUND|EAI_AGAIN|ECONNREFUSED)\s+(?:registry\.npmjs\.org|registry\.yarnpkg\.com|"
-                        r"repo\.yarnpkg\.com)|Error when performing the request to https://registry\.|"
-                        r"Usage Error: This project is configured to use \w+", re.I)
+                        r"repo\.yarnpkg\.com)|Error when performing the request to https://(?:registry|repo)\.", re.I)
+# 0.102.13 (review-0102-12 m5): `Usage Error: This project is configured to use pnpm` is a package-manager MISMATCH (e.g.
+# `yarn test` in a pnpm repo) — a config error, not an empty offline cache
+MISMATCH_RE = re.compile(r"Usage Error: This project is configured to use \w+", re.I)
 
 
 def home(base=None):
@@ -121,6 +126,22 @@ def offline_fetch_failure(raw):
         if OFFLINE_RE.search(ln):
             return " ".join(ln.split())[:200]
     return None
+
+
+def mismatch_failure(raw):
+    """The first output line that shows the command used another package manager than package.json pins, or None."""
+    for ln in (raw or "").split("\n"):
+        if MISMATCH_RE.search(ln):
+            return " ".join(ln.split())[:200]
+    return None
+
+
+def mismatch_line(where, raw, root=None):
+    """The `env` stop line for a package-manager mismatch (the command's tool is not the one package.json pins)."""
+    pm = package_manager(root) if root else None
+    return ("engine-env-package-manager-mismatch: %s — the command runs another package manager than package.json's "
+            "packageManager (%s): %s — set commands.test (and commands.*) to the pinned package manager, then "
+            "continue" % (where, "%s@%s" % pm if pm else "-", mismatch_failure(raw) or "-"))
 
 
 def offline_line(where, raw, root=None):

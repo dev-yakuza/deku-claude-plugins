@@ -40,15 +40,31 @@ def allowed(journal):
 TRACE_CAP = 12000
 
 
+# 0.102.13 (review-0102-12 m6): the traceback is redacted as ONE text — a multi-line PEM block is cut out whole (not just
+# its header line), and the secrets a traceback carries that the commit gate's inline patterns do not take whole: an
+# npmrc `_authToken=…`, a JSON / dict / keyword `password|secret|token|api_key…` value, a full JWT
+_PEM_BLOCK_RE = re.compile(r"-----BEGIN [A-Z0-9 ]*(?:PRIVATE|SECRET) KEY(?: BLOCK)?-----.*?(?:-----END [A-Z0-9 ]*-----|\Z)"
+                           r"|PuTTY-User-Key-File-\d+:.*\Z", re.S)
+_TRACE_EXTRA = (
+    (re.compile(r"(_authToken\s*=\s*)[^\s'\"]+"), r"\1[REDACTED]"),
+    (re.compile(r"""((?:["'])?(?:password|passwd|pwd|secret|client_secret|token|access_token|auth_token|refresh_token|"""
+                r"""api_key|apikey|private_key)(?:["'])?\s*[:=]\s*)(["'])(?:(?!\2).)*\2""", re.I), r"\1\2[REDACTED]\2"),
+    (re.compile(r"((?<![\w-])(?:password|passwd|secret|token|api_key|apikey)=)[^\s&'\",;]+", re.I), r"\1[REDACTED]"),
+    (re.compile(r"\beyJ[\w-]{5,}\.[\w-]{5,}\.[\w-]+"), "[REDACTED]"),
+)
+
+
 def redacted_trace(tb):
     """0.102.12 (word_app #1797 `engine FAIL — TypeError — sequence item 8 …` with no traceback anywhere): the engine's own
-    traceback, every line redacted on its own (a key-shaped line becomes the redaction mark, the rest stays), the
-    newest frames kept when it is long."""
+    traceback, redacted, the newest frames kept when it is long. 0.102.13 (review-0102-12 m6): redacted over the WHOLE
+    text (`_PEM_BLOCK_RE`, `_TRACE_EXTRA`, then the commit gate's patterns) — never line by line."""
     if not tb:
         return None
     from guildcore.records import redact as RD
-    lines = [RD.redact(ln) for ln in str(tb).rstrip("\n").split("\n")]
-    text = "\n".join(lines)
+    text = _PEM_BLOCK_RE.sub(RD.REPLACEMENT, str(tb).rstrip("\n"))
+    for rx, rep in _TRACE_EXTRA:
+        text = rx.sub(rep, text)
+    text = RD.redact(text)              # a key header still left (no END) → the whole text is the redaction mark
     return text if len(text) <= TRACE_CAP else "…\n" + text[-TRACE_CAP:]
 
 

@@ -23,6 +23,7 @@ import fnmatch
 import json
 import hashlib
 import os
+import re
 import subprocess
 
 from guildcore.adapters import git as G
@@ -73,8 +74,17 @@ def _git(cwd, *args):
 
 
 def _hash(path):
+    """sha1 of a regular file's content (a link to one is read as before). 0.102.13 (review-0102-12 M2): a FIFO / device
+    / socket — or a link to one — is never opened (an open FIFO blocks the engine forever): its kind is the hash."""
+    import stat as ST
     try:
-        with open(path, "rb") as fh:
+        st = os.stat(path)
+        if not ST.S_ISREG(st.st_mode):
+            return None if ST.S_ISDIR(st.st_mode) else "nonregular:%o" % ST.S_IFMT(st.st_mode)
+        fd = os.open(path, os.O_RDONLY | getattr(os, "O_NONBLOCK", 0))
+        with os.fdopen(fd, "rb") as fh:
+            if not ST.S_ISREG(os.fstat(fh.fileno()).st_mode):
+                return "nonregular"
             return hashlib.sha1(fh.read()).hexdigest()
     except (IOError, OSError):
         return None
@@ -131,20 +141,49 @@ def _tree_hash(root):
     return h.hexdigest()
 
 
+# 0.102.13 (review-0102-12 M3, japanlifeinfo #227 — lead decision): a person's ordinary branch bookkeeping in the main
+# checkout (`branch -D`, `checkout -b --track`, `push -u`, VS Code's `vscode-merge-base`) rewrites `.git/config` but
+# changes nothing a role's or check's execution reads. The integrity hash covers only execution-relevant keys — every
+# key EXCEPT this bookkeeping (core.hooksPath / fsmonitor / sshCommand, include* / includeIf*, filter.*,
+# diff.*.textconv, alias.*, credential.*, url.*.insteadOf / pushInsteadOf, remote.*.url / pushurl and any unknown key
+# stay in).
+_BOOKKEEPING = (re.compile(r"^branch\."), re.compile(r"^remote\..*\.fetch$"), re.compile(r"^gc\."),
+                re.compile(r"^maintenance\."), re.compile(r"vscode"))
+
+
+def config_relevant(raw):
+    """The execution-relevant entries of `git config --list -z` output (bytes), in order, as one bytes string."""
+    keep = []
+    for ent in (raw or b"").split(b"\0"):
+        if not ent:
+            continue
+        key = ent.split(b"\n", 1)[0].decode("utf-8", "replace").lower()
+        if any(r.search(key) for r in _BOOKKEEPING):
+            continue
+        keep.append(ent)
+    return b"\0".join(keep)
+
+
+def _config_hash(args, cwd):
+    p = subprocess.run(["git", "config"] + list(args) + ["--list", "-z"], cwd=cwd, stdout=subprocess.PIPE,
+                       stderr=subprocess.DEVNULL)
+    return hashlib.sha1(config_relevant(p.stdout)).hexdigest() if p.returncode == 0 else None
+
+
 def integrity(worktree, watch_files=()):
     """Hashes of what no role may change and porcelain cannot see (K1-B2): local/worktree git
     config, the hooks and info dirs of the git dir and common dir, and `watch_files` (the main
-    checkout's `.claude/settings.local.json`, the user settings)."""
+    checkout's `.claude/settings.local.json`, the user settings). 0.102.13 (M3): the config hashes are of the
+    execution-relevant keys only (`config_relevant` — branch / remote fetch / gc / maintenance / vscode bookkeeping out)."""
     gp = _git_paths(worktree)
     out = {}
     for scope in ("--local", "--worktree"):
-        p = subprocess.run(["git", "config", "--list", scope], cwd=worktree, stdout=subprocess.PIPE,
-                           stderr=subprocess.DEVNULL)
-        out["git config " + scope] = hashlib.sha1(p.stdout).hexdigest() if p.returncode == 0 else None
+        out["git config " + scope] = _config_hash([scope], worktree)
     for k in sorted(set(gp.values())):
         out["hooks " + k] = _tree_hash(os.path.join(k, "hooks"))
         out["info " + k] = _tree_hash(os.path.join(k, "info"))
-        out["config file " + k] = _hash(os.path.join(k, "config"))
+        cf = os.path.join(k, "config")
+        out["config file " + k] = _config_hash(["--file", cf], worktree) if os.path.isfile(cf) else _hash(cf)
     for f in watch_files or ():
         out["file " + f] = _hash(f)
     for f in lefthook_local_files(worktree):           # K4r2-m1: gitignored → porcelain never shows it
@@ -416,71 +455,125 @@ def rename_partner(snap, path):
     return tag.split(":", 1)[1] if ":" in tag else None
 
 
+COPY_CAP = 64 * 1024 * 1024   # a reverted file larger than this is not copied → not reverted (the stop stays)
+
+
+def _lkind(full):
+    """("missing" | "link" | "file" | "dir" | "fifo" | "device" | "socket" | "other", lstat) — never follows a link."""
+    import stat as ST
+    try:
+        st = os.lstat(full)
+    except FileNotFoundError:
+        return "missing", None
+    m = st.st_mode
+    for k, f in (("link", ST.S_ISLNK), ("file", ST.S_ISREG), ("dir", ST.S_ISDIR), ("fifo", ST.S_ISFIFO),
+                 ("device", lambda x: ST.S_ISCHR(x) or ST.S_ISBLK(x)), ("socket", ST.S_ISSOCK)):
+        if f(m):
+            return k, st
+    return "other", st
+
+
+def _read_regular(full, limit):
+    """Bytes of a REGULAR file read without following a link (O_NOFOLLOW + O_NONBLOCK, fstat re-check), at most
+    `limit` bytes; None when it is no regular file any more or is larger than `limit` (`limit` None: no cap)."""
+    import stat as ST
+    try:
+        fd = os.open(full, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0))
+    except OSError:
+        return None
+    with os.fdopen(fd, "rb") as fh:
+        st = os.fstat(fh.fileno())
+        if not ST.S_ISREG(st.st_mode):
+            return None
+        if limit is not None and st.st_size > limit:
+            return None
+        return fh.read() if limit is None else fh.read(limit)
+
+
 def revert_writes(worktree, paths, cap=1200, keep_dir=None, after=None):
     """Put each path back to HEAD (a new file is removed) → [(path, what the role wrote — its added lines, capped)].
 
     0.102.12 (review-0102-11 M2, lead decision M2): NOTHING is lost — before any path is touched, its content is copied
-    to `keep_dir` (the role's `out/reverted/`: the file at its own relative path, `<path>.diff` against HEAD for a
-    tracked one) and `manifest.json` lists each path's state (modified / new / deleted / renamed from|to) and copy.
-    No stash, no `git clean` of anything not copied first: a path whose copy cannot be written is not reverted (the
-    caller's re-check then stops for a person, as before 0.102.11). A binary file's text is `(binary)`."""
-    import shutil
+    to `keep_dir` (the file at its own relative path, `<path>.diff` against HEAD for a tracked one) and `manifest.json`
+    lists each path's state (modified / new / deleted / renamed from|to) and copy. No stash, no `git clean` of anything
+    not copied first: a path whose copy cannot be written is not reverted (the caller's re-check then stops for a
+    person, as before 0.102.11). A binary file's text is `(binary)`.
+    0.102.13 (review-0102-12 B2·M2, lead decision): `keep_dir` is ENGINE-owned, outside every role-writable tree (the
+    runner's `<issue>/reverted/<run>` beside `runs/`); it must not be a link and every write under it goes through
+    `fsafe` (O_NOFOLLOW, a link on the way refused). The revert never follows a link: a symlink is recorded as a symlink
+    (its target string — the file it points at is never read) and removed as a link; a FIFO / device / socket /
+    directory is never opened — recorded and left in place (not reverted: the re-check stops for a person)."""
+    from guildcore import fsafe as FS
     rows, keep = [], {}
+    if keep_dir:
+        if not os.path.lexists(keep_dir):
+            os.makedirs(keep_dir)  # fs-ok: the caller's engine-owned dir outside role-writable trees (runner: fsafe-made)
+        if _lkind(keep_dir)[0] != "dir":
+            return []                                     # a link / non-directory there: write nothing, revert nothing
     for p in paths:
         full = os.path.join(worktree, p)
         tracked = subprocess.run(["git", "cat-file", "-e", "HEAD:%s" % p], cwd=worktree,
                                  stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0
-        exists = os.path.lexists(full)
+        kind, _st = _lkind(full)
+        exists = kind != "missing"
         partner = rename_partner(after, p) if after else None
         ent = ((after or {}).get("status") or {}).get(p) or []
         state = ("renamed-to %s" % partner if ent[:1] and str(ent[0]).startswith("D") else "renamed-from %s" % partner) \
             if partner else ("deleted" if not exists else ("modified" if tracked else "new"))
-        row = {"path": p, "state": state, "tracked": tracked, "copy": None, "diff": None}
-        if keep_dir:
+        row = {"path": p, "state": state, "tracked": tracked, "copy": None, "diff": None, "kind": kind}
+        if kind == "link":
             try:
-                if exists and os.path.isfile(full):
-                    dst = os.path.join(keep_dir, p)
-                    os.makedirs(os.path.dirname(dst), exist_ok=True)  # fs-ok: engine-owned run dir out/reverted (copy before revert)
-                    shutil.copy2(full, dst)  # fs-ok: engine-owned run dir out/reverted (copy before revert)
-                    row["copy"] = dst
-                if tracked:
+                row["link"] = os.readlink(full)           # the link's own text — its target is never opened
+            except OSError as e:
+                row["error"] = str(e)
+        elif kind not in ("file", "missing"):
+            row["error"] = "not a regular file (%s) — never opened, left in place" % kind
+        if keep_dir and not row.get("error"):
+            try:
+                if kind == "file":
+                    data = _read_regular(full, COPY_CAP)
+                    if data is None:
+                        raise OSError("not copied (no regular file any more, or larger than %d bytes)" % COPY_CAP)
+                    row["copy"] = FS.write_bytes(keep_dir, p, data)
+                if tracked and kind in ("file", "missing", "link"):
                     d = _git(worktree, "diff", "--binary", "HEAD", "--", p)
                     if d:
-                        dst = os.path.join(keep_dir, p + ".diff")
-                        os.makedirs(os.path.dirname(dst), exist_ok=True)  # fs-ok: engine-owned run dir out/reverted
-                        with open(dst, "wb") as fh:  # fs-ok: engine-owned run dir out/reverted (copy before revert)
-                            fh.write(d)
-                        row["diff"] = dst
-            except (OSError, RuntimeError, IOError) as e:
+                        row["diff"] = FS.write_bytes(keep_dir, p + ".diff", d)
+            except (OSError, RuntimeError, IOError, FS.UnsafePath) as e:
                 row["error"] = str(e)
         rows.append(row)
         keep[p] = row
     if keep_dir:
         try:
-            os.makedirs(keep_dir, exist_ok=True)  # fs-ok: engine-owned run dir out/reverted
-            with open(os.path.join(keep_dir, "manifest.json"), "w", encoding="utf-8") as fh:  # fs-ok: engine-owned run dir out/reverted
-                json.dump(rows, fh, ensure_ascii=False, indent=1, sort_keys=True)
-        except (OSError, IOError):
+            FS.write_text(keep_dir, "manifest.json", json.dumps(rows, ensure_ascii=False, indent=1, sort_keys=True))
+        except (OSError, IOError, FS.UnsafePath):
             return []                                     # no record of what is kept → nothing is reverted
     out = []
     for p in paths:
         row = keep[p]
-        if keep_dir and row.get("error"):
-            continue                                      # never revert what could not be copied
+        if row.get("error"):
+            continue                                      # never revert what could not be copied / was never opened
         full = os.path.join(worktree, p)
+        kind = row["kind"]
         text = ""
         try:
-            if _binary(full):
-                text = "(binary)"
-            elif row["tracked"] and os.path.isfile(full):
-                diff = _git(worktree, "diff", "HEAD", "--", p).decode("utf-8", "replace")
-                text = "\n".join(l[1:] for l in diff.split("\n") if l.startswith("+") and not l.startswith("+++"))
-            elif os.path.isfile(full):
-                with open(full, encoding="utf-8", errors="replace") as fh:
-                    text = fh.read(cap * 2)
+            if kind == "link":
+                text = "(symlink to %s)" % row.get("link")
+            elif kind == "file":
+                data = _read_regular(full, 8192)
+                if data is not None and b"\0" in data:
+                    text = "(binary)"
+                elif row["tracked"]:
+                    diff = _git(worktree, "diff", "HEAD", "--", p).decode("utf-8", "replace")
+                    text = "\n".join(l[1:] for l in diff.split("\n") if l.startswith("+") and not l.startswith("+++"))
+                else:
+                    data = _read_regular(full, cap * 8)
+                    text = (data or b"").decode("utf-8", "replace")
         except (RuntimeError, OSError):
             text = ""
         if row["tracked"]:
+            if kind == "link":
+                os.unlink(full)  # fs-ok: removes the role's link itself (never followed) before git restores HEAD
             G.run(worktree, "reset", "-q", "HEAD", "--", p, check=False)     # a staged rename / deletion side
             G.run(worktree, "checkout", "HEAD", "--", p)              # the git adapter: the one mutating door
         else:
@@ -488,18 +581,10 @@ def revert_writes(worktree, paths, cap=1200, keep_dir=None, after=None):
             # path whose staged content differs from both the file and HEAD — an edited rename destination)
             G.run(worktree, "reset", "-q", "HEAD", "--", p, check=False)
             G.run(worktree, "rm", "-q", "--cached", "--ignore-unmatch", "--", p, check=False)
-            if os.path.lexists(full) and (row.get("copy") or not keep_dir):
-                os.remove(full)  # fs-ok: an engine worktree path the role wrote outside its scope, copied to out/reverted first
+            if os.path.lexists(full) and (row.get("copy") or row.get("link") is not None or not keep_dir):
+                os.unlink(full)  # fs-ok: an engine worktree path the role wrote outside its scope (a link removed as a link), recorded first
         out.append((p, " ".join(text.split())[:cap]))
     return out
-
-
-def _binary(path):
-    try:
-        with open(path, "rb") as fh:
-            return b"\0" in fh.read(8192)
-    except (OSError, IOError):
-        return False
 
 
 def drift(baseline, now, worktree=None):

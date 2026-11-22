@@ -24,7 +24,8 @@ class Pres(unittest.TestCase):
         self.assertEqual(R.parse_pres("all good").violation, "none")
         self.assertEqual(R.parse_pres(">>> RESULT <<<\nDONE\n>>> RESULT <<<\nDONE").violation, "duplicate")
         self.assertEqual(R.parse_pres(">>> RESULT <<<\nLooks done").violation, "invalid")
-        self.assertEqual(R.parse_pres(">>> RESULT <<<\nBLOCKED:").violation, "invalid")
+        # 0.102.13 (review-0102-12 B1): a text-less / variant BLOCKED line is BLOCKED, never unreadable (→ never DONE)
+        self.assertEqual(R.parse_pres(">>> RESULT <<<\nBLOCKED:").status, "BLOCKED")
         self.assertEqual(R.parse_pres(">>> RESULT <<<\nFAIL: x", allowed=("DONE",)).violation, "narrowed")
 
     def test_result_json_file_then_fence(self):

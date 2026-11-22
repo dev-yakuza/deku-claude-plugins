@@ -274,7 +274,7 @@ def reverted_findings(qres, root=None):
     """0.102.11 (review-0102-10 M4, lead decision 5): QA never writes repository files — what it wrote outside its
     scope the engine put back (`RoleResult.reverted`) and it becomes a FIXABLE finding for the developer, carrying
     what QA proposed (`release notes missing: <path>: <text>`). Never a stop for a person.
-    0.102.12: the finding names where the engine kept the copy (`out/reverted/<path>`, M2); a scratch write
+    0.102.12: the finding names where the engine kept the copy (`<keep>/<path>`, M2 — 0.102.13: engine-owned `<issue>/reverted/<run>`); a scratch write
     (`scratch_path`) or a binary one is no finding (m5) — its grading-sheet row is all."""
     out = []
     keep = getattr(qres, "reverted_dir", None)
@@ -436,14 +436,25 @@ def _unreadable(p, n):
 
 # ---- follow-ups (Q2.6) -------------------------------------------------------------------------
 
-def _followup_items(qres):
+def _followup_items(qres, p=None):
     items = qres.extras.get("followups")
     if items is None and qres.extras.get("followups_path"):
         txt = _read_any(qres.extras["followups_path"])
         try:
             items = json.loads(txt) if txt else []
         except ValueError:
-            items = []
+            items = "(not JSON)"
+    # 0.102.13 (review-0102-12 m4): an object-shaped followups.json (`{"followups": [...]}` / `{"items": [...]}`) is read
+    # by that key; any other shape is recorded (a decision line), never silently dropped
+    if isinstance(items, dict):
+        got = next((items[k] for k in ("followups", "items", "follow_ups") if isinstance(items.get(k), list)), None)
+        if got is None:
+            _unreadable_followups(p, "an object without a followups / items list (keys: %s)" % ", ".join(
+                sorted(str(k) for k in items)[:8]))
+        items = got
+    elif items is not None and not isinstance(items, list):
+        _unreadable_followups(p, "%s" % (items if isinstance(items, str) else type(items).__name__))
+        items = None
     out = []
     for it in items if isinstance(items, list) else []:
         if isinstance(it, str):
@@ -455,6 +466,16 @@ def _followup_items(qres):
             out.append({"title": _text(it["title"]), "rationale": _text(it.get("rationale") or it.get("근거")) or None,
                         "keywords": _text(it.get("keywords")) or _text(it["title"])})
     return out
+
+
+def _unreadable_followups(p, what):
+    if p is None:
+        return
+    try:
+        B.record_code(p, STAGE, "followups-unreadable", "recorded",
+                      reason="qa followups.json could not be read as a list of follow-ups: %s" % B.one_line(what, 160))
+    except Exception:                                  # noqa: BLE001 — the record is best effort, never a QA stop
+        pass
 
 
 def _text(v):
@@ -527,7 +548,7 @@ def _followups(p, cfg, qres, comments, pr):
     seen = set(i.title for i in carried)
     unfiled, skipped = [], []
     # 0.102.8 (review-0102-7 m5): an auto-narrowed reading's follow-ups are listed even without design output
-    for it in (_followup_items(qres) if has_design else []) + narrowed:
+    for it in (_followup_items(qres, p) if has_design else []) + narrowed:
         if it["title"] in seen:
             continue
         verdict = _dedup(p, it, pr.get("number") if pr else None)

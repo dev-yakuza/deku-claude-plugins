@@ -11,6 +11,8 @@ Each returns a list of failed items (empty = pass). A failure → the producing 
 engine's own renderer, so a failure there is an engine defect).
 """
 
+import re
+
 from guildcore import state as ST
 from guildcore.checks import visual as V
 from guildcore.records import audit as AU
@@ -107,13 +109,21 @@ def skeleton_bad(skeleton):
 
 
 def cases_bad(test_cases, ac_ids, visual):
-    from workflows.dev import analysis as AN
     if not (test_cases or "").strip():
         return ["test-cases.md empty or missing"]
+    from workflows.dev import cases as CS
     bad = []
-    missing = sorted(set(ac_ids) - AN.ac_ids_in(test_cases))
+    # 0.102.13 (review-0102-12 M1, lead decision): an AC counts only as a tag / list / table entry (the test stage's
+    # `doc_ac_refs`) — a prose mention ("Scope: AC #1, AC #2, AC #3.") does not satisfy the gate
+    named = set()
+    for a in CS.doc_ac_refs(test_cases):
+        m = re.match(r"^AC #(\d+)$", a)
+        if m:
+            named.add(int(m.group(1)))
+    missing = sorted(set(ac_ids) - named)
     if missing:
-        bad.append("test-cases.md does not name AC %s" % ", ".join("#%d" % n for n in missing[:8]))
+        bad.append("test-cases.md does not name AC %s as a tag, list item or table row (a prose mention is not "
+                   "one)" % ", ".join("#%d" % n for n in missing[:8]))
     if visual and "<!-- guild:visual-cases -->" not in test_cases:
         bad.append("VISUAL=yes but no visual-cases marker")
     return bad

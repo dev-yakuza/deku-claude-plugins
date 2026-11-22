@@ -92,42 +92,104 @@ def parse_pres(reply, allowed=STATUSES):
 
 def _status_of(line):
     """(status, text) of one status line — the strict form, else the separators models write (`_LOOSE_RE`); a status
-    other than DONE still needs its one-line text. (None, None) when it is no status line."""
+    other than DONE still needs its one-line text — except a BLOCKED / FAIL / NEEDS_CONTEXT line in any case or form
+    (`blocked: …`, `Status: BLOCKED — …`, `BLOCKED.`, a bare `BLOCKED`), which is that status, never DONE (0.102.13
+    B1). (None, None) when it is no status line."""
     m = _STATUS_RE.match(line)
     if m:
         return m.group(1) or m.group(3), (m.group(2) if m.group(1) else m.group(4)) or None
     m = _LOOSE_RE.match(line)
-    if not m:
-        return None, None
-    status = m.group(1)
-    if m.group(3) is not None:
-        text = ("%s %s" % (m.group(3).strip(), (m.group(4) or "").strip())).strip()
-    else:
-        text = (m.group(2) or "").strip()
-    text = text or None
-    if status != "DONE" and not text:
-        return None, None
-    return status, text
+    if m:
+        status = m.group(1)
+        if m.group(3) is not None:
+            text = ("%s %s" % (m.group(3).strip(), (m.group(4) or "").strip())).strip()
+        else:
+            text = (m.group(2) or "").strip()
+        text = text or None
+        if status != "DONE" and not text:
+            m = None
+        else:
+            return status, text
+    m = _BLOCKING_LINE_RE.match(line)
+    if m:
+        word = m.group(1).lower()
+        status = "BLOCKED" if word == "blocked" else "NEEDS_CONTEXT" if word.startswith("needs") else "FAIL"
+        return status, (m.group(2) or "").strip() or None
+    return None, None
 
 
-def structured_pres(pres, obj, allowed=STATUSES):
+# 0.102.13 (review-0102-12 B1): a status line that says BLOCKED / FAIL / NEEDS_CONTEXT in a form the strict and loose
+# readers do not take — lowercase, `Status: BLOCKED`, `BLOCKED.`, `BLOCKED → …`, bare — is read as that status.
+_BLOCKING_LINE_RE = re.compile(r"^[*`_\s]*(?:status\s*[:：=]?\s*)?[*`_]*(blocked|fail(?:ed)?|needs[_ -]?context)\b"
+                               r"[*`_]*[\s:：.,;!→>=\-–—]*(.*)$", re.I)
+# any blocking / failing token anywhere in a reply (any case, any punctuation) — no structured stand-in then
+_BLOCKING_TOKEN_RE = re.compile(r"(?<![A-Za-z0-9])(blocked|fail|failed|needs[_ -]?context|halted)(?![A-Za-z0-9])", re.I)
+
+
+def blocking_token(reply):
+    """The first BLOCKED / FAIL / NEEDS_CONTEXT / HALTED token anywhere in a reply (any case or form), else None."""
+    m = _BLOCKING_TOKEN_RE.search(reply or "")
+    return m.group(1) if m else None
+
+
+def _filled(v):
+    return v is not None and v != "" and v != [] and v != {} and not (isinstance(v, str) and not v.strip())
+
+
+def required_filled(obj, schema):
+    """True when `schema` has required fields and `obj` carries every one non-empty (one `anyOf` / `oneOf` branch's
+    required set suffices). A schema with no required field never is (0.102.13 B1 condition c)."""
+    if not isinstance(obj, dict) or not isinstance(schema, dict):
+        return False
+    req = schema.get("required") or []
+    if req:
+        return all(_filled(obj.get(k)) for k in req)
+    for k in ("anyOf", "oneOf"):
+        alts = [b.get("required") or [] for b in schema.get(k) or [] if isinstance(b, dict)]
+        if any(r and all(_filled(obj.get(x)) for x in r) for r in alts):
+            return True
+    return False
+
+
+def structured_pres(pres, obj, allowed=STATUSES, reply="", schema=None):
     """0.102.12 (one-man-company #687: tech-lead design wrote skeleton.md, split.json and a valid result.json, ended
     `DONE_WITH_CONCERNS: …` where the task allows DONE / BLOCKED / NEEDS_CONTEXT / FAIL — three sessions, then a
     pause): the status line could not be used but `out/result.json` validated — the structured result decides.
-    Its own `status` when it names an allowed one; else a DONE_WITH_CONCERNS line where only DONE is allowed is DONE
-    (the concern kept as the text); else a missing / unreadable line is DONE. Never BLOCKED / FAIL by inference: a
-    line that names one of those the task does not allow stays a violation. None when no status can be taken."""
-    st = obj.get("status") if isinstance(obj, dict) else None
-    if isinstance(st, str) and st.strip().upper() in allowed:
-        return Pres(True, st.strip().upper(), pres.text or "status from out/result.json")
+    0.102.13 (review-0102-12 B1 — lead decision): ONLY when (a) the final message carries no BLOCKED / FAIL /
+    NEEDS_CONTEXT / HALTED token anywhere (any case or form), (b) it has at most one RESULT marker and (c) the task's
+    schema has required fields, all present and non-empty in result.json. Otherwise None — the repair session
+    (0.102.11). Then: a narrowed DONE_WITH_CONCERNS line (DONE allowed) is `DONE: concerns — …` (the line before the
+    json `status`); else the json's allowed `status`; else a missing / unreadable line is DONE — but a text-less
+    DONE_WITH_CONCERNS (its concern not on the line) is no DONE."""
+    if pres is None or pres.ok:
+        return None
+    if blocking_token(reply) or blocking_token(pres.text) or pres.status in ("BLOCKED", "FAIL", "NEEDS_CONTEXT"):
+        return None
+    if (reply or "").count(SENTINEL) > 1 or pres.violation == "duplicate":
+        return None
+    if not required_filled(obj, schema):
+        return None
     if pres.violation == "narrowed":
         if pres.status == "DONE_WITH_CONCERNS" and "DONE" in allowed:
             return Pres(True, "DONE", "concerns — %s" % (pres.text or "-"))
         return None
-    if pres.violation in ("none", "invalid", "duplicate") and "DONE" in allowed:
+    st = obj.get("status") if isinstance(obj, dict) else None
+    if isinstance(st, str) and st.strip().upper() in allowed:
+        return Pres(True, st.strip().upper(), pres.text or "status from out/result.json")
+    if pres.violation == "invalid" and re.search(r"concern", _after_sentinel(reply), re.I):
+        return None
+    if pres.violation in ("none", "invalid") and "DONE" in allowed:
         return Pres(True, "DONE", "status from out/result.json (the RESULT line was %s)" % (
-            {"none": "missing", "duplicate": "doubled"}.get(pres.violation, "unreadable")))
+            {"none": "missing"}.get(pres.violation, "unreadable")))
     return None
+
+
+def _after_sentinel(reply):
+    lines = [ln.strip() for ln in (reply or "").split("\n")]
+    if SENTINEL not in lines:
+        return ""
+    rest = [ln for ln in lines[lines.index(SENTINEL) + 1:] if ln]
+    return rest[0] if rest else ""
 
 
 REPAIR_LINE = ("Your previous reply had %s `>>> RESULT <<<` — return EXACTLY one sentinel and one "

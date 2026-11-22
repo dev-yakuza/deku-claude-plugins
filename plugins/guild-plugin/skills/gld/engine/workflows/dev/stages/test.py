@@ -207,6 +207,9 @@ def run(p, only=None, config_present=True):
         # 0.102.12 (review-0102-11 M4, japanlifeinfo #227): the package manager could not be fetched offline — an
         # environment stop naming the cache, never a runner-format question
         from guildcore.checks import pmcache as PMC
+        if PMC.mismatch_failure(r.raw):                              # 0.102.13 (m5): a config error, not a cache one
+            line = PMC.mismatch_line("test suite", r.raw, p.root)
+            return B.pause(p, STAGE, "env", line, "engine-env-package-manager-mismatch", env_key="other")
         if PMC.offline_fetch_failure(r.raw):
             line = PMC.offline_line("test suite", r.raw, p.root)
             return B.pause(p, STAGE, "env", line, "engine-env-package-manager-offline", env_key="other")
@@ -435,15 +438,30 @@ def _judge_once(p, cfg, tc_rel, test_cases, covers, ledger, raw, attempt, acs=()
     return None, True
 
 
+def doc_predates_run(p, rel):
+    """0.102.13 (review-0102-12 M1, lead decision): `rel` existed at the base commit (the merge base of the run's base
+    and HEAD) — a document from before this run. Unknown base / no git → False (judged as this run's document)."""
+    if not getattr(p, "base", None) or not getattr(p, "root", None):
+        return False
+    try:
+        from guildcore.adapters import git as G
+        mb = G.run(p.root, "merge-base", p.base, "HEAD", check=False).decode("utf-8", "replace").strip()
+        return bool(mb) and G.ok(p.root, "cat-file", "-e", "%s:%s" % (mb, rel))
+    except Exception:
+        return False
+
+
 def _judge_coverage(p, cfg, test_cases, covers, raw, ledger, visual_cases, tc_rel, deferred):
     # 0.102.9 (#1797 D25/D26/D32/D33): ONE id set — a case that names an AC (its `— AC #n` tag / row / heading) is
     # folded into that AC; the tester's covers are re-keyed to it, so the judge, the checks and the gap use the same ids
     # 0.102.11 (review-0102-10 B1, lead decision 1): the analyze stage's AC list joins the set — an AC no case names is
     # judged (no cover → a gap) instead of never being looked at
     an_acs = analyze_acs(p)
-    acs, members, amap = CS.judged_units(test_cases, deferred, an_acs)
-    # 0.102.12 (m2): an untagged (legacy) document — the analyze ACs are judged beside its ids, never a gap
-    soft = CS.soft_units(test_cases, acs, an_acs, deferred) if acs else []
+    legacy = doc_predates_run(p, tc_rel)
+    acs, members, amap = CS.judged_units(test_cases, deferred, an_acs, legacy)
+    # 0.102.12 (m2): an untagged (legacy) document — the analyze ACs are judged beside its ids, never a gap;
+    # 0.102.13 (M1): legacy = test-cases.md exists at the base commit (a document of this run never is)
+    soft = CS.soft_units(test_cases, acs, an_acs, deferred, legacy) if acs else []
     acs = list(acs) + soft
     covers = valid_covers(p, cfg, CS.rekey_visual(CS.rekey_covers(covers, amap), test_cases))
     ac_source = "test-cases"
@@ -624,40 +642,133 @@ def _literal_prefix(x):
     return x[:m.start()].rstrip() if m else None
 
 
+# 0.102.13 (review-0102-12 m3, lead decision): a composed name (group + test) must be an ACTUAL group / test structure
+# of the file — the first string-literal argument of `group(` / `describe(` / `context(` / `suite(` calls that lexically
+# enclose a `test(` / `testWidgets(` / `it(` … call, in that order (a contiguous run ending at the test; outer groups
+# may be left out) — never any literals of the file joined in any order, and never the last segment alone when the
+# cited name names a group.
+_GROUP_CALLS = r"group|describe|context|suite|fdescribe|xdescribe|feature|scenario"
+_TEST_CALLS = (r"test|testWidgets|it|fit|xit|ftest|testGoldens|goldenTest|blocTest|patrolTest|patrolWidgetTest|"
+               r"testUI|integrationTest|widgetTest")
+_CALL_RE = re.compile(r"(?<![\w.$])(%s|%s)(?:\.(?:only|skip|concurrent|todo|each\s*\([^()]*\)))?\s*(?:<[^<>()]*>)?\s*\("
+                      % (_GROUP_CALLS, _TEST_CALLS))
+_GROUP_SET = set(_GROUP_CALLS.split("|"))
+_TRIPLE = ("'" * 3, '"' * 3)
+
+
+def _mask(text):
+    """`text` with comments and string-literal contents blanked (same length) → (masked, [(start, end, value)])."""
+    out, lits, i, n = list(text), [], 0, len(text)
+    while i < n:
+        c = text[i]
+        if text.startswith("//", i):
+            j = text.find("\n", i)
+            j = n if j < 0 else j
+            for k in range(i, j):
+                out[k] = " "
+            i = j
+            continue
+        if text.startswith("/*", i):
+            j = text.find("*/", i + 2)
+            j = n if j < 0 else j + 2
+            for k in range(i, j):
+                if out[k] != "\n":
+                    out[k] = " "
+            i = j
+            continue
+        if c in "'\"`":
+            q = text[i:i + 3] if text[i:i + 3] in _TRIPLE else c
+            j = i + len(q)
+            while j < n and not text.startswith(q, j):
+                if text[j] == "\\":
+                    j += 1
+                elif text[j] == "\n" and len(q) == 1 and q != "`":
+                    break
+                j += 1
+            end = min(n, j + len(q))
+            lits.append((i, end, text[i + len(q):min(j, n)]))
+            for k in range(i + len(q), min(j, n)):
+                if out[k] != "\n":
+                    out[k] = " "
+            i = end
+            continue
+        i += 1
+    return "".join(out), lits
+
+
+def test_structure(text):
+    """[[group name, …, test name]] — every test call's first literal with the group calls lexically around it."""
+    masked, lits = _mask(text or "")
+    by_start = dict((st, v) for st, _e, v in lits)
+    calls = []
+    for m in _CALL_RE.finditer(masked):
+        open_at = m.end() - 1
+        j = open_at + 1
+        while j < len(masked) and masked[j] in " \t\r\n":
+            j += 1
+        if j not in by_start:
+            continue
+        depth, k = 0, open_at
+        while k < len(masked):
+            if masked[k] == "(":
+                depth += 1
+            elif masked[k] == ")":
+                depth -= 1
+                if depth == 0:
+                    break
+            k += 1
+        calls.append((open_at, k, m.group(1) in _GROUP_SET, _norm(by_start[j])))
+    out = []
+    for st, en, is_group, name in calls:
+        if is_group or not name:
+            continue
+        chain = [g for gs, ge, ig, g in calls if ig and gs < st and en <= ge and g]
+        out.append(chain + [name])
+    return out
+
+
+_INTERP_TOKEN = re.compile(r"\$\{[^}]*\}|\$[A-Za-z_]\w*|%[sdrif]|\{[A-Za-z_][^{}]*\}")
+
+
+def _lit_match(c, x):
+    """The cited piece `c` names the literal `x` — exactly, or (an interpolated literal) by its literal prefix (≥ 8)
+    before the first interpolation with the rest of the literal around the interpolated values (0.102.13)."""
+    if c == x:
+        return True
+    px, pc = _literal_prefix(x), _literal_prefix(c)
+    if px is not None and len(px) >= PREFIX_MIN and c.startswith(px):
+        pat = ".+?".join(re.escape(part) for part in _INTERP_TOKEN.split(x))
+        if re.fullmatch(pat, c, re.S):
+            return True
+    return pc is not None and len(pc) >= PREFIX_MIN and x.startswith(pc)
+
+
+def _chain_match(c, lits):
+    if len(lits) == 1:
+        return _lit_match(c, lits[0])
+    head = lits[0]
+    return c.startswith(head + " ") and _chain_match(c[len(head) + 1:], lits[1:])
+
+
 def name_in_source(text, name, runner=None):
-    """Is the cited test `name` a test of `text` (the test file)? See the block comment above."""
+    """Is the cited test `name` a test of `text` (the test file)? See the block comments above."""
     if runner in ("pytest", "unittest", "go"):
         return EFF.test_body(text, name, runner) is not None
-    lits = set()
-    for m in _LIT_RE.finditer(text or ""):
-        v = _norm(next((g for g in m.groups() if g is not None), ""))
-        if v:
-            lits.add(v)
-    exact = set(x for x in lits if not _INTERP_RE.search(x))
-    prefixes = [p_ for p_ in (_literal_prefix(x) for x in lits) if p_ and len(p_) >= PREFIX_MIN]
     n = _norm(str(name or "").replace("\\$", "$"))           # `\$x` — a JSON-escaped Dart interpolation (#1797)
     segs = [_norm(x) for x in re.split(r"::| › | > ", n) if _norm(x)]
-    cands = [n] + ([" ".join(segs)] if len(segs) > 1 else []) + segs[-1:]
-    own = _literal_prefix(n)
-    if own is not None:                                   # the tester quoted an interpolated source name
-        def pref_ok(pre, depth=0):
-            if len(pre) >= PREFIX_MIN and any(x.startswith(pre) for x in lits):
+    cited = " ".join(segs) if segs else n
+    if not cited:
+        return False
+    tests = test_structure(text)
+    if not tests:
+        # no recognised test call (another framework): the name must be one literal of the file, never composed
+        _m, lits = _mask(text or "")
+        return any(_lit_match(cited, _norm(v)) for _s, _e, v in lits if _norm(v))
+    for path in tests:
+        for i in range(len(path)):
+            if _chain_match(cited, path[i:]):
                 return True
-            return depth < 6 and any(pre.startswith(x + " ") and pref_ok(pre[len(x) + 1:], depth + 1) for x in exact)
-        own_seg = _literal_prefix(segs[-1]) if segs else None
-        return any(pref_ok(pre) for pre in (own, own_seg) if pre)
-
-    def composed(s, depth=0):
-        """`s` = literals joined by single spaces (group names then the test name), interpolated ones by prefix."""
-        if s in exact:
-            return True
-        if depth > 6:
-            return False
-        for x in exact:
-            if s.startswith(x + " ") and composed(s[len(x) + 1:], depth + 1):
-                return True
-        return any(s.startswith(pre) for pre in prefixes)
-    return any(composed(c) for c in cands if c)
+    return False
 
 
 def valid_covers(p, cfg, covers):

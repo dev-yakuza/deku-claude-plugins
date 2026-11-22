@@ -1264,6 +1264,11 @@ class R5B1Suite(unittest.TestCase):
 
     def test_missing_ignored_classifier(self):
         r = self._dart_repo()
+        # 0.102.13 (review-0102-12 M4): a missing input is a git-ignored file the main checkout really holds
+        os.makedirs(os.path.join(r, "lib", "env"))
+        open(os.path.join(r, "lib", "env", "env.dart"), "w").write("const k = 1;\n")
+        os.makedirs(os.path.join(r, "assets"), exist_ok=True)
+        open(os.path.join(r, "assets", "data.db"), "w").write("db")
         raw = ("/tmp/T/lib/a.dart:1:8: Error: Error when reading '/tmp/T/lib/env/env.dart': No such file or directory\n"
                "No file or variants found for asset: assets/data.db.\nlib/real.dart:3: Error: x\n")
         self.assertEqual(PF.missing_ignored(raw, r, [], "/tmp/T"), ["assets/data.db", "lib/env/env.dart"])

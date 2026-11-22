@@ -190,7 +190,8 @@ class RoleResult(object):
         # engine put back after it (the stage turns them into a finding)
         self.reverted = list(reverted or ())
         # 0.102.12 (review-0102-11 M2): where the engine copied every reverted path BEFORE putting it back
-        # (`<run>/out/reverted/` — the files, `<path>.diff`, manifest.json) — nothing it reverts is lost
+        # (the files, `<path>.diff`, manifest.json) — nothing it reverts is lost; 0.102.13 (review-0102-12 B2): an
+        # ENGINE-owned dir `<issue>/reverted/<run>` beside `runs/` (`reverted_keep_dir`), never the role's own out/
         self.reverted_dir = reverted_dir
 
 
@@ -214,6 +215,15 @@ def run_root(worktree, issue, env=None):
     base = env.get("GLD_ENGINE_RUNS") or os.path.join(
         env.get("HOME") or os.path.expanduser("~"), ".cache", "guild-engine")
     return os.path.join(base, repo_hash(worktree), str(issue), "runs")
+
+
+def reverted_keep_dir(run_dir):
+    """0.102.13 (review-0102-12 B2, lead decision): where a scope revert copies what it puts back —
+    `<issue>/reverted/<run>`, a sibling of `runs/` (engine-owned; a role reaches only its own run dir's out/ and tmp/),
+    created component by component with `fsafe.makedirs` (a link on the way is refused, never followed)."""
+    from guildcore import fsafe as FS
+    runs = os.path.dirname(os.path.abspath(run_dir))
+    return FS.makedirs(os.path.dirname(runs), os.path.join("reverted", os.path.basename(run_dir)))
 
 
 def new_run_dir(root, stage, who):
@@ -725,8 +735,9 @@ class Runner(object):
                     rk = P.role_key(spec.role, spec.task)
                     paths = SC.revertable(spec.worktree, before, after, violations, rk)
                     if paths:
-                        # 0.102.12 (review-0102-11 M2): every path is copied to the run dir first (never lost)
-                        keep = os.path.join(run_dir, "out", "reverted")
+                        # 0.102.12 (review-0102-11 M2): every path is copied first (never lost) — 0.102.13 (B2): to
+                        # an engine-owned dir outside the role-writable tree, made with fsafe (no link followed)
+                        keep = reverted_keep_dir(run_dir)
                         got = SC.revert_writes(spec.worktree, paths, keep_dir=keep, after=after)
                         after = SC.snapshot(spec.worktree, remote=url, watch_files=watch)
                         left = SC.check(spec.worktree, before, after, [rk], issue=spec.issue, branch=spec.branch)
@@ -768,11 +779,12 @@ class Runner(object):
         self._src = None
         if spec.result_schema is not None and not pres.ok:
             # 0.102.12 (one-man-company #687): an unusable status line beside a valid out/result.json — the structured
-            # result decides (R.structured_pres), never a repair session and a pause for a finished role
+            # result decides (R.structured_pres), never a repair session and a pause for a finished role — 0.102.13 (B1):
+            # only with no blocking token in the reply, one marker and the schema's required fields all filled
             o_, s_, e_ = R.read_result_json(run_dir, st.last_text)
             if not e_ and not R.validate(o_, spec.result_schema, None) and \
                     not R.missing_artifacts(o_, spec.worktree, run_dir):
-                alt = R.structured_pres(pres, o_, spec.allowed_status)
+                alt = R.structured_pres(pres, o_, spec.allowed_status, st.last_text, spec.result_schema)
                 if alt is not None:
                     if isinstance(getattr(self, "_reply_notes", None), list):
                         self._reply_notes.append("status from result.json: RESULT line %s → %s" % (

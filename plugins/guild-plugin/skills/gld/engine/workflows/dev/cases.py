@@ -221,7 +221,7 @@ def ac_map(text):
     return out
 
 
-def judged_units(text, deferred=(), acs=()):
+def judged_units(text, deferred=(), acs=(), legacy=False):
     """(ids the TEST judge rules on, {AC id: [its cases]}, {case id: [AC ids]}) — AC ids (in document order) with the
     cases that name them folded in, plus every case naming no AC as its own unit. A deferred case leaves its AC's case
     list; a deferred AC leaves the set.
@@ -229,10 +229,12 @@ def judged_units(text, deferred=(), acs=()):
     (`ac_refs` — lists and `[AC #n]` tags included) and `acs` — the analyze stage's AC list. An AC no case names is a
     unit with no cases (no cover → a gap, unless the tester marks it untestable)."""
     units, members, amap = _judged_units(text, deferred)
-    if not amap:
+    if not amap and legacy:
         # 0.102.12 (review-0102-11 m2, lead decision m2): a document that tags no case with an AC (legacy) is judged by
         # its own ids — the analyze ACs are judged beside them as SOFT units (`soft_units`: an unconfirmed one is a
-        # grading-sheet row for the untagged document, never a gap)
+        # grading-sheet row for the untagged document, never a gap). 0.102.13 (review-0102-12 M1, lead decision): ONLY
+        # a document that predates this run (`legacy` — it exists at the base commit); one written in this run is
+        # judged with the union (an AC with no case is a hard unit → a gap)
         return units, members, amap
     dset = set(deferred or ()) | set(ac_key(x) for x in deferred or ())
     have = set(ac_key(u) for u in units)
@@ -268,10 +270,10 @@ def doc_ac_refs(text):
     return out
 
 
-def soft_units(text, units, acs=(), deferred=()):
+def soft_units(text, units, acs=(), deferred=(), legacy=False):
     """0.102.12 (m2): the analyze ACs judged as SOFT units — only for a document that tags no case with an AC; the ones
-    not already a unit (and not deferred)."""
-    if ac_map(text):
+    not already a unit (and not deferred). 0.102.13 (M1): only for a `legacy` document (it exists at the base commit)."""
+    if not legacy or ac_map(text):
         return []
     have = set(ac_key(u) for u in units or ())
     dset = set(deferred or ()) | set(ac_key(x) for x in deferred or ())

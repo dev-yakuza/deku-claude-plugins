@@ -617,6 +617,9 @@ def evidence_step(p, cx, dev, attempt):
         # 0.102.12 (review-0102-11 M4, japanlifeinfo #227): a red run whose output shows the package manager could
         # not be fetched offline is an environment stop that says so — never "set commands.test_summary"
         from guildcore.checks import pmcache as PMC
+        if not r.passed and PMC.mismatch_failure(r.raw):            # 0.102.13 (m5): a config error, not a cache one
+            line = PMC.mismatch_line("execute suite", r.raw, getattr(p, "root", None))
+            return env_pause(p, line, "engine-env-package-manager-mismatch", "X2.3")
         if not r.passed and PMC.offline_fetch_failure(r.raw):
             line = PMC.offline_line("execute suite", r.raw, getattr(p, "root", None))
             return env_pause(p, line, "engine-env-package-manager-offline", "X2.3")

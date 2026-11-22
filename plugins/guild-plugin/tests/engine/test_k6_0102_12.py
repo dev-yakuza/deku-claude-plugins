@@ -226,7 +226,9 @@ class M2RevertKeepsACopy(unittest.TestCase):
                                                             remote_check=False))
         self.assertEqual(res.status, "DONE")
         keep = res.reverted_dir
-        self.assertEqual(keep, os.path.join(res.run_dir, "out", "reverted"))
+        # 0.102.13 (review-0102-12 B2): an engine-owned dir beside runs/, never the role's own out/
+        self.assertEqual(keep, os.path.join(os.path.dirname(os.path.dirname(res.run_dir)), "reverted",
+                                            os.path.basename(res.run_dir)))
         self.assertEqual(open(os.path.join(keep, "lib", "hotfix.dart")).read(), self.NEW)
         self.assertEqual(open(os.path.join(keep, "lib", "a.dart")).read(), "a\nb\n")
         self.assertIn("+b", open(os.path.join(keep, "lib", "a.dart.diff")).read())
@@ -439,15 +441,18 @@ class m2Untagged(unittest.TestCase):
     TC = "## 케이스\n| ID | 내용 |\n|---|---|\n| C1 | a |\n| C2 | b |\n"
 
     def test_the_analyze_acs_are_soft_units(self):
-        units, _m, amap = CS.judged_units(self.TC, (), ["AC #1", "AC #2"])
+        # 0.102.13 (review-0102-12 M1): only a legacy document (it exists at the base commit) has soft units
+        units, _m, amap = CS.judged_units(self.TC, (), ["AC #1", "AC #2"], legacy=True)
         self.assertEqual((units, amap), (["C1", "C2"], {}))
-        self.assertEqual(CS.soft_units(self.TC, units, ["AC #1", "AC #2"]), ["AC #1", "AC #2"])
+        self.assertEqual(CS.soft_units(self.TC, units, ["AC #1", "AC #2"], legacy=True), ["AC #1", "AC #2"])
 
     def test_an_unconfirmed_soft_ac_is_a_row_not_a_gap(self):
         covers = [{"test": "test/a_test.dart::t", "ac": "C1", "kind": "guard"},
                   {"test": "test/a_test.dart::t", "ac": "C2", "kind": "guard"}]
-        h, r = _test_stage(self, covers, self.TC, [judge_test(["C1", "C2"])] * 2,
-                           roles_after=[role("DONE", covers=covers)], analyze=_analyze_out(["AC #1", "AC #2"]))
+        from unittest import mock
+        with mock.patch.object(T, "doc_predates_run", lambda p, rel: True):     # 0.102.13 (M1): a legacy document
+            h, r = _test_stage(self, covers, self.TC, [judge_test(["C1", "C2"])] * 2,
+                               roles_after=[role("DONE", covers=covers)], analyze=_analyze_out(["AC #1", "AC #2"]))
         self.assertEqual(r.token(), "OK ADVANCE: qa")
         row = _blocks(h, "ac-untagged")
         self.assertEqual(row[0].get("ac_untagged"), "AC #1,AC #2")
@@ -586,15 +591,20 @@ class R687ResultLine(unittest.TestCase):
             p = R.parse_pres(">>> RESULT <<<\n" + line)
             self.assertTrue(p.ok, line)
             self.assertEqual((p.status, p.text), want)
-        for bad in ("BLOCKED", "DONEX", "DONE-ish", "done"):
+        for bad in ("DONEX", "DONE-ish", "done"):
             self.assertFalse(R.parse_pres(">>> RESULT <<<\n" + bad).ok, bad)
+        # 0.102.13 (review-0102-12 B1): a bare / variant BLOCKED is read as BLOCKED, never left unreadable
+        self.assertEqual(R.parse_pres(">>> RESULT <<<\nBLOCKED").status, "BLOCKED")
 
     def test_structured_status_never_infers_a_failure(self):
-        p = R.parse_pres(">>> RESULT <<<\nFAIL: broke", ("DONE", "BLOCKED"))
-        self.assertIsNone(R.structured_pres(p, {"skeleton": "x"}, ("DONE", "BLOCKED")))
+        tl = R.RESULT_SCHEMAS["tech-lead"]
+        reply = ">>> RESULT <<<\nFAIL: broke"
+        p = R.parse_pres(reply, ("DONE", "BLOCKED"))
+        self.assertIsNone(R.structured_pres(p, {"skeleton": "x"}, ("DONE", "BLOCKED"), reply, tl))
         p = R.parse_pres("no sentinel at all")
-        self.assertEqual(R.structured_pres(p, {"status": "BLOCKED"}, R.STATUSES).status, "BLOCKED")
-        self.assertEqual(R.structured_pres(p, {"skeleton": "x"}, R.STATUSES).status, "DONE")
+        self.assertEqual(R.structured_pres(p, {"status": "BLOCKED", "skeleton": "x"}, R.STATUSES, "no sentinel at all",
+                                           tl).status, "BLOCKED")
+        self.assertEqual(R.structured_pres(p, {"skeleton": "x"}, R.STATUSES, "no sentinel at all", tl).status, "DONE")
 
 
 if __name__ == "__main__":

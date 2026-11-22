@@ -505,7 +505,7 @@ def role_outcome(p, stage, role, res):
         # 0.102.11 (review-0102-10 M4): the engine put back what a read-only role wrote outside its scope — on record
         # (a grading-sheet row); QA's also becomes a finding for the developer (stages.qa.reverted_findings)
         res._reverted_recorded = True
-        # 0.102.12 (review-0102-11 M2): the row names where every reverted path was copied first (`out/reverted/`)
+        # 0.102.12 (review-0102-11 M2): the row names where every reverted path was copied first (0.102.13: `<issue>/reverted/<run>`, engine-owned)
         keep = getattr(res, "reverted_dir", None)
         record_code(p, stage, "scope-reverted", "reverted", reason=("%s wrote outside its scope; the engine put back: %s"
                     % (role, ", ".join(x for x, _t in res.reverted)))[:500] + (" — copies: %s" % keep if keep else ""),

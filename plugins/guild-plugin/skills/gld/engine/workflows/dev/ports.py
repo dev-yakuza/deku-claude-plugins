@@ -299,7 +299,8 @@ def suite_in_tree(worktree, base, cmds, owner, timeout_s, run_dir, env, copy_lis
 # reachable (no GitHub release hosts: those serve native-asset hooks, which run in the warm-up).
 DEPS_MAIN_CMDS = {"pubspec.yaml": ["flutter pub get"], "package.json": ["npm ci --ignore-scripts"]}   # (npm: see deps_main)
 REGISTRY_HOSTS = {"pubspec.yaml": ("pub.dev", "pub.dartlang.org", "storage.googleapis.com"),
-                  "package.json": ("registry.npmjs.org", "registry.yarnpkg.com")}
+                  # 0.102.13 (review-0102-12 m2): Corepack fetches yarn ≥ 2 from repo.yarnpkg.com
+                  "package.json": ("registry.npmjs.org", "registry.yarnpkg.com", "repo.yarnpkg.com")}
 
 
 def read_allowlist(tree, run_dir):

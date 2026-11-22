@@ -112,15 +112,36 @@ MISSING_PATH_RES = (
 )
 
 
+# 0.102.13 (review-0102-12 M4, word_app #1797 — lead decision): a skipped git-ignored path counts as a MISSING input only
+# when (1) a line naming it reads as a read failure and not as a write, (2) the temp tree still lacks it after the run
+# and (3) the main checkout holds it as a git-ignored file; tool outputs never count. Everything else is a normal red.
+READ_FAIL_RE = re.compile(r"No such file|not found|does not exist|Error when reading|Unable to load|Cannot open|"
+                          r"ENOENT|FileSystemException: Cannot (?:open|read)|Failed to load|No file or variants found|"
+                          r"Couldn't resolve", re.I)
+WRITE_CTX_RE = re.compile(r"written to|crash report|Writing|Saved|Generated|Created", re.I)
+TOOL_OUTPUT_RE = re.compile(r"(^|/)flutter_\d+\.log$|^[^/]+\.log$|(^|/)(build|\.dart_tool|coverage)(/|$)")
+
+
+def _read_failure_line(raw, rel):
+    """A line of `raw` naming `rel` (path-bounded) in a read-failure context and not a write context."""
+    rx = re.compile(r"(^|[/\s'\"(])%s(?=$|[/\s'\":),.])" % re.escape(rel))
+    for ln in raw.split("\n"):
+        if rx.search(ln) and READ_FAIL_RE.search(ln) and not WRITE_CTX_RE.search(ln):
+            return True
+    return False
+
+
 def missing_ignored(raw, root, skipped, tree=None):
-    """The git-ignored paths a red suite run names as missing: every `skipped_ignored` entry the
-    output mentions (path-bounded), plus asset/compile 'not found' paths git ignores."""
+    """The git-ignored paths a red suite run names as missing: `skipped_ignored` entries the output names on a
+    read-failure line, plus asset/compile 'not found' paths git ignores — 0.102.13 (M4): each only when the temp tree
+    still lacks it after the run and the main checkout holds it as a git-ignored file, tool outputs
+    (`flutter_N.log`, a root `*.log`, `build/`, `.dart_tool/`, `coverage/`) never."""
     raw = raw or ""
-    out = []
+    cands = []
     for x in skipped or []:
         rel = x.rstrip("/")
-        if rel and re.search(r"(^|[/\s'\"(])%s(?=$|[/\s'\":),.])" % re.escape(rel), raw, re.M) and rel not in out:
-            out.append(rel)
+        if rel and _read_failure_line(raw, rel) and rel not in cands:
+            cands.append(rel)
     found = []
     for rx in MISSING_PATH_RES:
         for m in rx.findall(raw):
@@ -132,10 +153,14 @@ def missing_ignored(raw, root, skipped, tree=None):
                     p = p[len(base.rstrip("/")) + 1:]
             if not os.path.isabs(p):
                 found.append(os.path.normpath(p))
-    for p in sorted(_ignored(root, found)):
-        if p not in out:
-            out.append(p)
-    return out
+    for p in sorted(found):
+        if p not in cands:
+            cands.append(p)
+    cands = [c for c in cands if not TOOL_OUTPUT_RE.search(c)]
+    cands = [c for c in cands if not (tree and os.path.lexists(os.path.join(tree, c)))]
+    cands = [c for c in cands if os.path.lexists(os.path.join(root, c))]
+    ign = _ignored(root, cands)
+    return [c for c in cands if c in ign]
 
 
 # K2r6-B1 option A: an offline run that failed on dependency resolution or a download (a hook

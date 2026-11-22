@@ -59,7 +59,8 @@ MEMBERS = ("OWNER", "MEMBER", "COLLABORATOR")
 NEEDS_MORE_MAX = 5
 NEEDS_MORE_BYTES = 20000
 CHARTER = "docs/standards/charter.md"
-PO_SCHEMA = {"type": "object", "properties": {
+# 0.102.13 (review-0102-12 B1): both fields the prompt asks for are required (an empty list is valid)
+PO_SCHEMA = {"type": "object", "required": ["ac_patch", "non_goals"], "properties": {
     "ac_patch": {"type": "array", "items": {"type": "object", "required": ["id", "text"], "properties": {
         "id": {"type": "string"}, "text": {"type": "string"}, "priority": {"type": "string"}}}},
     "non_goals": {"type": "array", "items": {"type": "string"}}}}

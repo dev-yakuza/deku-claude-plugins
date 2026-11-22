@@ -41,8 +41,12 @@ STAGE = "design"
 CHILD_PREFIX = "[Guild子] "
 SLICE_KEY_RE = re.compile(r"<!-- guild:slice-key (\S+) -->")
 TL_STATUSES = ("DONE", "BLOCKED", "NEEDS_CONTEXT", "FAIL")
+# 0.102.13 (review-0102-12 B1): a specialist names its file or says none applies — a result with neither (the A-F27
+# BLOCKED `{"evidence": …}`) is no DONE result
 SPECIALIST_SCHEMA = {"type": "object", "properties": {"file": {"type": "string"},
-                                                       "none_applicable": {"type": "boolean"}}}
+                                                       "none_applicable": {"type": "boolean"}},
+                     "anyOf": [{"type": "object", "required": ["file"]},
+                               {"type": "object", "required": ["none_applicable"]}]}
 
 
 def kickoff_block(comments):
@@ -227,6 +231,9 @@ def run(p, only=None, config_present=True):
         return got
     sk_text, tlres, tlnote = got
     rows.append(("tech-lead", "스파인", tlres.status, tlres.line))
+    if tlres.status == "DONE_WITH_CONCERNS" or (tlres.line or "").startswith("DONE: concerns — "):
+        # 0.102.13 (review-0102-12 m1, #687): a tech-lead concern — narrowed to `DONE: concerns — …` too — is a concern
+        concerns.append("tech-lead: %s" % B.one_line(tlres.line or "", 200))
     assumptions += tlnote
     split = split_holder.get("split") or {"split": False}
     if not isinstance(split.get("split"), bool):
