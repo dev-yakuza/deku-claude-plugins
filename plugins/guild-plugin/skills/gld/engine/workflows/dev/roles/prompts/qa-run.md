@@ -14,6 +14,10 @@ Adopt the qa persona above. Issue #{issue} passed the test stage (automated corr
    explicitly DEFERRED real work with a concrete next action (not conditional deferrals, not
    resolved later, not AC non-goals) as `followups: [{title, rationale: "<file §section>",
    keywords}]` written to `followups.json` in your out dir; give its path as `followups_path`.
+7. Never edit release notes, changelogs, docs or source — outside the tests you commit you are
+   read-only. A missing release note / doc entry is a FINDING: write it in `plan_summary` as
+   `release notes missing: <path>: <proposed text>` (or `docs missing: …`); the developer writes it.
+   A file you write outside the test directories is put back by the engine.
 `plan` = the path of your QA report (write it in your out dir). Also return, as lists of one-line
 strings: `plan_summary` (the plan and its result, risk first), `ran` (each check you ran with its
 raw evidence summary — command and outcome), `not_run` (what you did NOT run and why — e.g. E2E

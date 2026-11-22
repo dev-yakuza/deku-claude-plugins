@@ -638,10 +638,11 @@ class M4Effective(unittest.TestCase):
         rows = [({"test": "t.dart::vacuous", "kind": "new"}, "t.dart", "vacuous", 1, "vacuous"),
                 ({"test": "t.dart::other", "kind": "new"}, "t.dart", "other", 2, "other")]
         oc = EFF._outcome("AC1", rows, EFF._rerun(Pt(), "flutter", TT(), rows, 60))
-        # 0.102.10 (review-0102-9 m4, lead decision 6): the AC itself reacted (`other`) — `pass`, the still-passing test
-        # named as a regression guard; the AC is `unsure` only when none reacted (below) or one failed otherwise
-        self.assertEqual(oc.result, "pass")
-        self.assertIn("regression guard: t.dart::vacuous", oc.why)
+        # 0.102.11 (review-0102-10 M2, lead decision 3 — 0.102.10's decision 6 reverted): a new test that still passes
+        # beside a reacting one is vacuous — `unsure` naming it, whatever the other did
+        self.assertEqual(oc.result, "unsure")
+        self.assertEqual(oc.test, "t.dart::vacuous")
+        self.assertIn("reacted: t.dart::other", oc.why)
         out["other"] = Res(True, "00:01 +1: other\n00:01 +1: All tests passed!\n")
         oc = EFF._outcome("AC1", rows, EFF._rerun(Pt(), "flutter", TT(), rows, 60))
         self.assertEqual(oc.result, "unsure")

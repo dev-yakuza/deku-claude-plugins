@@ -12,7 +12,11 @@ import re
 from guildcore.records import markers
 
 NAME = "loopback"
-CAP = 2  # H§H verify row: "this row defines the cap; every other file says <cap>"
+CAP = 2  # H§H verify row: "this row defines the cap; every other file says <cap>" — per source (0.102.11)
+# 0.102.11 (review-0102-10 m2, lead decision 6 — word_app #1797: two TEST loop-backs spent on the engine's own id
+# mismatch refused QA's first real defect): the cap is PER SOURCE (`from: test` ≤ CAP, `from: qa` ≤ CAP) under a TOTAL
+# ceiling — the worst developer round trip grows from 2 to 3, never unbounded (the stagnation stop stays)
+TOTAL_CAP = 3
 HEADING_RE = re.compile(r"^### loopback( [0-9]+|-reset)$")
 NUMBERED_RE = re.compile(r"^### loopback ([0-9]+)$")
 TAIL_RE = re.compile(r"^" + re.escape(markers.close_tag(NAME)))
@@ -62,8 +66,15 @@ class LoopbackRecord(object):
         lat = self.latest_active()
         return lat is not None and not lat.has("consumed")
 
-    def cap_reached(self, cap=CAP):
-        return len(self.active()) >= cap
+    def cap_reached(self, from_=None, cap=CAP, total=TOTAL_CAP):
+        """0.102.11: this source's active blocks ≥ `cap`, or all active blocks ≥ `total` (no source: the total only)."""
+        act = self.active()
+        if len(act) >= total:
+            return True
+        return from_ is not None and len([b for b in act if b.get("from") == from_]) >= cap
+
+    def active_from(self, from_):
+        return len([b for b in self.active() if b.get("from") == from_])
 
     def stagnant_with(self, signature, from_):
         """H§B step 3 reading: a non-empty signature wholly contained in the signature of the

@@ -10,7 +10,11 @@ Your job:
    the test(s) that cover it: `covers: [{test: "<path>::<test name>", ac: "<id>", kind: "new"|"guard"}]`
    — `new` when the test checks behaviour this Issue added or changed, `guard` when it pins
    behaviour that already existed. An id with no covering test gets no entry. Safety-net cases
-   listed in `safety-net-deferred.txt` are deferred, not uncovered.
+   listed in `safety-net-deferred.txt` are deferred, not uncovered. Name only a test that exists
+   in the tree with that exact name — a missing file or name is no cover.
+   An id that NO automated test can verify (a record, a procedure, a manual-only check) gets
+   `{test: "", ac: "<id>", kind: "none", reason: "<why no test can verify it>"}` — the engine
+   records it for a person to grade instead of looping back. Without a reason it is a gap.
 2. Visual (`visual.txt`): when VISUAL_CASES = yes, map every `<!-- guild:visual-cases -->` row to
    the comparing test that passed. Never run a create/update/approve command (`--update-goldens`,
    `-u`, `--update-snapshots`, `reg-suit approve`, `visual.create`) and never touch a comparison

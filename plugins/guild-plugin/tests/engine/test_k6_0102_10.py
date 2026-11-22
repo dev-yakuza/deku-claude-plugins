@@ -151,7 +151,9 @@ def _helper(name):
 class M1HelperAssertion(unittest.TestCase):
     def test_unreachable_or_unrun_helper_call_is_no_assertion(self):
         # r0102_9/test_r2
-        for n in ("dead call", "closure never run", "conditional call", "callback call"):
+        # 0.102.11 (lead decision 7): `runAsync`'s callback is top level — "callback call" counts now
+        # (test_k6_0102_11.m1HelperShapes)
+        for n in ("dead call", "closure never run", "conditional call"):
             with self.subTest(test=n):
                 self.assertFalse(_helper(n))
 
@@ -312,12 +314,15 @@ class m4RegressionGuard(unittest.TestCase):
         return EFF._outcome("AC #6", rows, EFF._rerun(Pt(), "flutter", TT(), rows, 60))
 
     def test_a_guard_beside_a_reacting_test_passes(self):
+        # 0.102.11 (review-0102-10 M2, lead decision 3 — 0.102.10's decision 6 reverted): only `kind: new` rows are
+        # re-run, so the still-passing row is a NEW test that does not react — `unsure` naming its case, never a guard
         red = self.Res(False, "00:01 +0: new\nExpected: <1>\n  Actual: <2>\n00:01 +0 -1: new [E]\n"
                               "00:01 +0 -1: Some tests failed.\n")
         green = self.Res(True, "00:01 +1: guard\n00:01 +1: All tests passed!\n")
         oc = self._rows({"guard": green, "new": red})
-        self.assertEqual(oc.result, "pass")
-        self.assertIn("regression guard: t.dart::guard", oc.why)
+        self.assertEqual(oc.result, "unsure")
+        self.assertIn("(case C25)", oc.why)
+        self.assertNotIn("regression guard", oc.why)
         oc = self._rows({"guard": green, "new": self.Res(True, "00:01 +1: new\n00:01 +1: All tests passed!\n")})
         self.assertEqual(oc.result, "unsure")                  # the AC itself did not react
 

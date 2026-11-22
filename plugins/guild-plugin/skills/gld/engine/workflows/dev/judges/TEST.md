@@ -11,7 +11,8 @@ The brief names the ids to judge ("Judge exactly these ids") — give one `ac[]`
 When cases are folded into an AC (`AC #3 (cases C7, C8)`), judge the AC: `effective` only when its cases' behaviour is
 covered by effective tests; the tester's covers are already listed under the AC id (`[case C7]`). If you also answer
 a case id, your weakest answer for the AC or any of its cases is the AC's verdict. An AC with no cover at all is never
-effective (the code makes it a gap); a case no cover names is recorded for grading.
+effective (the code makes it a gap); a case no cover names is recorded for grading. The ids include every AC of
+the analysis — an AC no case names has no cover; judge it on the covers listed (none → not_covering).
 Visual rows: `covered` only when a comparing test that passed is named for that row.
 Your `effective` is re-checked by code (an assertion line must exist, and for new behaviour the
 test must fail with the implementation reverted) — do not call a test effective on its name alone.

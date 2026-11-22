@@ -480,9 +480,10 @@ class EffectiveRealTests(unittest.TestCase):
         cfg = {"commands": {"test": "flutter test"}}
         covers = {"AC #1": [{"kind": "new", "test": "test/a_test.dart::g en"}, {"kind": "new", "test": "test/a_test.dart::g ko"}]}
         out, _meta = EFF.run(p, cfg, ["AC #1"], covers, "main", ["lib/a.dart"])
-        self.assertEqual(out["AC #1"].result, "pass", out["AC #1"].why)
-        self.assertIn("reacts to the reverted impl (test/a_test.dart::g ko)", out["AC #1"].why)
-        self.assertIn("regression guard: test/a_test.dart::g en", out["AC #1"].why)
+        # 0.102.11 (review-0102-10 M2, lead decision 3): back to 0.102.6 — a NEW test that still passes is no reaction
+        self.assertEqual(out["AC #1"].result, "unsure", out["AC #1"].why)
+        self.assertEqual(out["AC #1"].test, "test/a_test.dart::g en")
+        self.assertIn("reacted: test/a_test.dart::g ko", out["AC #1"].why)
 
     def test_a_test_that_fails_alone_runs_in_its_file(self):
         r = self._repo()

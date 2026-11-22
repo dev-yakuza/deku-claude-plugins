@@ -1,6 +1,7 @@
 """workflows.dev.stages.loopback — the shared loop-back procedure (H§B steps 1–7, C §2.L).
 
-    run(p, from_, reason, signature)     unattended: cap (active ≥ 2) → pause; stagnation (this
+    run(p, from_, reason, signature)     unattended: cap (0.102.11: this source's active ≥ 2 or all
+                                         active ≥ 3) → pause asking reset / stop; stagnation (this
                                          signature ⊆ the latest active same-`from` block's) →
                                          pause + `stagnation` capture; else timestamp → append
                                          the block (verified) → move the label → LOOPBACK
@@ -38,10 +39,17 @@ def _sig(signature):
 
 def readings(p, from_, signature, comments=None):
     rec = _record(p, comments)
-    cap = LB.CAP
-    active = len(rec.active()) if rec else 0
-    stag = rec.stagnant_with(_sig(signature), from_) if rec else None
-    return {"active": active, "cap": cap, "cap_reached": active >= cap, "stagnant_n": stag}
+    return _readings(rec, from_, _sig(signature))
+
+
+def _readings(rec, from_, sig):
+    """0.102.11: `active` / `cap` = this source's active loop-backs and its cap; `total` / `total_cap` = all of them and
+    the ceiling; `cap_reached` = either is full."""
+    act = len(rec.active()) if rec else 0
+    mine = rec.active_from(from_) if rec else 0
+    return {"active": mine, "cap": LB.CAP, "total": act, "total_cap": LB.TOTAL_CAP,
+            "cap_reached": bool(rec and rec.cap_reached(from_)),
+            "stagnant_n": rec.stagnant_with(sig, from_) if rec else None}
 
 
 def ask_suffix(r):
@@ -54,7 +62,8 @@ def ask_suffix(r):
 
 
 def ask_line(prefix, r):
-    """`<prefix>; loop back to execute? (loop-backs so far: <active>/<cap>)[suffixes]`."""
+    """`<prefix>; loop back to execute? (loop-backs so far: <active>/<cap>)[suffixes]` — 0.102.11: this source's count
+    and cap (the total ceiling shows as `cap reached`)."""
     return "%s; loop back to execute? (loop-backs so far: %d/%d)%s" % (prefix, r["active"], r["cap"], ask_suffix(r))
 
 
@@ -77,13 +86,10 @@ def run(p, stage, from_, reason, signature, decided_human=False, current_label=N
         raise ValueError("a loop-back signature is never empty (C-F-7)")
     label = current_label or ("guild:" + stage)
     rec = _record(p)                                                       # step 1
-    r = readings(p, from_, sig, comments=None) if rec is None else {
-        "active": len(rec.active()), "cap": LB.CAP, "cap_reached": rec.cap_reached(),
-        "stagnant_n": rec.stagnant_with(sig, from_)}
+    r = _readings(rec, from_, sig)
     if not decided_human:
         if r["cap_reached"]:                                               # step 2
-            line = "loop-back cap reached — %s" % reason
-            return pause(p, stage, "defect", line, "loop-back cap reached")
+            return cap_stop(p, stage, from_, reason, sig, r)
         if r["stagnant_n"] is not None:                                    # step 3
             prev = [b for b in rec.active() if LB.NUMBERED_RE.match(b.heading.rstrip("\r")) and
                     int(LB.NUMBERED_RE.match(b.heading.rstrip("\r")).group(1)) == r["stagnant_n"]]
@@ -110,6 +116,36 @@ def run(p, stage, from_, reason, signature, decided_human=False, current_label=N
             raise
         return fail(p, stage, "loop-back record not written", "defect")
     return move_label(p, label, decided_human)                             # steps 6–7
+
+
+OUTPUTS = {"test": "test:output", "qa": "qa:output"}
+
+
+def cap_stop(p, stage, from_, reason, sig, r):
+    """0.102.11 (lead decision 6): the cap-reached stop asks `reset` (one more round: a `### loopback-reset by: human`
+    block, then this loop-back — both on the record) or `stop`. The output carries the loop-back lines the answer
+    applies (`apply_answer`)."""
+    from guildcore import ask as ASK
+    from guildcore.records import outputs as OUT
+    from workflows.dev.stages import render as R
+    line = "loop-back cap reached — %s" % reason
+    name = OUTPUTS.get(stage)
+    cur = OUT.find(records(p), name) if name else None
+    if cur is None:
+        return pause(p, stage, "defect", line, "loop-back cap reached")
+    p.writer.upsert_comment(p.issue, name, R.add_loopback_lines(cur.body, name, reason, sig))
+    q = ASK.Question("loopback", "%s (%s %d/%d, all %d/%d) — reset the count and loop back once more?" % (
+        line, from_, r["active"], r["cap"], r["total"], r["total_cap"]),
+        [{"token": "reset", "label": "reset — one more round (recorded)"}, {"token": "stop", "label": "stop"}],
+        point="loopback-cap:%s" % stage)
+    return pause(p, stage, "defect", line, "loop-back cap reached", question=q)
+
+
+def reset(p):
+    """The `reset` answer: a `### loopback-reset` block (by: human) on the loop-back record."""
+    blk = LB.render_reset(p.now(), by="human")
+    p.writer.append_block(p.issue, LB.NAME, insert=lambda body: LB.append(body, blk),
+                          present=lambda body: blk in body, new_comment=lambda: LB.render_new_record(blk))
 
 
 def _same_pending(body, from_, reason, sig, decided_human):

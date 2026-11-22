@@ -201,7 +201,7 @@ def run(p, only=None, config_present=True, diff_paths=None):
 
     prev_qa = _prev_qa(comments)
     d, checklist = _judge(p, cfg, qres, dres, test_out, issue_brief, diff, prev_qa)  # Q2.5
-    defects = [x for x in d.fields.get("defects") or [] if x.get("blocking")]
+    defects = [x for x in d.fields.get("defects") or [] if x.get("blocking")] + reverted_findings(qres)
     if dres is not None and dres.status == "BLOCKED" and not any(
             "designer" in (x.get("line") or "") or x.get("id", "").startswith("UX") for x in defects):
         defects.append({"id": "UX-1", "blocking": True, "fixable_in_code": "no",
@@ -249,8 +249,29 @@ def run(p, only=None, config_present=True, diff_paths=None):
     return B.StageResult(B.StageResult.DONE)
 
 
+RELEASE_NOTES_RE = re.compile(r"(^|/)(release[_-]?notes?|changelog|changes|news)([/._-]|$)", re.I)
+DOCS_RE = re.compile(r"(^|/)(docs?|documentation)/|(^|/)readme[^/]*$|\.(md|mdx|rst|adoc)$", re.I)
+
+
+def reverted_findings(qres):
+    """0.102.11 (review-0102-10 M4, lead decision 5): QA never writes repository files — what it wrote outside its
+    scope the engine put back (`RoleResult.reverted`) and it becomes a FIXABLE finding for the developer, carrying
+    what QA proposed (`release notes missing: <path>: <text>`). Never a stop for a person."""
+    out = []
+    for i, (path, text) in enumerate(getattr(qres, "reverted", None) or []):
+        what = "release notes missing" if RELEASE_NOTES_RE.search(path) else \
+            ("docs missing" if DOCS_RE.search(path) else "change missing")
+        out.append({"id": "QA-W%d" % (i + 1), "blocking": True, "fixable_in_code": "yes",
+                    "line": "%s: %s — %s" % (what, path, text or "(qa wrote nothing readable)"),
+                    "evidence": "qa wrote %s outside its scope; the engine reverted it — qa never edits, the developer "
+                                "writes it (proposed text above)" % path})
+    return out
+
+
 def _plan_lines(qres):
     out = ["계획: %s" % x for x in qres.extras.get("plan_summary") or []]
+    for path, text in getattr(qres, "reverted", None) or []:
+        out.append("qa 범위 밖 쓰기 — 엔진이 되돌림, developer 에게: %s — %s" % (path, B.one_line(text or "-", 400)))
     plan = qres.extras.get("plan")
     if isinstance(plan, str) and plan.strip():
         txt = _read_any(plan)

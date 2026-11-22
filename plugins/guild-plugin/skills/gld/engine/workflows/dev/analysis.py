@@ -502,6 +502,14 @@ ISSUE_AC_TITLE_RE = re.compile(r"acceptance|\bac\b|\bacs\b|definition of done|\b
                                r"受け入れ|受入|完了条件|完了基準|完了の定義|合格基準|"
                                r"수용 ?(기준|조건)|인수 ?(기준|조건)|완료 ?(기준|조건)|합격 ?기준|승인 ?기준|수락 ?기준|"
                                r"성공 ?기준|검수 ?기준", re.I)
+# 0.102.11 (review-0102-10 M3, lead decision 4): inside an AC section only a markdown heading, an AC title or one of
+# these NEXT-section titles ends it — any other bold / `label:` line (`データ:`, `画面:`, `필수:`) is a sub-label whose
+# items are read
+ISSUE_NEXT_TITLE_RE = re.compile(r"^\s*(?:background|context|motivation|notes?|remarks?|memo|references?|related|links?|"
+                                 r"out of scope|non-?goals?|open questions?|questions?|risks?|concerns?|screenshots?|"
+                                 r"appendix|背景|経緯|目的|備考|補足|メモ|参考|関連|対象外|スコープ外|範囲外|懸念|リスク|質問|"
+                                 r"確認事項|スクリーンショット|배경|목적|비고|메모|참고|관련|범위 ?밖|범위 ?외|비목표|우려|리스크|"
+                                 r"위험|질문|확인 ?필요|확인 ?사항|스크린샷)(?![A-Za-z])", re.I)
 ISSUE_BOLD_TITLE_RE = re.compile(r"^\s{0,3}(\*\*|__)(.+?)\1\s*[:：]?\s*$")
 ISSUE_COLON_TITLE_RE = re.compile(r"^\s{0,3}([^\s\-*+>#|][^:：]{0,40})[:：]\s*$")
 # 0.102.10 (review-0102-9 M2/m2, lead decision 3): list items are `-` / `*` / `+` (then a space), `・` / `•`, and numbered
@@ -558,7 +566,10 @@ def issue_ac_read(body):
         t = _ac_title(ln)
         if t is not None:
             lv, title = t
-            if level is not None and lv <= level:
+            if level is not None and lv == 7 and not (ISSUE_AC_TITLE_RE.search(title) or
+                                                      ISSUE_NEXT_TITLE_RE.match(title)):
+                continue                # 0.102.11 (lead decision 4): a sub-label — the section goes on
+            if level is not None and (lv <= level or lv == 7):
                 close()
                 level = None
             if level is None and ISSUE_AC_TITLE_RE.search(title):

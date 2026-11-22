@@ -21,8 +21,9 @@ ID_CELL = re.compile(r"^(AC ?#?\d+[a-z]?|TC-?[A-Z]{0,3}\d+(?:[-.]\d+)*[a-z]?|[A-
 CASE_CELL = re.compile(r"^(TC-?[A-Z]{0,3}\d+(?:[-.]\d+)*[a-z]?|([A-Z]{1,2})-?\d+(?:[-.]\d+)*[a-z]?)$")
 AC_ANY = re.compile(r"\bAC ?#?\d+\b")
 AC_LINE = re.compile(r"^[\s>*-]{0,8}\**\s{0,4}(AC ?#?\d+)\b")
+# 0.102.11 (review-0102-10 B1): `- E4 [AC #5] …` (#1945) — a bracketed tag after the id marks a case too
 BULLET_ID = re.compile(r"^[\s>*-]{1,8}\**\s{0,4}(TC-?[A-Z]{0,3}\d+(?:[-.]\d+)*|[A-Z]{1,2}\d+(?:[-.]\d+)*[a-z]?)"
-                       r"(?:\*\*|\s{0,2}[:.)—|]|\s{0,2}\()")
+                       r"(?:\*\*|\s{0,2}[:.)—|]|\s{0,2}\(|\s{0,2}\[)")
 HEADING = re.compile(r"^(#{2,6})\s+(.*)$")
 H_MARKED = re.compile(r"^(?:\*\*)?(?:((?:케이스|항목|Case|case)\s?\d+(?:[-.]\d+)*[a-z]?)|(TC-?[A-Z]{0,3}\d+(?:[-.]\d+)*[a-z]?)|"
                       r"([A-Z]{1,3}-\d+(?:[-.]\d+)*[a-z]?|[A-Z]{1,2}\d+(?:[-.]\d+)*[a-z]?))(?=[\s.:)—*]|$)")
@@ -121,6 +122,8 @@ def case_ids(text, dropped=None):
                         dropped.append(n.group(1))
             for a in AC_ANY.finditer(title):
                 add(a.group(0))
+            for a in ac_list_tails(title):                    # 0.102.11: `(AC #1, #5)` names #5 too
+                add(a)
             section.append((level, title))
             i += 1
             continue
@@ -146,6 +149,28 @@ def case_ids(text, dropped=None):
 # names an AC (on its own line / row, else the nearest heading above it) is FOLDED into that AC — the judge, the covers,
 # the checks and the gap all speak AC ids; a case naming no AC stays its own unit.
 AC_TAG = re.compile(r"\bAC ?#? ?-?(\d+)\b")
+# 0.102.11 (review-0102-10 B1): an AC LIST — `AC #3, #4`, `AC #1·#5`, `AC #2 / #3` — names every number after the first
+# `AC` (a continuation needs its own `#`: `AC #3, 2 cases` names AC #3 only)
+AC_LIST = re.compile(r"\bAC ?#? ?-?(\d+)\b((?:\s*[,、，/&·・]\s*(?:and\s+|및\s+|と)?(?:AC ?)?#\s?\d+\b)*)")
+
+
+def ac_list_tails(text):
+    """The ACs a list names AFTER its first (`AC #3, #4` → `AC #4`)."""
+    out = []
+    for m in AC_LIST.finditer(text or ""):
+        out += ["AC #%s" % n for n in re.findall(r"#\s?(\d+)", m.group(2) or "")]
+    return out
+
+
+def ac_refs(text):
+    """Every AC a text names, lists included, as `AC #n` keys in order (no repeats)."""
+    out = []
+    for m in AC_LIST.finditer(text or ""):
+        for n in [m.group(1)] + re.findall(r"#\s?(\d+)", m.group(2) or ""):
+            k = "AC #%s" % n
+            if k not in out:
+                out.append(k)
+    return out
 
 
 def ac_key(x):
@@ -183,10 +208,10 @@ def ac_map(text):
             while section and section[-1][0] >= level:
                 section.pop()
         if cid and cid in ids and not AC_TAG.match(cid) and cid not in out:
-            own = ["AC #%s" % n for n in AC_TAG.findall(ln[ln.find(cid) + len(cid):])]
+            own = ac_refs(ln[ln.find(cid) + len(cid):])
             if not own:
                 for _l, t in reversed(section):
-                    own = ["AC #%s" % n for n in AC_TAG.findall(t)]
+                    own = ac_refs(t)
                     if own:
                         break
             if own:
@@ -196,10 +221,26 @@ def ac_map(text):
     return out
 
 
-def judged_units(text, deferred=()):
+def judged_units(text, deferred=(), acs=()):
     """(ids the TEST judge rules on, {AC id: [its cases]}, {case id: [AC ids]}) — AC ids (in document order) with the
     cases that name them folded in, plus every case naming no AC as its own unit. A deferred case leaves its AC's case
-    list; a deferred AC leaves the set."""
+    list; a deferred AC leaves the set.
+    0.102.11 (review-0102-10 B1, lead decision 1): the set is the UNION of these, every AC id the document names anywhere
+    (`ac_refs` — lists and `[AC #n]` tags included) and `acs` — the analyze stage's AC list. An AC no case names is a
+    unit with no cases (no cover → a gap, unless the tester marks it untestable)."""
+    units, members, amap = _judged_units(text, deferred)
+    dset = set(deferred or ()) | set(ac_key(x) for x in deferred or ())
+    have = set(ac_key(u) for u in units)
+    for a in ac_refs(text) + [ac_key(x) for x in acs or ()]:
+        if a not in have and a not in dset:
+            units.append(a)
+            have.add(a)
+            if amap:
+                members.setdefault(a, [])
+    return units, members, amap
+
+
+def _judged_units(text, deferred=()):
     ids = case_ids(text)
     amap = ac_map(text)
     if not amap:                                   # no case names an AC — the ids as before

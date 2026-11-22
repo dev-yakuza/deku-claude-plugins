@@ -500,6 +500,14 @@ def role_outcome(p, stage, role, res):
     """RoleResult statuses outside the P-RES five (K1 A9) → the stage's answer, or None when the
     status is one of DONE / DONE_WITH_CONCERNS / BLOCKED / NEEDS_CONTEXT / FAIL (caller's)."""
     st = res.status
+    if getattr(res, "reverted", None) and not getattr(res, "_reverted_recorded", False) and \
+            getattr(p, "decisions", None) is not None:
+        # 0.102.11 (review-0102-10 M4): the engine put back what a read-only role wrote outside its scope — on record
+        # (a grading-sheet row); QA's also becomes a finding for the developer (stages.qa.reverted_findings)
+        res._reverted_recorded = True
+        record_code(p, stage, "scope-reverted", "reverted", reason="%s wrote outside its scope; the engine put back: %s"
+                    % (role, ", ".join(x for x, _t in res.reverted))[:600], refs="P-SCOPE",
+                    extra={"grade": "trigger", "role": role})
     if st == "HALTED":
         raise Halted()
     if st == "RATE_LIMITED":

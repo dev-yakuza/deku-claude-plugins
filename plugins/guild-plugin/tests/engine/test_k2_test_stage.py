@@ -144,7 +144,8 @@ class TestFail(unittest.TestCase):
 
     def test_cap_reached_pauses_without_moving_label(self):
         rec = LB.render_new_record(consumed(LB.render_block(1, "test", "2026-11-15T00:00:00Z", "b", "r", "x")) + "\n" +
-                                   consumed(LB.render_block(2, "qa", "2026-11-15T00:00:01Z", "b", "r", "y")))
+                                   consumed(LB.render_block(2, "test", "2026-11-15T00:00:01Z", "b", "r", "y")))
+        # 0.102.11 (lead decision 6): the cap is per source — two `from: test` blocks (a test + a qa one no longer is)
         h = self.red(comments=[comment(rec, 3)])
         r = T.run(h.p)
         self.assertEqual(r.token(), "OK PAUSE: needs-human — loop-back cap reached")

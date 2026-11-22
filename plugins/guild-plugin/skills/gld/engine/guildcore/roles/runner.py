@@ -169,7 +169,8 @@ class RoleSpec(object):
 
 class RoleResult(object):
     def __init__(self, status, line=None, extras=None, artifacts=(), session_id=None, cost=0.0,
-                 denials=(), violations=(), rl=None, run_dir=None, notes=(), pres=None, result_source=None):
+                 denials=(), violations=(), rl=None, run_dir=None, notes=(), pres=None, result_source=None,
+                 reverted=()):
         self.status = status          # DONE | DONE_WITH_CONCERNS | BLOCKED | NEEDS_CONTEXT | FAIL
         self.line = line              # | INVALID | PERMISSION | TIMEOUT | HALTED | SCOPE
         self.extras = extras or {}
@@ -185,6 +186,17 @@ class RoleResult(object):
         # 0.102.8: where the result JSON came from — "file" (out/result.json) or "fence" (the last message's
         # ```guild-result``` block) — None without a result schema
         self.result_source = result_source
+        # 0.102.11 (review-0102-10 M4): [(path, what the role wrote)] — writes outside a read-only role's scope the
+        # engine put back after it (the stage turns them into a finding)
+        self.reverted = list(reverted or ())
+
+
+def _own_worktree(worktree):
+    """0.102.11: the worktree is an engine worktree (`git worktree`), not the main checkout."""
+    try:
+        return os.path.realpath(S.main_checkout(worktree)) != os.path.realpath(worktree)
+    except Exception:                                  # noqa: BLE001 — unknown → treat as the main checkout
+        return False
 
 
 def repo_hash(worktree):
@@ -700,6 +712,26 @@ class Runner(object):
                                           branch=spec.branch)
                 except Exception as e:           # a check that cannot run is a violation
                     violations = ["post-role check failed: %s" % e]
+            reverted = []
+            if violations and not blocked and _own_worktree(spec.worktree):
+                # (never on a person's main checkout — a role there, e.g. design's tester, may sit beside their edits)
+                # 0.102.11 (review-0102-10 M4, lead decision 5): a read-only role's own file writes are put back and
+                # handed to the stage (`RoleResult.reverted`) — never a stop for a person
+                try:
+                    rk = P.role_key(spec.role, spec.task)
+                    paths = SC.revertable(spec.worktree, before, after, violations, rk)
+                    if paths:
+                        got = SC.revert_writes(spec.worktree, paths)
+                        after = SC.snapshot(spec.worktree, remote=url, watch_files=watch)
+                        left = SC.check(spec.worktree, before, after, [rk], issue=spec.issue, branch=spec.branch)
+                        if not left:
+                            reverted, violations = got, []
+                            st_["notes"].append("reverted %s writes outside its scope: %s" % (
+                                spec.role, ", ".join(p for p, _t in got)))
+                        else:
+                            violations = left
+                except Exception as e:           # a revert that cannot run leaves the stop
+                    st_["notes"].append("revert failed: %s" % e)
             if violations:
                 if status:
                     st_["notes"].append("was %s" % status)
@@ -716,7 +748,7 @@ class Runner(object):
             self._last = RoleResult(status or "INVALID", line, obj, session_id=st_["sid"],
                                     cost=st_["cost"], denials=st_["denials"], violations=violations,
                                     rl=RL.verdict(st_["rls"]), run_dir=run_dir, notes=st_["notes"],
-                                    pres=pres, result_source=st_["src"])
+                                    pres=pres, result_source=st_["src"], reverted=reverted)
 
     def _judge_reply(self, spec, run_dir, st):
         pres = R.parse_pres(st.last_text, spec.allowed_status)

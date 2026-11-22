@@ -413,6 +413,45 @@ def matcher_assertion(stmt, runner):
     return not (name and name.group(0) in SANITY_MATCHERS and args[1].strip() == name.group(0))
 
 
+# 0.102.11 (review-0102-10 m1, lead decision 7): two common golden shapes are still "top level" — the body of a `for`
+# over a LITERAL collection (`for (final l in ['ko', 'ja']) { await _shoot(t, l); }`) and the callback of the test
+# framework's own `runAsync` (`await tester.runAsync(() async { await _shoot(t); })`); a statement after a top-level
+# `return` / `throw` is unreachable and never counts. `if`, a user closure and any other callback stay excluded.
+FOR_LITERAL_RE = re.compile(r"^for\s*\(\s*(?:final|var|const|let)?\s*(?:[\w<>?, ]+\s+)?[A-Za-z_$][\w$]*\s+(?:in|of)\s+"
+                            r"(?:const\s+)?(?:<[^<>()]*>\s*)?[\[{]")
+RUN_ASYNC_RE = re.compile(r"^(?:await\s+)?(?:[A-Za-z_$][\w$]*\.)?runAsync\s*\(")
+
+
+def _flat(stmts, runner):
+    """`stmts` with the two shapes above opened into their own top-level statements (one level), cut at a top-level
+    `return` / `throw`."""
+    out = []
+    for st in stmts:
+        if re.match(r"^(?:return|throw)\b", st):
+            break
+        m = FOR_LITERAL_RE.match(st)
+        if m:
+            head_end = _balanced_end(st, st.find("("), runner)
+            if head_end:
+                coll = re.split(r"\s(?:in|of)\s", st[st.find("(") + 1:head_end - 1], 1)[-1].strip()
+                coll = re.sub(r"^const\s+|^<[^<>()]*>\s*", "", coll).strip()
+                close = _balanced_end(coll, 0, runner) if coll[:1] in "[{" else None
+                body = st[head_end:].strip()
+                if close == len(coll) and body.startswith("{"):
+                    out.extend(_block_statements(body, runner))
+                    continue
+        m = RUN_ASYNC_RE.match(st)
+        if m:
+            end = _balanced_end(st, m.end() - 1, runner)
+            args = _split_args(st[m.end():end - 1]) if end else []
+            cb = re.match(r"^\(\s*\)\s*(?:async\s*)?(?=\{|=>)", args[0]) if len(args) == 1 else None
+            if cb and not st[end:].strip():
+                out.extend(_block_statements(args[0][cb.end():], runner))
+                continue
+        out.append(st)
+    return out
+
+
 def _called_helpers(stmts):
     """Names of the calls that are whole top-level statements (`[await] name(…)`)."""
     out = []
@@ -437,7 +476,7 @@ def helper_assertion(text, snippet, runner, depth=2):
     todo = [(_block_statements(body[body.find("{"):] if "{" in body else "", runner), None, 0)]
     while todo:
         stmts, line0, d = todo.pop(0)
-        for name, st in _called_helpers(stmts):
+        for name, st in _called_helpers(_flat(stmts, runner)):
             if name in seen:
                 continue
             seen.add(name)
@@ -445,7 +484,7 @@ def helper_assertion(text, snippet, runner, depth=2):
             if not hb:
                 continue
             line = line0 if line0 is not None else body.count("\n", 0, max(body.find(st), 0))
-            hst = _block_statements(hb, runner)
+            hst = _flat(_block_statements(hb, runner), runner)
             if any(matcher_assertion(x, runner) for x in hst):
                 return True, line
             if d + 1 < depth:
@@ -1408,33 +1447,30 @@ def _phases(p, runner, pending, tt, base, impl, out, timeout_s):
 def _rerun(p, runner, tt, rows, timeout_s):
     """The AC's cited (new) tests re-run with the impl reverted. 0.102.6 (review-0102-5 M4 a): the AC's OWN cited tests
     must react — every one of them fails with an assertion; one that fails some other way makes the AC `unsure` with
-    that test named. 0.102.10 (lead decision 6): one that still PASSES beside at least one that reacted is a regression
-    guard — the AC itself reacted (`pass`, the guard named); only an AC none of whose tests reacted is `unsure`.
-    An unsure check does not change the verdict (0.102.5) — it is recorded (`check_unsure`) and graded after.
+    that test named. 0.102.11 (review-0102-10 M2, lead decision 3 — 0.102.10's decision 6 reverted): only `kind: new`
+    tests are re-run here, so one that still PASSES with the implementation reverted is a NEW test that does not react
+    — vacuous for the case it covers, never a "regression guard": the AC is `unsure` (the weakest of its tests) and a
+    grading-sheet row. An unsure check does not change the verdict (0.102.5) — it is recorded (`check_unsure`).
     Returns (kind, cv, line, cmd, reacted): `assertion` only when all reacted; else a compile / collection error first
     (the partial revert retries it), else the first row that did not react, with the names of those that did."""
     files = getattr(tt, "file_cmds", None) or set()
-    load, other, reacted, still = None, None, [], []
+    load, other, reacted = None, None, []
     for cv, path, name, line, cmd in rows:
         r = p.check(cmd, tt.path, "tester", timeout_s, [tt.path])
         kind = _classify(p, runner, r, path, name, cmd, files)
         if kind == "assertion":
             reacted.append(cv.get("test") or name)
             continue
-        if kind == "passed":
-            still.append(cv.get("test") or name)
         if kind == "load_error" and load is None:
             load = (kind, cv, line, cmd)
         if other is None:
             other = (kind, cv, line, cmd)
     if load is not None:
         return load + (reacted,)
-    if other is not None and not (reacted and len(still) == len(rows) - len(reacted)):
+    if other is not None:
         return other + (reacted,)
-    # 0.102.10 (review-0102-9 m4, lead decision 6): the AC itself reacted — a cited test that still passes beside a
-    # reacting one is a regression guard (a case folded into the AC), recorded on the outcome, never an `unsure` row
     cv, _path, _name, line, cmd = rows[0]
-    return ("assertion", cv, line, cmd, reacted, still)
+    return ("assertion", cv, line, cmd, reacted)
 
 
 def _outcome(ac, rows, res, second=False):
@@ -1442,14 +1478,13 @@ def _outcome(ac, rows, res, second=False):
     reacted = list(res[4]) if len(res) > 4 else []
     t = cv.get("test")
     if kind == "assertion":
-        still = list(res[5]) if len(res) > 5 else []
-        why = ("assertion present; every cited test reacts to the reverted impl" if not still else
-               "assertion present; reacts to the reverted impl (%s); still passing — regression guard: %s"
-               % (", ".join(reacted[:3]), ", ".join(still[:3])))
-        return CheckOutcome(ac, t, "pass", why, kind, line, cmd)
+        return CheckOutcome(ac, t, "pass", "assertion present; every cited test reacts to the reverted impl", kind,
+                            line, cmd)
     also = "; reacted: %s" % ", ".join(reacted[:3]) if reacted else ""
+    if cv.get("case"):
+        also = " (case %s)%s" % (cv.get("case"), also)
     if kind in ("passed", "runtime", "none_ran"):
-        why = {"passed": "test still passes with the impl reverted",
+        why = {"passed": "new test still passes with the impl reverted (vacuous)",
                "runtime": "re-run failed with a non-assertion error",
                "none_ran": "the test did not run after the revert"}[kind]
         return CheckOutcome(ac, t, "unsure", why + also, kind, line, cmd)

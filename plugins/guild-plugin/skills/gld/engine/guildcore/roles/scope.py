@@ -14,8 +14,9 @@ HEAD rule: developer and qa may advance `refs/heads/<branch>` by fast-forward co
 commits' paths must be inside their scope and HEAD must be `<branch>` after the P0.R2 cleanup
 (ordering: cleanup FIRST, then this check — R7C-M1); every other role leaves HEAD and refs
 untouched. Every role: touching `.claude/settings*.json` or `.claude/guild/gates/**` is a
-violation (R6C-m5). A violation discards the result (never reverts) → pause
-`defect: <role> wrote outside its scope — <paths>`.
+violation (R6C-m5). A violation discards the result → pause `defect: <role> wrote outside its scope — <paths>` —
+except (0.102.11) a read-only role's uncommitted writes to paths clean before it, in an engine worktree: the engine
+puts them back and hands them to the stage (`revertable` / `revert_writes`, `RoleResult.reverted`).
 """
 
 import fnmatch
@@ -360,6 +361,63 @@ def check(worktree, before, after, roles, issue=None, branch=None, extra_globs=N
     for p, who in bad:
         viol.append("%s wrote %s" % (who, p) if who != "protected" else "protected path %s changed" % p)
     return viol
+
+
+# ---- 0.102.11 (review-0102-10 M4, lead decision 5): a read-only role's own file writes are reverted, never a stop ---
+# word_app #1797 (0.102.10 run, `209-qa-qa-run`): the repo's QA persona wrote `release_notes/{ko,ja,en}.txt` — every
+# user-visible Issue stopped for a person (`qa wrote outside its scope`). A role other than the developer never writes
+# repository files outside its scope: when EVERY violation is such a write — a path that was clean before the role,
+# not committed, not protected — the engine puts each path back (tracked: its HEAD content; new: removed) and hands
+# what the role wrote to the stage (QA: a fixable finding for the developer). Anything else stays a stop.
+def revertable(worktree, before, after, violations, role):
+    """[path] when every violation is `<role> wrote <path>` for an uncommitted write to a path that was clean before
+    the role (never the developer's, never a protected path); else None."""
+    import re as _re
+    if role == "developer" or not violations:
+        return None
+    committed = set()
+    if before.get("head") != after.get("head"):
+        try:
+            committed = set(x for x in _git(worktree, "diff", "--name-only", "-z", "%s..%s" % (
+                before["head"], after["head"])).decode("utf-8", "replace").split("\0") if x)
+        except RuntimeError:
+            return None
+    out = []
+    for v in violations:
+        m = _re.match(r"^%s wrote (.+)$" % _re.escape(role), v)
+        if not m:
+            return None
+        p = m.group(1)
+        if protected(p) or p in committed or p in (before.get("status") or {}) or p not in (after.get("status") or {}):
+            return None
+        out.append(p)
+    return out
+
+
+def revert_writes(worktree, paths, cap=1200):
+    """Put each path back to HEAD (a new file is removed) → [(path, what the role wrote — its added lines, capped)]."""
+    out = []
+    for p in paths:
+        full = os.path.join(worktree, p)
+        tracked = subprocess.run(["git", "cat-file", "-e", "HEAD:%s" % p], cwd=worktree,
+                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0
+        text = ""
+        try:
+            if tracked:
+                diff = _git(worktree, "diff", "HEAD", "--", p).decode("utf-8", "replace")
+                text = "\n".join(l[1:] for l in diff.split("\n") if l.startswith("+") and not l.startswith("+++"))
+            elif os.path.isfile(full):
+                with open(full, encoding="utf-8", errors="replace") as fh:
+                    text = fh.read(cap * 2)
+        except (RuntimeError, OSError):
+            text = ""
+        if tracked:
+            G.run(worktree, "checkout", "HEAD", "--", p)              # the git adapter: the one mutating door
+        else:
+            G.run(worktree, "rm", "-q", "--cached", "--ignore-unmatch", "--", p, check=False)
+            G.run(worktree, "clean", "-f", "-q", "--", p, check=False)
+        out.append((p, " ".join(text.split())[:cap]))
+    return out
 
 
 def drift(baseline, now, worktree=None):
