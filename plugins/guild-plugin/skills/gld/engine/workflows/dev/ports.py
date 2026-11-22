@@ -83,6 +83,8 @@ def tree_sandbox(tree, run_dir, repo_root, issue=None, extra_roots=()):
                                    os.path.realpath(a.rstrip("*").rstrip("/")).startswith(r + "/") for r in roots)]
     fs["allowWrite"].append(tr + "/**")
     fs["allowRead"] = [d + "/**" for d in EFF.linked_dirs(tree)]
+    if run_dir:                                  # 0.102.14: the engine's offline shims are never role-writable
+        fs["denyWrite"].append(os.path.join(os.path.abspath(run_dir), SHIM_DIR) + "/**")
     return dict(sb, filesystem=fs)
 
 
@@ -205,6 +207,88 @@ def offline_cmd(cmd):
     return FLUTTER_TEST_RE.sub(r"\1 --no-pub", cmd, count=1)
 
 
+# 0.102.14 (one-man-company #687): `offline_cmd` sees only a command that STARTS with `flutter test`; a repo whose test
+# command is a wrapper script (`bash tool/hooks/run_tests_judged.sh` → `flutter test --concurrency=N …` inside) ran
+# the implicit `pub get` offline → advisories fetch → `Failed host lookup: 'pub.dev'` rc 69 → safety net → a false
+# `env build-inputs-changed` stop. Every OFFLINE suite run (the main suite, its flake re-runs, the effective re-runs,
+# the refactor net) therefore gets engine-owned shims first on PATH: `flutter` (and `fvm`, whose `fvm flutter` resolves
+# its SDK by its own path, never through PATH) exec the real binary resolved at prep time (absolute path) with
+# `--no-pub` added to `test` and `--offline` to `pub get` / `pub upgrade`, unless the command already says
+# `--no-pub` / `--pub` (resp. `--offline` / `--no-offline`) — the literal case `offline_cmd` rewrote stays as it is (no
+# second flag). Every other subcommand passes through unchanged. The shims live in `<run_dir>/engine-shim/` (written
+# through fsafe; denyWrite in `tree_sandbox`). `dart test` / `dart pub get` are not shimmed (the engine never treated
+# dart as offline-sensitive — follow-up).
+SHIM_DIR = "engine-shim"
+SHIM_NAMES = ("flutter", "fvm")
+_SHIM = r"""#!/bin/sh
+# guild engine offline shim (0.102.14) — engine-owned; `%(name)s` of this check's offline sandbox.
+REAL=%(real)s
+%(pre)s
+cmd=; sub=; flag=; need=0
+for a do
+  case "$a" in -*) continue ;; esac
+  if [ -z "$cmd" ]; then cmd=$a; elif [ -z "$sub" ]; then sub=$a; break; fi
+done
+case "$cmd" in
+  test)
+    flag=--no-pub; need=1
+    for a do case "$a" in --no-pub|--pub) flag= ;; esac; done ;;
+  pub)
+    case "$sub" in
+      get|upgrade)
+        flag=--offline; need=2
+        for a do case "$a" in --offline|--no-offline) flag= ;; esac; done ;;
+    esac ;;
+esac
+if [ -n "$flag" ]; then
+  n=$#; seen=0; put=
+  for a do
+    set -- "$@" "$a"
+    if [ -z "$put" ]; then
+      case "$a" in
+        -*) ;;
+        *) seen=$((seen + 1)); if [ "$seen" -eq "$need" ]; then set -- "$@" "$flag"; put=1; fi ;;
+      esac
+    fi
+  done
+  shift "$n"
+fi
+exec "$REAL" %(prefix)s"$@"
+"""
+
+
+def _shim_text(name, real):
+    q = "'" + real.replace("'", "'\\''") + "'"
+    if name == "fvm":                         # only `fvm flutter …` is rewritten; every other fvm command as it is
+        pre = 'case "${1-}" in flutter) shift ;; *) exec "$REAL" "$@" ;; esac'
+        return _SHIM % {"name": name, "real": q, "pre": pre, "prefix": "flutter "}
+    return _SHIM % {"name": name, "real": q, "pre": "", "prefix": ""}
+
+
+def offline_shims(run_dir, env):
+    """0.102.14: (env with `<run_dir>/engine-shim` first on PATH, "flutter,fvm" — the shims written) for an OFFLINE
+    suite run; (env, None) when neither binary is on the env's PATH. The real binaries are resolved NOW, on the PATH
+    without the shim dir, to absolute paths."""
+    import shutil
+    env = dict(env if env is not None else os.environ)
+    sdir = os.path.join(os.path.abspath(run_dir), SHIM_DIR)
+    path = env.get("PATH") or ""
+    search = os.pathsep.join(d for d in path.split(os.pathsep)
+                             if d and os.path.realpath(d) != os.path.realpath(sdir))
+    made = []
+    for name in SHIM_NAMES:
+        real = shutil.which(name, path=search)
+        if not real:
+            continue
+        FS.write_text(os.path.abspath(run_dir), os.path.join(SHIM_DIR, name),
+                      _shim_text(name, os.path.abspath(real)), mode=0o755)
+        made.append(name)
+    if not made:
+        return env, None
+    env["PATH"] = sdir + os.pathsep + search
+    return env, ",".join(made)
+
+
 def suite_in_tree(worktree, base, cmds, owner, timeout_s, run_dir, env, copy_list=(), issue=None,
                   extra_roots=(), journal=None, warm=True):
     """K2r4-M2 / K2r5-B1: the main suite in a temp tree prepared exactly like the effective re-runs
@@ -232,8 +316,10 @@ def suite_in_tree(worktree, base, cmds, owner, timeout_s, run_dir, env, copy_lis
             r.warm, r.build_inputs_changed, r.missing_ignored = info["warm"], info["build_files"], []
             r.warm_detail, r.build_inputs = info.get("warm_detail"), info["build_inputs"]
             r.skipped_ignored, r.ignored_copied, r.tree_kb = list(tt.skipped_ignored), [], None
+            r.offline_shim = None
             return r
         sb = tree_sandbox(tt.path, run_dir, worktree, issue, extra_roots)
+        env, shim = offline_shims(run_dir, env)      # 0.102.14: also for the flake re-runs below (same env)
         reports = [os.path.join(run_dir, "tmp", "report-%d.jsonl" % i) for i in range(len(cmds))]
         os.makedirs(os.path.join(run_dir, "tmp"), exist_ok=True)  # fs-ok: this check's run dir tmp/ (new_run_dir, outside the worktree; the role sandbox gets it only as scratch)
         r = CH.run_command([with_json_report(c, rp) for c, rp in zip(cmds, reports)], timeout_s, cwd=tt.path,
@@ -291,6 +377,7 @@ def suite_in_tree(worktree, base, cmds, owner, timeout_s, run_dir, env, copy_lis
         r.build_inputs = info["build_inputs"]
         r.skipped_ignored = list(tt.skipped_ignored)
         r.ignored_copied = list(tt.copied)
+        r.offline_shim = shim
         return r
 
 
@@ -557,6 +644,8 @@ def keep_raw(run_dir, cmds, r):
     try:
         text = "$ %s\nrc: %s%s\n\n%s" % (" && ".join(cmds if isinstance(cmds, (list, tuple)) else [cmds]), r.rc,
                                           " (timed out)" if r.timed_out else "", CH.redact_lines(r.raw or ""))
+        if getattr(r, "offline_shim", None):            # 0.102.14: the engine's offline shims were first on PATH
+            text = text.replace("\nrc: ", "\nshim: %s\nrc: " % r.offline_shim, 1)
         fl = getattr(r, "flake_tried", None)
         if fl:
             text += "\n\n--- flake re-run: %s\n" % json.dumps(fl, ensure_ascii=False, sort_keys=True)
@@ -598,9 +687,10 @@ def live(issue, worktree, base, branch, config, clock, gh, writer, decisions, ru
     def _tree_run(cmds, tree, owner, timeout_s):
         run_dir = RR.new_run_dir(RR.run_root(worktree, issue, root_env), "check", owner)
         sb = tree_sandbox(tree, run_dir, worktree, issue)
-        env = check_env(root_env, worktree, run_dir)
+        env, shim = offline_shims(run_dir, check_env(root_env, worktree, run_dir))     # 0.102.14
         r = CH.run_command(cmds, timeout_s, cwd=tree, env=env, journal=journal, who="check-%s" % owner,
                            sandbox=sb, tmp=os.path.join(run_dir, "tmp"))
+        r.offline_shim = shim
         keep_raw(run_dir, cmds, r)
         runner.rebaseline(worktree, issue)
         return r
@@ -957,7 +1047,9 @@ def net_in_tree(worktree, base, rev, files, raw, copy_list, run_dir, env, issue=
             return r
         sb = tree_sandbox(tt.path, run_dir, worktree, issue)
         c = with_json_report(offline_cmd(cmd), rep)
-        r = CH.run_command([c], timeout_s, cwd=tt.path, env=env, sandbox=sb, tmp=os.path.join(run_dir, "tmp"))
+        senv, shim = offline_shims(run_dir, env)                    # 0.102.14
+        r = CH.run_command([c], timeout_s, cwd=tt.path, env=senv, sandbox=sb, tmp=os.path.join(run_dir, "tmp"))
+        r.offline_shim = shim
         r.report = open(rep, encoding="utf-8", errors="replace").read() if os.path.exists(rep) else None
         r.report_expected = bool(FLUTTER_TEST_RE.match(c))
         r.warm = info["warm"]

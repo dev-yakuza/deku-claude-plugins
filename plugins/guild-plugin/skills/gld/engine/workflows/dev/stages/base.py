@@ -128,6 +128,7 @@ class Ports(object):
         self.warm = None                  # (base, tree) → CheckResult|None: the engine warm-up, in place on pristine <base>
         self.suite_warm = None            # the last suite run's warm-up status (K2r5-m3)
         self.suite_warm_detail = None     # its proxy summary + redacted output tail (K2r7-m1)
+        self.suite_shim = None            # 0.102.14: "flutter,fvm" when the engine's offline shims were on PATH
 
     # -- judging (K5r5-M3: every L0/SJ decision passes the §9.5 conservative path) -----------------------------
     @property

@@ -425,6 +425,8 @@ class Runner(object):
             return [], None
         now = SC.snapshot(worktree, watch_files=self._watch(worktree))
         late = SC.drift(base, now, worktree)
+        if self.format_rebaseline(worktree, issue, base, now, late):
+            return [], None
         if late and self.accept_base_merge(worktree, issue, base, now, branch, base_ref):
             return [], None
         return late, (SC.drift_print(base, now, late) if late else None)
@@ -439,7 +441,7 @@ class Runner(object):
             return None
         now = SC.snapshot(worktree, watch_files=self._watch(worktree))
         late = SC.drift(base, now, worktree)
-        if not late:
+        if not late or self.format_rebaseline(worktree, issue, base, now, late):
             return None
         if shown_fp and SC.drift_print(base, now, late) == shown_fp:
             self._set_baseline(worktree, issue, now)
@@ -449,6 +451,19 @@ class Runner(object):
         if self.accept_base_merge(worktree, issue, base, now, branch, base_ref):
             return None
         return late, SC.drift_print(base, now, late)
+
+    def format_rebaseline(self, worktree, issue, baseline, now, late):
+        """0.102.14 (lead decision, word_app #1797 / japanlifeinfo #227): a baseline of another integrity-hash format
+        whose only late items are the git-config hashes is re-taken silently (journal `rebaseline-format`) — the
+        difference is the hash format (0.102.13 changed it), not a change. Anything else late → the drift question as
+        before. True when re-taken."""
+        if not SC.config_format_only(baseline, late):
+            return False
+        self._set_baseline(worktree, issue, now)
+        if self.journal is not None and hasattr(self.journal, "append"):
+            self.journal.append("event", what="rebaseline-format", items=sorted(late),
+                                was=(baseline or {}).get("integrity_format"), now=SC.INTEGRITY_FORMAT)
+        return True
 
     def accept_base_merge(self, worktree, issue, baseline, now, branch, base_ref):
         """0.102.5 (#1945): a person merged the base into this Issue's own branch between steps (`git merge origin/main`

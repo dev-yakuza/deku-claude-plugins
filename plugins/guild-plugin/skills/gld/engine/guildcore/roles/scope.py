@@ -170,6 +170,22 @@ def _config_hash(args, cwd):
     return hashlib.sha1(config_relevant(p.stdout)).hexdigest() if p.returncode == 0 else None
 
 
+# 0.102.14 (lead decision, word_app #1797 / japanlifeinfo #227): the FORMAT of the integrity hashes, stored with every
+# snapshot. 0.102.13 changed the git-config hashes (execution-relevant keys only), so a baseline written by 0.102.12
+# read as two late config changes on resume. A baseline of another (or no) format whose ONLY late items are these
+# config hashes is re-taken silently (`config_format_only`, journal `rebaseline-format`) — never a drift question.
+INTEGRITY_FORMAT = 2
+CONFIG_ITEM_PREFIXES = ("git config ", "config file ")
+
+
+def config_format_only(baseline, late):
+    """True when `baseline` was written in another integrity format (or none) and every late item is a git-config
+    hash — nothing else differs, so the difference is the hash format, not a change."""
+    if not late or (baseline or {}).get("integrity_format") == INTEGRITY_FORMAT:
+        return False
+    return all(any(x.startswith(p) for p in CONFIG_ITEM_PREFIXES) for x in late)
+
+
 def integrity(worktree, watch_files=()):
     """Hashes of what no role may change and porcelain cannot see (K1-B2): local/worktree git
     config, the hooks and info dirs of the git dir and common dir, and `watch_files` (the main
@@ -225,7 +241,7 @@ def snapshot(worktree, remote=None, watch_files=()):
             r, sha = ln.split(" ", 1)
             refs[r] = sha
     snap = {"status": entries, "head": head, "symref": sym, "refs": refs,
-            "integrity": integrity(worktree, watch_files)}
+            "integrity": integrity(worktree, watch_files), "integrity_format": INTEGRITY_FORMAT}
     if remote:
         snap["remote_url"] = remote
         snap["remote"] = remote_heads(worktree, remote)

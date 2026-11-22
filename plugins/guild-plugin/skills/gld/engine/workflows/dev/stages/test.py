@@ -196,6 +196,7 @@ def run(p, only=None, config_present=True):
     r = p.suite(cmds, "tester", CEILING_S)
     p.suite_warm = getattr(r, "warm", None)          # K2r5-m3: recorded with the TEST decision
     p.suite_warm_detail = getattr(r, "warm_detail", None)     # K2r7-m1: proxy summary + output tail
+    p.suite_shim = getattr(r, "offline_shim", None)           # 0.102.14: the engine's offline flutter/fvm shims
     miss = getattr(r, "missing_ignored", None)
     if not r.passed and miss:                        # the same halt, found by the run itself
         return B.ignored_missing(miss, "suite")
@@ -877,6 +878,7 @@ def _record_test(p, d, acs, verdicts, outcomes, meta, ac_source, attempt, tool_m
                              "warm": meta.get("warm"), "suite_warm": getattr(p, "suite_warm", None),
                              "warm_detail": meta.get("warm_detail"),
                              "suite_warm_detail": getattr(p, "suite_warm_detail", None),
+                             "suite_shim": getattr(p, "suite_shim", None),
                              "impl_given_mismatch": _mismatch_field(meta.get("impl_given_mismatch")),
                              "ignored_refused": ",".join(meta.get("ignored_refused") or []) or None,
                              "grade": "trigger" if unver or invalid or ac_source != "test-cases" else None})

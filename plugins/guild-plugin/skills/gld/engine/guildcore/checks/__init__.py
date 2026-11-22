@@ -260,6 +260,12 @@ def run_command(cmd, timeout_s=UNATTENDED_CEILING_S, cwd=".", env=None, journal=
         if not tmp:
             raise ValueError("a sandboxed check needs a private tmp dir outside the worktree")
         env = check_env(env, tmp)
+        # 0.102.14 (one-man-company #687): the engine's own PWD / PYENV_DIR (pyenv's `python3` shim exports PYENV_DIR =
+        # the dir the engine was started in — the main checkout, denyRead here) must not reach the check: pyenv
+        # aborted `cannot change working directory`. PWD is the check's cwd; pyenv then reads it.
+        env["PWD"] = os.path.abspath(cwd)
+        for k in ("PYENV_DIR", "OLDPWD"):
+            env.pop(k, None)
         deny = listening_ports()                       # once, before any command of this check starts
         cmds = [sandboxed(c, sandbox, tmp, allow_ports, deny) for c in cmds]
     raw, steps, t0 = [], [], time.time()
