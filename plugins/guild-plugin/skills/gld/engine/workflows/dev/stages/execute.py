@@ -31,6 +31,7 @@ from guildcore.records import markers
 from guildcore.records import outputs as OUT
 from guildcore.records import prbody as PB
 from guildcore import state as ST
+from workflows.dev import conservative as CONS
 from workflows.dev import exec_audit as XA
 from workflows.dev import firstsprint as FS
 from workflows.dev import judging as JG
@@ -755,6 +756,22 @@ def engine_net_run(p, cx, dev, nb):
     return True, None
 
 
+CC_TYPES = ("feat", "fix", "refactor", "perf", "docs", "test", "tests", "chore", "build", "ci", "style", "revert")
+# `fix: …`, `feat(kanji): …`, `refactor!: …` — a Conventional Commits type (any case), never any `Word: …`
+CC_PREFIX_RE = re.compile(r"^\s*(?:%s)(?:\([^)]*\))?!?:\s" % "|".join(CC_TYPES), re.I)
+PR_TYPE = {"implement": "feat", "debug": "fix", "refactor": "refactor"}
+
+
+def pr_title(variant, issue_title):
+    """0.102.7 (review-0102-6 m3): the PR title — the variant's conventional type before the Issue title, unless the
+    Issue title already opens with a conventional-commit prefix (`type:` / `type(scope):` / `type!:`): then the Issue
+    title as it is (never `fix: fix: …` — word_app PR #1963)."""
+    t = " ".join(str(issue_title or "").split())
+    if CC_PREFIX_RE.match(t):
+        return t
+    return "%s: %s" % (PR_TYPE[variant], t)
+
+
 def net_unverified(p, why):
     """K3r3-m3: like K2's `unverified` — the outcome stands, the person grades it (§9.5 trigger), and the
     C14 unattended log says so."""
@@ -893,8 +910,14 @@ def auditor_step(p, cx, attempt):
         if o is not None:
             return o
         found = None
-        if res.status == "DONE":
+        if res.status in ("DONE", "DONE_WITH_CONCERNS"):
+            # 0.102.7 (word_app #1797): the findings are what counts — schema-checked by the runner from out/result.json
+            # or, when the role could not write it, its ```guild-result``` block (`roles.result`). A role that says
+            # DONE_WITH_CONCERNS only because that write failed still audited: its valid findings are used
             found = XA.parse_auditor_reply(json.dumps((res.extras or {}).get("findings")))
+            if found is not None and res.status != "DONE":
+                B.record_code(p, STAGE, "auditor-result", "accepted", reason=B.one_line(
+                    "auditor %s with schema-valid findings — %s" % (res.status, res.line or "-"), 300))
         if found is not None:
             return found, mb, before["head"], set(before["untracked"])
         if shot == 2:
@@ -1002,7 +1025,19 @@ def arbitrate_step(p, cx, attempt, scan, scan_ran, head, untracked, role_trigger
                          "conservative": PF.conservative_label(p, "EX-ARB:dismiss")}.get(
                             why, "exarb.no_unattended_dismiss"),
                         ex[k].get("reason") or "")}
+        # 0.102.7 (review-0102-6 M1): a security concern (the judge's `security_concern` not false, the security role
+        # among the triggers, an issue phrase in the findings) is never dismissed without a person: a BLOCKER's
+        # dismiss/dispute is a dispute (a person decides it), a MAJOR's is accepted (fixed, never dropped unasked)
+        sec = []
+        if CONS.security(getattr(cx, "ex_arb_spec", None), d, "EX-ARB"):
+            for k, c in new_bm:
+                if (ex.get(k) or {}).get("verdict") in ("dismiss", "dispute"):
+                    sec.append(k)
+                    ex[k] = {"verdict": "dispute" if c.severity == "BLOCKER" else "accept",
+                             "reason": "security concern — a person decides (%s)" % (ex[k].get("reason") or "-")}
         extra = {"coerced": "true"} if coerced else {}
+        if sec:
+            extra.update(coerced="true", security="; ".join(sec))
         if would:
             extra.update(coerced="true", coerced_by=why, raw_choice=",".join(
                 "%s:%s" % (k, "would-dismiss" if k in would else (ex.get(k) or {}).get("verdict", "accept"))
@@ -1187,7 +1222,9 @@ def ex_arb(p, cx, new_bm, dev_route, role_triggers, scan):
              ("roles", "\n".join("%s %s — %s" % t for t in role_triggers) or "none"),
              ("developer", "%s: %s" % dev_route if dev_route else "DONE")]
     model = "opus" if any(c.severity in ("BLOCKER", "MAJOR") for _k, c in new_bm) else None
-    return p.judge(JG.spec(p, "EX-ARB", parts, STAGE, "X4", model=model, cwd=p.root))
+    spec = JG.spec(p, "EX-ARB", parts, STAGE, "X4", model=model, cwd=p.root)
+    cx.ex_arb_spec = spec                               # 0.102.7 M1: the security reading reads its inputs too
+    return p.judge(spec)
 
 
 def human_answers(p):
@@ -1247,8 +1284,7 @@ def pr_step(p, e, cx):
             return env_pause(p, "PR body unreadable", "PR body unreadable", "X5.11")
     else:
         body = pr_body(p, cx, sections, base_note)
-        title = "%s: %s" % ({"implement": "feat", "debug": "fix", "refactor": "refactor"}[cx.variant],
-                            issue.get("title") or "#%d" % p.issue)
+        title = pr_title(cx.variant, issue.get("title") or "#%d" % p.issue)
         res = p.writer.pr_create(p.branch, pr_base, title, body, draft=bool(getattr(p, "draft", False)))
         prn = res["number"]
     if p.unattended:

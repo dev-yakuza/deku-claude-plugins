@@ -57,6 +57,8 @@ def runner_judge(group, fields_of, choice, seen=None):
             seen.append(spec.point)
         f = copy.deepcopy(fields_of(choice))
         f[JG.CHOICE.get(group, "verdict")] = choice
+        if group in CONS.SECURITY_FIELD_GROUPS:
+            f.setdefault(CONS.SECURITY_FIELD, False)        # 0.102.7: a schema-valid output carries the field
         for co in JG.COERCIONS.get(group, ()):
             f, _by = co(f)
         return Decision(f.get(JG.CHOICE.get(group, "verdict")), f, "judge:sonnet", "dg-%s" % spec.point)

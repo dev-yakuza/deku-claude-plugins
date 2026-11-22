@@ -748,7 +748,7 @@ def gate(p, spec, raw):
     if not opts or d.choice not in opts:
         return d
     irr = any(n == "irreversible" and str(t).strip() not in ("", "none") for n, t in (spec.brief_parts or []))
-    if posthoc(p, g, spec, irr):
+    if posthoc(p, g, spec, irr, d):
         # 0.102.5 user decision (2026-11-22, k6-notes "사람 개입 최소화"): a §10.2-6 UNVERIFIED group (no valve set) does not
         # stop for a person — the judge's decision runs and is graded AFTER (`post_hoc` on its decision block → a
         # grading-sheet row, `dev grade`; a confirmed wrong sets `group.<G>.conservative` — this gate then asks again).
@@ -775,6 +775,11 @@ def gate(p, spec, raw):
     p.__dict__.pop("_cons_used_replay", None)
     # stakes high always: a conservative group's answer is a gate answer (§2.5 — the answerer removes the label)
     line = "%s — %s %s 결정을 사람이 정함" % (source_label(p, g), g, spec.step or spec.point or "")
+    if security(spec, d):
+        # 0.102.7 (review-0102-6 M1): why an unverified group's decision is asked — the security reading named
+        why = (d.fields or {}).get(SECURITY_REASON) if isinstance(getattr(d, "fields", None), dict) else None
+        line += " (보안: %s)" % (" ".join(str(why).split())[:160] if why else "판단의 security_concern 이 false 가 아님"
+                                if concern_of(d) and g in SECURITY_FIELD_GROUPS else "입력에 보안 사안")
     q = ASK.Question(KIND, line, [{"token": o, "label": o} for o in opts] + [{"token": "stop", "label": "stop"}],
                      recommended=d.choice, recommended_by=d.by, refs=key, group=g, stakes="high",
                      # K5r11-M1: the neutral wording never carries the group name (`SPLIT` IS the option `split`) —
@@ -804,32 +809,64 @@ SECURITY_ROLE = "security"
 #   STAKES  `arbitration.blocked`  → `stakes`  ("question", "<role>: <line>"), ("about_to_take", <assumption>)
 #   QA      `stages.qa._judge`     ("qa", "QA report: …"), ("candidates", "Human-QA candidates from qa: …")
 #   EX-ARB  `stages.execute.ex_arb` ("findings", <auditor json>), ("roles", "<role> <status> — <why>" lines)
-# (a) the security ROLE is the source: its name opens the `role` / `question` / a `roles` line;
-# (b) the content names a security ISSUE (`SECURITY_ISSUE_WORDS`, whole identifier words; `plain text`, `API key`) —
-#     not a feature word (`login`, `session`, `token` — `execute.SECURITY_WORDS` casts the security role; an auth
-#     Issue's every decision would ask).
+# 0.102.7 (review-0102-6 M1): the PRIMARY signal is language-independent and structured — the judge of every group
+# whose decision can run post hoc and may carry a security issue writes `security_concern: true|false` (+ a short
+# `security_reason`) in its output (`SECURITY_FIELD_GROUPS`; the judge reads the repo's language). `true`, missing or
+# not a boolean → a security decision → a person decides it. Kept beside it:
+# (a) the security ROLE as the source: its name opens the `role` / `question` / a `roles` line;
+# (b) an EXTRA trigger on the brief text (`security_text`): ISSUE phrases only (a vulnerability, a secret exposed, an
+#     auth bypass, a data leak — en / ko / ja), never a feature or bug word (`dependency injection`, `memory leak`,
+#     `401 Unauthorized`, `keychain`, `encrypt`) — an auth / storage Issue's routine decisions do not stop.
 SECURITY_INPUTS = {
     "DE-ARB": {"role": ("role",), "text": ("line",)},
     "STAKES": {"role": ("question",), "text": ("question", "about_to_take")},
     "QA": {"role": (), "text": ("qa", "candidates")},
     "EX-ARB": {"role": ("roles",), "text": ("findings", "roles")},
 }
-SECURITY_ISSUE_WORDS = frozenset((
-    "security", "insecure", "vulnerability", "vulnerabilities", "vulnerable", "exploit", "xss", "csrf", "ssrf",
-    "injection", "plaintext", "unauthorized", "unauthenticated", "privilege", "privileges", "cve", "leak", "leaks",
-    "leaked", "leaking", "keychain", "encryption", "encrypt", "decrypt"))
+SECURITY_FIELD = "security_concern"
+SECURITY_REASON = "security_reason"
+SECURITY_FIELD_GROUPS = ("QA", "DE-ARB", "STAKES", "EX-ARB", "KICKOFF")
+# whole-phrase issue patterns (case-insensitive; `\b` only where the script has word boundaries)
+_SEC_ISSUE = (
+    r"\binsecure(ly)?\b", r"\bvulnerab(le|ility|ilities)\b", r"\bexploit(s|ed|able|ing)?\b", r"\b(xss|csrf|ssrf)\b",
+    r"\bcve-\d", r"\bplain[ -]?text\b", r"\bunencrypted\b", r"\bnot encrypted\b",
+    r"\b(sql|command|code|script|html|shell|ldap|header|template) injection\b", r"\bprivilege escalation\b",
+    r"\b(auth|authentication|authorization|login|permission|access[- ]control) bypass\b",
+    r"\bbypass(es|ed|ing)? (the |a |an )?(auth|authentication|authorization|login|permission|access)",
+    r"\bsecurity (issue|problem|hole|flaw|risk|bug|vulnerability|concern|defect|incident)s?\b", r"\(security\)",
+    r"\bexposed without\b", r"\bwithout (any )?(auth|authentication|authorization|permission) check",
+    r"\bdata (leak|breach)", r"\bpersonal data (is |are )?(leaked|exposed|logged)",
+    # ko
+    "취약", "평문", r"보안\s*(문제|취약|위험|결함|이슈|구멍|사고|우려|상의? 문제)", r"\(보안\)",
+    "권한 ?우회", "인증 ?우회", "암호화되지 않", "암호화 없이", "개인 ?정보 ?(유출|노출)",
+    # ja
+    "脆弱", "平文", r"セキュリティ(上の)?(問題|リスク|欠陥|ホール|事故|懸念)", r"[（(]セキュリティ[)）]",
+    "認証回避", "権限昇格", "暗号化されていない", "個人情報(の)?(漏洩|漏えい|流出)",
+)
+# a secret noun and an exposure word in the same sentence — `the token leaks`, `password is sent to analytics`
+_SEC_NOUN = (r"\b(secrets?|credentials?|passwords?|passcodes?|api[ _-]?keys?|private keys?|(access|refresh|auth|"
+             r"bearer|session|id) tokens?|tokens?|pii)\b|비밀번호|비밀 ?키|시크릿|토큰|자격 ?증명|api ?키|개인 ?키|"
+             r"パスワード|認証情報|トークン|秘密鍵|シークレット|apiキー")
+_SEC_EXPOSE = (r"\b(leak(s|ed|ing)?|logged|logs it|printed|exposed|exposes|committed|hard-?coded|in (the )?logs?|"
+               r"analytics|crashlytics|world-readable|publicly)\b|유출|노출|로그에|하드코딩|커밋|외부로|"
+               r"漏洩|漏えい|流出|ログに|ハードコード|露出|公開され")
+_SENTENCE = r"[.;\n。！？!?]"
 
 
-def _security_words(text):
+def security_text(text):
+    """0.102.7: the EXTRA content trigger — an issue phrase (`_SEC_ISSUE`), or a secret noun with an exposure word in
+    one sentence. Never the primary signal (that is the judge's `security_concern`)."""
     import re
     t = text or ""
-    if re.search(r"(?i)\bplain[ -]?text\b|\bapi[ _-]?keys?\b", t):
+    if any(re.search(rx, t, re.I) for rx in _SEC_ISSUE):
         return True
-    for word in re.findall(r"[A-Za-z][A-Za-z0-9]*", t):
-        for part in re.findall(r"[A-Z]?[a-z0-9]+|[A-Z]+(?![a-z])", word):
-            if part.lower() in SECURITY_ISSUE_WORDS:
-                return True
+    for sent in re.split(_SENTENCE, t):
+        if re.search(_SEC_NOUN, sent, re.I) and re.search(_SEC_EXPOSE, sent, re.I):
+            return True
     return False
+
+
+_security_words = security_text                       # 0.102.6 name, kept for readers
 
 
 def _role_named(text):
@@ -839,11 +876,25 @@ def _role_named(text):
     return any(re.match(r"\s*%s\b(?![-\w])" % SECURITY_ROLE, ln) for ln in (text or "").split("\n"))
 
 
-def security(spec):
-    """A decision about a security concern — never post-hoc: a person decides it (0.102.5 user decision). 0.102.6:
-    read from the group's real brief parts (`SECURITY_INPUTS`): the security role as the source, or a security issue
-    named in the content. A group with no table entry has no security input."""
-    g = str(getattr(spec, "group", "") or "")
+def concern_of(decision):
+    """0.102.7 (review-0102-6 M1): the judge's structured security reading of `decision` — True (a concern), False
+    (none), never None: a missing field or one that is not a boolean is a concern (ask)."""
+    f = getattr(decision, "fields", None)
+    if not isinstance(f, dict):
+        return True
+    return f.get(SECURITY_FIELD) is not False
+
+
+def security(spec=None, decision=None, group=None):
+    """A decision about a security concern — never post-hoc: a person decides it (0.102.5 user decision).
+    0.102.7: the judge's `security_concern` of `decision` (a group of `SECURITY_FIELD_GROUPS`: true / missing / invalid
+    → True), the security role as the source (`SECURITY_INPUTS` role parts), or an issue phrase in the brief text
+    (`security_text`, extra). Without a decision (before the judge) only the inputs are read."""
+    g = str(group or getattr(spec, "group", "") or "")
+    if decision is not None and g in SECURITY_FIELD_GROUPS and concern_of(decision):
+        return True
+    if spec is None:
+        return False
     if "security" in str(getattr(spec, "point", "") or "").lower():
         return True
     if getattr(spec, "security", False):
@@ -854,19 +905,20 @@ def security(spec):
     for n, t in (getattr(spec, "brief_parts", None) or []):
         if n in want["role"] and _role_named(str(t)):
             return True
-        if n in want["text"] and _security_words(str(t)):
+        if n in want["text"] and security_text(str(t)):
             return True
     return False
 
 
-def posthoc(p, group, spec=None, irreversible=False):
+def posthoc(p, group, spec=None, irreversible=False, decision=None):
     """0.102.5: is `group`'s non-conservative decision graded AFTER instead of asked? — only when the group is on the
     conservative side for being §10.2-6 UNVERIFIED (not a valve: a valve = a person or the count rule wants it asked)
-    and the decision is neither on an irreversible path (§3.2) nor about security."""
+    and the decision is neither on an irreversible path (§3.2) nor about security (0.102.7: the judge's
+    `security_concern` of `decision` included)."""
     from workflows.dev import predict as PF
     if PF.conservative_source(p, group) != "unverified":
         return False
-    return not irreversible and not (spec is not None and security(spec))
+    return not irreversible and not security(spec, decision, group)
 
 
 def _neutral(p, spec):

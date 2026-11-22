@@ -15,7 +15,8 @@
   "safety_net_visual",
   "areas",
   "surface_to_human",
-  "verdict"
+  "verdict",
+  "security_concern"
  ],
  "properties": {
   "interpretations": {
@@ -79,6 +80,27 @@
        "convene": {
         "type": "boolean"
        }
+      }
+     },
+     "nested_in": {
+      "type": "array",
+      "items": {
+       "type": "string"
+      }
+     },
+     "keeps_issue_ac": {
+      "type": "boolean"
+     },
+     "ac": {
+      "type": "array",
+      "items": {
+       "type": "string"
+      }
+     },
+     "drops": {
+      "type": "array",
+      "items": {
+       "type": "string"
       }
      }
     }
@@ -425,6 +447,12 @@
     "not_ready",
     "unsure"
    ]
+  },
+  "security_concern": {
+   "type": "boolean"
+  },
+  "security_reason": {
+   "type": "string"
   }
  }
 }

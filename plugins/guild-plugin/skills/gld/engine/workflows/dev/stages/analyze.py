@@ -471,6 +471,26 @@ def run(p, only=None, config_present=True):
             q.extra = dict(q.extra or {}, **AN.capture_fields(capture))
         return q
     recorders, high, cons = [], [], False
+    auto = None                    # 0.102.7 m5: (token, drops) — the narrowest nested reading taken without a person
+
+    def auto_narrow():
+        """0.102.7 (review-0102-6 m5): take the narrowest of nested readings (`analysis.narrowest`) — True if taken."""
+        nonlocal auto
+        from workflows.dev import conservative as CONS_
+        if human_decided or reask:
+            return False
+        tok, own, drops = AN.narrowest(k, capture, p.root, bool(irr), CONS_.concern_of(d),
+                                       p.engine_cfg("irreversible_globs"))
+        if tok is None:
+            if getattr(p, "journal", None) is not None:
+                p.journal.append("event", what="auto-narrow-refused", why=drops)
+            return False
+        AN.take_narrowest(k, capture, tok, own, p.root, widen=AN.real_dirs(p.root, ev_areas),
+                          globs=p.engine_cfg("irreversible_globs"))
+        auto = (tok, drops)
+        if getattr(p, "journal", None) is not None:
+            p.journal.append("event", what="auto-narrow", token=tok, drops=drops)
+        return True
     if not a4 and not a5:
         if not p.unattended:
             opts = [{"token": i["id"], "label": B.one_line(i["summary"], 80)} for i in k.interpretations] or \
@@ -485,7 +505,10 @@ def run(p, only=None, config_present=True):
                 a6 = ("ask", with_readings(q), what)
             else:
                 judge_asked = bool(k.surface.get("ask"))
-                surf = judge_asked or FS.confirm_interpretation(p, bool(irr)) or reask   # §10.4: on in the first sprint (and KICKOFF conservative)
+                confirm = FS.confirm_interpretation(p, bool(irr), decision=d)
+                surf = judge_asked or confirm or reask   # §10.4: on in the first sprint (and KICKOFF conservative)
+                if surf and judge_asked and not confirm and not reask and auto_narrow():
+                    surf = False                          # 0.102.7 m5: nested readings — the narrowest, unasked
                 if surf and "interpretation-surface" not in answers and "readiness" not in answers:
                     what = k.surface.get("question") or "해석 확인: %s" % k.chosen
                     if reask and not judge_asked:
@@ -517,7 +540,13 @@ def run(p, only=None, config_present=True):
             # 0.102.5: an UNVERIFIED KICKOFF (no valve) is graded after, not confirmed — unless the reading touches an
             # irreversible area (§3.2)
             from workflows.dev import conservative as CONS
-            cons_k = PF.conservative(p, "KICKOFF") and not CONS.posthoc(p, "KICKOFF", irreversible=bool(irr))
+            cons_k = PF.conservative(p, "KICKOFF") and not CONS.posthoc(p, "KICKOFF", irreversible=bool(irr), decision=d)
+            if high and not cons_k and all(x not in k.high for x in high) and auto_narrow():
+                # 0.102.7 m5: the open dimensions' STAKES `high` were about which nested reading — the narrowest is
+                # taken (graded after); the code-fixed `high` (premise, reinterpretation) still asks
+                for x in high:
+                    stakes[x] = "auto-narrow"
+                high = []
             cons = not human_decided and not high and (cons_k or reask) and bool(k.interpretations)
             if high or cons:
                 dim = high[0] if high else None
@@ -554,9 +583,15 @@ def run(p, only=None, config_present=True):
         # centre (`centre.first_sprint_view`) then pauses it as the engine does (a confirmation, never post-hoc)
         kextra["irreversible"] = "true"
     from workflows.dev import conservative as CONS
-    if a6 is None and CONS.posthoc(p, "KICKOFF", irreversible=bool(irr)):
+    if a6 is None and CONS.posthoc(p, "KICKOFF", irreversible=bool(irr), decision=d):
         # 0.102.5: the unverified KICKOFF ran without a person's confirmation — its decision is a grading-sheet row
         kextra["post_hoc"] = "unverified KICKOFF"
+    if auto is not None:
+        # 0.102.7 m5: the engine took the narrowest nested reading — a post-hoc grading-sheet row, and the broader parts
+        # it dropped are follow-up candidates (the analyze output, QA's follow-up list)
+        kextra["auto_narrow"] = auto[0]
+        kextra["follow_ups"] = " ;; ".join(auto[1])
+        kextra["post_hoc"] = AN.NARROW_POST_HOC
     did = B.record_judgment(p, STAGE, "KICKOFF", "J-DEV-01,J-AN-05,J-AN-06,J-AN-10,J-AN-13", d,
                             choice=",".join("%s=%s" % (x, k.readiness[x]) for x in AN.DIMS),
                             reason=kreason, extra=kextra)
@@ -616,6 +651,9 @@ def run(p, only=None, config_present=True):
             assumptions.append("%s %s (stakes %s): %s — %s 로 진행" % (AN.DIM_KEY[dim], k.readiness[dim], stakes[dim],
                                                                     k.choice_needed.get(dim) or "-", k.chosen))
     assumptions = AN.readiness_assumptions(k) + assumptions
+    if auto is not None:
+        assumptions.append("겹친 해석 중 가장 좁은 해석(%s)으로 진행 — 사후 채점" % auto[0])
+        assumptions += ["후속 Issue 후보: %s" % x for x in auto[1]]
     if harness_note:
         assumptions.append(harness_note)
 

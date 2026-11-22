@@ -4,7 +4,8 @@
   "defects",
   "checklist",
   "quality_bar_met",
-  "verdict"
+  "verdict",
+  "security_concern"
  ],
  "properties": {
   "defects": {
@@ -70,6 +71,12 @@
    ]
   },
   "reason": {
+   "type": "string"
+  },
+  "security_concern": {
+   "type": "boolean"
+  },
+  "security_reason": {
    "type": "string"
   }
  }

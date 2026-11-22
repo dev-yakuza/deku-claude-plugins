@@ -305,8 +305,10 @@ class B2Security(unittest.TestCase):
         for role_name, asks in (("security", True), ("designer", False)):
             with self.subTest(role=role_name):
                 h = Harness(self, fixture(labels=("guild:design",)),
-                            judges={"DE-ARB": decision("decide", {"action": "decide", "assumption": "keep it"}),
-                                    "STAKES": decision("low", {"level": "low", "local_reversible_reason": "a revert"})})
+                            judges={"DE-ARB": decision("decide", {"action": "decide", "assumption": "keep it",
+                                                                         "security_concern": False}),
+                                    "STAKES": decision("low", {"level": "low", "local_reversible_reason": "a revert",
+                                                               "security_concern": False})})
                 h.p.unverified = frozenset(["DE-ARB", "STAKES"])
 
                 def go():

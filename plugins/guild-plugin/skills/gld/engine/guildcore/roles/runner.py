@@ -125,6 +125,14 @@ def lefthook_local_problem(spec, base_sha):
                        "person's too; delete it before committing here or resuming" % name)
     return out
 
+class Late(list):
+    """0.102.7 (review-0102-6 m2): the late changes of one drift snapshot with that snapshot's fingerprint (`fp`)."""
+
+    def __init__(self, items=(), fp=None):
+        super(Late, self).__init__(items or ())
+        self.fp = fp
+
+
 class BaselineContract(Exception):
     """A step was taken without a scope check and without a rebaseline — an engine bug."""
 
@@ -372,21 +380,18 @@ class Runner(object):
         """[] or the late changes since the last role / rebaseline — the engine calls it before
         its own push and, on resume, shows a non-empty result to the human before rebaselining
         (a human's edit during a pause is legitimate; an orphan's is not — K1r3-M3). 0.102.5: with the
-        Issue's `branch` and base, a drift that is only base merges on that branch is accepted here."""
+        Issue's `branch` and base, a drift that is only base merges on that branch is accepted here.
+        0.102.7 (review-0102-6 m2): the list carries the fingerprint of the SAME snapshot (`.fp`, `Late`) — a drift
+        question shows exactly what its fingerprint binds (never a second read)."""
         if (os.path.abspath(worktree), issue) in self._unbaselined:
             raise BaselineContract("a role ran without the scope check (a group member?) — call "
                                    "run_group or rebaseline before the next step")
-        base = self._get_baseline(worktree, issue)
-        if base is None:
-            return []
-        now = SC.snapshot(worktree, watch_files=self._watch(worktree))
-        late = SC.drift(base, now, worktree)
-        if late and self.accept_base_merge(worktree, issue, base, now, branch, base_ref):
-            return []
-        return late
+        late, fp = self.drift_state(worktree, issue, branch, base_ref)
+        return Late(late, fp)
 
     def drift_state(self, worktree, issue, branch=None, base_ref=None):
-        """0.102.6 (review-0102-5 M2): (late items, fingerprint) now — what a drift question shows (`drift_print`)."""
+        """0.102.6 (review-0102-5 M2): (late items, fingerprint) now — what a drift question shows (`drift_print`),
+        both from ONE snapshot."""
         base = self._get_baseline(worktree, issue)
         if base is None:
             return [], None
@@ -438,7 +443,7 @@ class Runner(object):
         wt, issue = specs[0].worktree, specs[0].issue
         late = self.drift_check(wt, issue, specs[0].branch, specs[0].base)
         if late:
-            fp = self.drift_state(wt, issue, specs[0].branch, specs[0].base)[1]
+            fp = getattr(late, "fp", None)              # 0.102.7 m2: the fingerprint of the snapshot `late` came from
             return [RoleResult("DRIFT", "worktree changed between steps — %s" % "; ".join(late)[:300],
                                violations=["late change after the previous step: %s" % x for x in late],
                                extras={"drift_fp": fp} if fp else None, notes=["not run"]) for _ in specs]

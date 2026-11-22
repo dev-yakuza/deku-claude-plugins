@@ -221,7 +221,8 @@ class Permissions(unittest.TestCase):
         a, _ = P.role_rules("qa", None, worktree="/w")
         self.assertIn("Write(//w/test/**)", a)
         a, _ = P.role_rules("auditor", None, run_dir="/r")
-        self.assertEqual(a, ["Read", "Grep", "Glob", "Read(//r/in/**)"])
+        # 0.102.7: its own out/ is writable (word_app #1797: the refused out/result.json write paused a clean audit)
+        self.assertEqual(a, ["Read", "Grep", "Glob", "Read(//r/in/**)", "Write(//r/out/**)", "Edit(//r/out/**)"])
 
     def test_toolchain(self):
         d = repo(self, {"pubspec.yaml": "name: x\n", "scripts/run.sh": "#!/bin/sh\n", "package.json": "{}"})

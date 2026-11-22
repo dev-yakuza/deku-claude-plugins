@@ -23,7 +23,7 @@ TL_DONE = role("DONE")
 
 def exarb(fid="F1", verdict="accept", reason="right", evidence=None, route=None, addendum=None):
     f = {"findings": [{"id": fid, "verdict": verdict, "reason": reason, "evidence": evidence or []}] if fid else [],
-         "summary": "s"}
+         "summary": "s", "security_concern": False}
     if route:
         f["developer_route"] = route
         f["addendum"] = addendum or "the API key lives in config"

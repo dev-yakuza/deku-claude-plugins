@@ -98,9 +98,17 @@ FLAKE_POINT = "flake"            # 0.102.6 M5: the code's flake note (`flake.rec
 FLAKE_GROUP = "flake"
 
 
+def code_trigger_row(b):
+    """0.102.7 (review-0102-6 m4): a block the CODE wrote that says a person grades its outcome (`by: code`,
+    `grade: trigger`) — the flake note (`flake.record`: a red suite taken as green), `execute.net_unverified` (a
+    refactor whose safety net could not run at HEAD went on), the TEST code fallback (`unjudged`) … The ONE place such
+    blocks become grading-sheet rows (`select`)."""
+    return b.get("by") == "code" and str(b.get("grade") or "").strip().lower() == "trigger"
+
+
 def flake_row(b):
     """A flake note the code wrote (`point: flake`, `grade: trigger`): a red suite the engine took as green."""
-    return b.get("point") == FLAKE_POINT and b.get("by") == "code" and str(b.get("grade") or "") == "trigger"
+    return b.get("point") == FLAKE_POINT and code_trigger_row(b)
 
 
 def triggered(b, later_events):
@@ -177,10 +185,13 @@ def select(blocks_by_issue, repo, first_sprint, rate, later, grader=None, watch=
     for issue in sorted(blocks_by_issue):
         human_resolved = _human_decided(blocks_by_issue[issue])
         for b in blocks_by_issue[issue]:
-            if flake_row(b):
+            if code_trigger_row(b):
                 # 0.102.6 (review-0102-5 M5): every flake the code took as green is graded (ok = it was a flake,
-                # wrong = a real failure was masked → `group.flake.conservative`: no flake is taken any more)
-                out.append((issue, b, "triggered: flake — %s" % (b.get("reason") or b.get("refs") or "-")))
+                # wrong = a real failure was masked → `group.flake.conservative`: no flake is taken any more).
+                # 0.102.7 (review-0102-6 m4): and every other code block that asks a person to grade it
+                # (`net-unverified` …) — one rule, never a per-point list
+                out.append((issue, b, "triggered: %s — %s" % (b.get("point") or "code",
+                                                              b.get("reason") or b.get("refs") or "-")))
                 continue
             if not _engine_made(b) or b.id in human_resolved or b.get("shadow") == "true" or b.get("post_hoc"):
                 continue                                         # 0.102.5: a post-hoc decision is its own row

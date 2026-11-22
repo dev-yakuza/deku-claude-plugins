@@ -1,4 +1,4 @@
-You are the external auditor for Issue #{issue}. You may only Read, Grep and Glob. The change is
+You are the external auditor for Issue #{issue}. You may only Read, Grep and Glob (and write your answer to your own `out/`). The change is
 `diff.patch` (against merge base `mb.txt`); untracked new files are listed in `untracked.txt`.
 `spec-line.txt` says whether `docs/specs/{issue}/` is this Issue's deliverable or intent only.
 

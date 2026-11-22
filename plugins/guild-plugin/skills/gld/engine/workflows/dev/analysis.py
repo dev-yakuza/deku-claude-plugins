@@ -467,6 +467,78 @@ def coerce_kickoff(fields, root, sources, net_lines, plan_lines, premise_unmet_d
     return k
 
 
+# ---- 0.102.7 (review-0102-6 m5): nested readings — the narrowest one is taken without a person -----------------------
+# word_app #1797 D5: three readings, each a strict part of the next (entry point only ⊂ + the exampleReading fix ⊂ +
+# the shared-widget refactor); a STAKES `high` on the open dimension stopped the run for a person, who took the
+# narrowest. The engine takes it itself when ALL hold (`narrowest`), else asks as before:
+#   (a) the judge says the reading is a STRICT part of every other one (`nested_in` names every other reading) and the
+#       engine sees it: its own areas are known and inside every other reading's areas, and its summary is its own;
+#   (b) it keeps every AC the Issue itself states (`keeps_issue_ac: true`) and, when it is not the judge's `chosen`,
+#       the judge gave this reading's own AC (`ac`) — the top-level AC are the chosen reading's;
+#   (c) nothing irreversible (§3.2 — the whole KICKOFF and the reading) and no security concern (the KICKOFF judge's
+#       `security_concern` is false — `conservative.concern_of`);
+#   (d) the broader parts it drops are named (`drops`) — they become follow-up candidates and the decision a
+#       post-hoc grading-sheet row.
+NARROW_POST_HOC = "auto-narrow KICKOFF"
+
+
+def narrowest(k, capture, root, irreversible_any, security_concern, globs=None):
+    """(token, own entry, drops) of the reading the engine takes without asking, or (None, None, why)."""
+    if len(k.interpretations) < 2 or not capture:
+        return None, None, "fewer than two readings"
+    if irreversible_any:
+        return None, None, "irreversible area"
+    if security_concern:
+        return None, None, "security concern"
+    owns = getattr(k, "own_footprints", {}) or {}
+    cap = dict((e.get("token"), e) for e in capture)
+    norm = lambda x: str(x or "").strip().casefold()                  # noqa: E731
+    found = []
+    for i in k.interpretations:
+        raw = owns.get(i["id"]) or {}
+        others = [o for o in k.interpretations if o["id"] != i["id"]]
+        nested = set(norm(x) for x in raw.get("nested_in") or [] if isinstance(x, str))
+        if not all(norm(o["orig"]) in nested for o in others):
+            continue
+        own_areas = real_dirs(root, raw.get("areas")) if isinstance(raw.get("areas"), list) else []
+        if not own_areas:
+            continue                                 # an unknown footprint is never "inside" another
+        mine = set(own_areas)
+        if any(not mine <= set(os.path.normpath(a) for a in (cap.get(o["id"]) or {}).get("areas") or ()) for o in others):
+            continue
+        if any(_norm(o["summary"]) == _norm(i["summary"]) for o in others):
+            continue
+        if raw.get("keeps_issue_ac") is not True:
+            continue
+        own_ac = [str(a.get("text") if isinstance(a, dict) else a).strip() for a in raw.get("ac") or []]
+        own_ac = [a for a in own_ac if a]
+        if i["id"] != k.chosen and not own_ac:
+            continue
+        drops = [str(x).strip() for x in raw.get("drops") or [] if str(x).strip()]
+        if not drops:
+            continue
+        if irreversible(sorted(mine), globs):
+            continue
+        found.append((i["id"], dict(raw, ac=own_ac), drops))
+    if len(found) != 1:
+        return None, None, "no single strictly narrowest reading" if not found else "two narrowest readings"
+    return found[0]
+
+
+def take_narrowest(k, capture, token, own, root, widen=(), globs=None):
+    """Make the narrowest reading THIS run's KICKOFF result: its footprint (`apply_reading` — the question-time
+    capture) and, when it was not the judge's `chosen`, its own AC (the safety-net AC kept)."""
+    was = k.chosen
+    apply_reading(k, capture, token, root, widen=widen, globs=globs)
+    if token != was:
+        net = [a for a in k.ac if a.get("tag") == "safety net"]
+        have = set(_norm(a["text"]) for a in net)
+        acs = [{"text": t, "priority": "must", "tag": ""} for t in own.get("ac") or [] if _norm(t) not in have] + \
+            [dict(a) for a in net]
+        k.ac = [dict(a, id="AC #%d" % (n + 1)) for n, a in enumerate(acs)]
+    k.coerced.append("reading = the narrowest %s (nested in every other reading; auto-narrow)" % token)
+
+
 # ---- K6 r3 M1 / K6 r4: the person's reading, carried as the reading itself -----------------------------------------
 # A KICKOFF answer is a TOKEN (`i2`) of the canonical order of THAT run's summaries; the next run's judge writes new
 # summaries (the order — and so the token — can flip) and its own footprint (`areas` · `ui_surface` · `cast` ·

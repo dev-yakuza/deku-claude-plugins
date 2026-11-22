@@ -27,12 +27,14 @@ def on(p):
         return True
 
 
-def confirm_interpretation(p, irreversible=False):
+def confirm_interpretation(p, irreversible=False, decision=None):
     # K5r5-M3: a conservative KICKOFF (§9.5 count rule) confirms the interpretation with a person too; 0.102.5: an only
     # UNVERIFIED KICKOFF does not (it is graded after — `conservative.posthoc`), unless the reading is irreversible
+    # or (0.102.7, review-0102-6 M1) the KICKOFF judge's `security_concern` (`decision`) is not false
     from workflows.dev import conservative as CONS
     return bool(p.engine_cfg("attended_confirm_interpretation", False)) or on(p) or \
-        (PF.conservative(p, "KICKOFF") and not CONS.posthoc(p, "KICKOFF", irreversible=irreversible))
+        (PF.conservative(p, "KICKOFF") and not CONS.posthoc(p, "KICKOFF", irreversible=irreversible,
+                                                            decision=decision))
 
 
 def no_dismiss(p, attended=False):

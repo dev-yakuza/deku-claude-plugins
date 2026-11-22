@@ -62,7 +62,7 @@ def kickoff(goal="clear", constraint="clear", success="clear", ac=("the count sh
          "work_type": work_type, "split_hint": False,
          "cast": cast or {"participation": [], "gates": [], "skipped": []}, "po": {"convene": po, "reason": "r"},
          "ui_surface": ui, "safety_net_visual": net_visual, "areas": list(areas),
-         "surface_to_human": {"ask": surface}, "verdict": "ready"}
+         "surface_to_human": {"ask": surface}, "verdict": "ready", "security_concern": False}
     bad = [d for d in (goal, constraint, success) if d != "clear"]
     return decision("not_ready" if bad else "ready", f, by="judge:opus")
 

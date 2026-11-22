@@ -407,6 +407,27 @@ def _followup_items(qres):
     return out
 
 
+def narrowed_followups(comments):
+    """0.102.7 (review-0102-6 m5): the broader parts the analyze stage dropped when it took the narrowest of nested
+    readings (`follow_ups` on the KICKOFF block with `auto_narrow`) — follow-up candidates like the qa role's own."""
+    from guildcore.decisions import DecisionLog
+    try:
+        blocks = DecisionLog.load(comments or []).blocks
+    except Exception:                                  # noqa: BLE001 — an unreadable log adds nothing
+        return []
+    out, seen = [], set()
+    for b in blocks:
+        if b.get("point") != "KICKOFF" or not b.get("auto_narrow"):
+            continue
+        for t in str(b.get("follow_ups") or "").split(" ;; "):
+            t = t.strip()
+            if t and t not in seen:
+                seen.add(t)
+                out.append({"title": t, "rationale": "analyze 가 겹친 해석 중 가장 좁은 해석(%s, %s)을 골라 뺀 부분" % (
+                    b.get("auto_narrow"), b.id), "keywords": t})
+    return out
+
+
 def _dedup(p, item, pr_n):
     rows = [r for r in p.gh.issue_search(item["keywords"], limit=10)
             if int(r.get("number")) not in (p.issue, pr_n or -1)]
@@ -436,7 +457,7 @@ def _followups(p, cfg, qres, comments, pr):
         return {"run": False, "items": [], "carried": carried, "line": None, "prev": prev}
     seen = set(i.title for i in carried)
     unfiled, skipped = [], []
-    for it in _followup_items(qres):
+    for it in _followup_items(qres) + narrowed_followups(comments):
         if it["title"] in seen:
             continue
         verdict = _dedup(p, it, pr.get("number") if pr else None)

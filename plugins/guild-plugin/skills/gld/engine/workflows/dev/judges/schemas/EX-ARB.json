@@ -2,7 +2,8 @@
  "type": "object",
  "required": [
   "findings",
-  "summary"
+  "summary",
+  "security_concern"
  ],
  "properties": {
   "findings": {
@@ -76,6 +77,12 @@
    "type": "string"
   },
   "summary": {
+   "type": "string"
+  },
+  "security_concern": {
+   "type": "boolean"
+  },
+  "security_reason": {
    "type": "string"
   }
  }

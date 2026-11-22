@@ -12,6 +12,13 @@ citations, candidate areas). You decide; the explorer only gathered.
   `po` (`convene`) and `work_type` inside its `interpretations[]` entry: a person may choose a reading you did not,
   and then that reading's footprint is the one used (a reading without one gets the widest: every area, a UI
   surface, every gate role).
+  NESTED readings (one reading is a strict part of another — "the entry point only" inside "the entry point plus
+  fixing X"): on the narrower entry give `nested_in` (the ids of EVERY reading that contains all of it),
+  `keeps_issue_ac` (true only when every acceptance criterion the Issue itself states still holds under it),
+  `ac` (its own acceptance criteria, as strings) and `drops` (each broader part it leaves out, one short line each).
+  When exactly one reading is nested in all the others, keeps the Issue's AC and touches nothing irreversible, the
+  engine takes it without asking and records `drops` as follow-up candidates — so never claim nesting you are not
+  sure of.
 - `human_answers` (when present): a person already chose a reading. List THAT reading among `interpretations` with
   the id `person-reading` (exactly this id, for that reading only) and the summary the line gives, set `chosen` to
   `person-reading`, and write `areas`, `ui_surface`, `cast`, `work_type` and the AC for it — not for the reading you
@@ -43,3 +50,12 @@ citations, candidate areas). You decide; the explorer only gathered.
 - `surface_to_human.ask`: true when a choice you made should be shown to a person before going on.
 - `needs_more`: up to 5 repo file paths whose text you need; they are added once.
 - `verdict`: `ready` (nothing unclear) | `not_ready` | `unsure`.
+`security_concern` (required, true|false) with `security_reason` (one short line, any language): `true` when
+the Issue's work, in the reading you choose, carries a security ISSUE — a vulnerability (injection into SQL / a shell / HTML, XSS, CSRF,
+SSRF, a known CVE), a secret or credential exposed (an API key, token, password or private key written to a log,
+to analytics, committed, hard-coded, stored or sent unencrypted / in plain text), an authentication or
+authorization bypass (a missing permission check, an endpoint reachable without auth), or a leak of users'
+personal data. It is NOT a security issue that the Issue builds or touches an auth / security FEATURE (login,
+logout, a 401 / unauthenticated redirect, a token kept in the keychain / secure storage, encryption added),
+nor a non-security defect that shares a word (dependency injection, a memory leak). Read the inputs in whatever
+language they are written. Doubt → `true` (a person decides it); the engine reads a missing value as `true`.

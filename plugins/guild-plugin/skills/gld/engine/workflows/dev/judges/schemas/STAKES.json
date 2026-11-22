@@ -1,7 +1,8 @@
 {
  "type": "object",
  "required": [
-  "level"
+  "level",
+  "security_concern"
  ],
  "properties": {
   "level": {
@@ -21,6 +22,12 @@
    "items": {
     "type": "string"
    }
+  },
+  "security_concern": {
+   "type": "boolean"
+  },
+  "security_reason": {
+   "type": "string"
   }
  }
 }

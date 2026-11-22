@@ -556,19 +556,56 @@ DRIFT_KIND = "drift"
 
 
 DRIFT_SHOWN = 5
+DRIFT_CHUNK = 1500               # one `drift_items*` value (under the decision log's VALUE_CAP), whole items only
+DRIFT_CHUNKS = 20                # at most this many values on one question (~30 KB — far under a comment's limit)
+
+
+def drift_chunks(items, chunk=DRIFT_CHUNK, chunks=DRIFT_CHUNKS):
+    """0.102.7 (review-0102-6 m2): the late items as block values — whole items, never cut mid-list: (values,
+    listed count). Items past `chunks` values are not listed; the caller says how many (`drift_items_unlisted`)."""
+    vals, cur, listed = [], [], 0
+    for it in items:
+        it = one_line(it, chunk - 10)
+        if cur and len(" ;; ".join(cur + [it])) > chunk:
+            vals.append(" ;; ".join(cur))
+            cur = []
+            if len(vals) >= chunks:
+                break
+        cur.append(it)
+        listed += 1
+    else:
+        if cur:
+            vals.append(" ;; ".join(cur))
+        return vals, listed
+    return vals, listed
 
 
 def drift_question(p, stage, role, items, fp):
-    """The drift question (accept / stop) over `items` (all of them on the block, the first `DRIFT_SHOWN` in the line
-    with the count of the rest) and their fingerprint."""
+    """The drift question (accept / stop) over `items` and their fingerprint. 0.102.7 (review-0102-6 m2): every item is
+    on the block (`drift_items`, `drift_items_2` … — whole items); only the LINE shows the first `DRIFT_SHOWN` with the
+    count of the rest. A list too long for the block (past `DRIFT_CHUNKS` values) says how many are not listed there
+    (`drift_items_unlisted`, and the line) and the journal keeps the whole list (`drift-items`)."""
+    vals, listed = drift_chunks(items)
+    unlisted = len(items) - listed
     shown = ", ".join(items[:DRIFT_SHOWN])
     more = len(items) - DRIFT_SHOWN
+    if more > 0 and unlisted > 0:
+        tail = " (+%d more; %d listed on this question, all %d in the journal)" % (more, listed, len(items))
+    elif more > 0:
+        tail = " (+%d more, all listed on this question)" % more
+    else:
+        tail = ""
     line = "%s not started — the worktree needs a person first: %d late change(s): %s%s" % (
-        role, len(items), shown, " (+%d more, all listed on this question)" % more if more > 0 else "")
+        role, len(items), shown, tail)
     q = ASK.Question(DRIFT_KIND, "%s — accept the worktree as it is and continue?" % line,
                      [{"token": "accept", "label": "인정하고 계속"}, {"token": "stop", "label": "멈춤"}])
-    q.extra = {"drift_n": str(len(items)), "drift_fp": fp or "-",
-               "drift_items": one_line(" ;; ".join(items), 1500)}
+    q.extra = {"drift_n": str(len(items)), "drift_fp": fp or "-"}
+    for i, v in enumerate(vals or ["-"]):
+        q.extra["drift_items" if i == 0 else "drift_items_%d" % (i + 1)] = v
+    if unlisted > 0:
+        q.extra["drift_items_unlisted"] = str(unlisted)
+    if getattr(p, "journal", None) is not None:
+        p.journal.append("event", what="drift-items", stage=stage, role=role, fp=fp or "-", items=list(items))
     return ask(p, stage, q, q.text, {"cause_kind": "defect", "line": line, "token_cause": line})
 
 

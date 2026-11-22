@@ -312,7 +312,15 @@ def role_rules(role, task=None, run_dir=None, worktree=None, issue=None, toolcha
         r = _abs(run_dir)
         allow += ["Read(//%s/in/**)" % r, "Write(//%s/out/**)" % r, "Edit(//%s/out/**)" % r]
     if key == "auditor":
-        allow = list(READ_TOOLS) + (["Read(//%s/in/**)" % _abs(run_dir)] if run_dir else [])
+        # 0.102.7 (word_app #1797, runs 018/020): the auditor reads only — but it hands its findings back in its OWN
+        # run dir's out/ (`out/result.json`), like every role. Without the out/ write rule the CLI refused that write
+        # (the CLI's permission mode is forced to `default` under CLAUDE_CODE_SUBPROCESS_ENV_SCRUB — only explicitly
+        # allowed tools run; dontAsk refused it too) and a clean audit became a needs-human pause. out/ is outside the
+        # worktree (the tripwire still sees any write there); the sandbox already allows exactly `<run>/out/**`
+        allow = list(READ_TOOLS)
+        if run_dir:
+            r = _abs(run_dir)
+            allow += ["Read(//%s/in/**)" % r, "Write(//%s/out/**)" % r, "Edit(//%s/out/**)" % r]
     allow += [p for p in extra_allow if p not in allow]
     return allow, deny
 
@@ -338,7 +346,8 @@ def summary(role, task=None, toolchain=(), allowlist=False):
                 "— the engine does those and such commands are refused.%s %s If a command you "
                 "need is refused, return BLOCKED: permission — <command>." % (ro, writes))
     if not classes:
-        return ("You may use only the Read, Grep and Glob tools; no shell commands are available. "
+        return ("You may use only the Read, Grep and Glob tools, plus Write for your own run directory's out/ "
+                "(the files you hand back); no shell commands are available. "
                 "Your inputs are files under your run directory's in/.")
     parts = []
     if "C0" in classes:
