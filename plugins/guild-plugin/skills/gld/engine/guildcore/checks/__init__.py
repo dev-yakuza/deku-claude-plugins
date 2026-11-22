@@ -221,6 +221,12 @@ def check_env(role_env, tmp):
               # K3r6-m3: the suite's node_modules is the engine's (read-only) — tool caches go to the run tmp
               "BABEL_CACHE_PATH": os.path.join(tmp, "babel-cache.json"), "XDG_CACHE_HOME": os.path.join(tmp, "cache"),
               "npm_config_cache": os.path.join(tmp, "npm-cache")})
+    # 0.102.12 (review-0102-11 M4, japanlifeinfo #227): ONE engine-owned Corepack home (never the run tmp's empty
+    # `$XDG_CACHE_HOME/node/corepack`); a networked step (the deps step marks its env) may fetch into it, every other
+    # check runs with Corepack's network off
+    from guildcore.checks import pmcache as PMC
+    networked = e.pop("GUILD_NETWORK_STEP", None) == "1"
+    e = PMC.env_for(e, offline=not networked)
     tools = process_tools_dir()
     if tools:
         e["PATH"] = tools + os.pathsep + e.get("PATH", "")
@@ -510,6 +516,7 @@ def deps_step(cmds, worktree, sandbox, tmp, env=None, hosts=None, timeout_s=1800
     with AllowlistProxy(hosts if hosts is not None else deps_hosts(worktree)) as px:
         e = dict(env or os.environ)
         e.update(px.env())
+        e["GUILD_NETWORK_STEP"] = "1"              # 0.102.12: check_env keeps Corepack's network on for this step
         r = run_command(cmds, timeout_s, cwd=worktree, env=e, sandbox=sandbox, tmp=tmp,
                         allow_ports=(px.srv.server_address[1],))
         return r, px.summary()

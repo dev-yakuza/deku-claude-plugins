@@ -1,0 +1,14 @@
+뼈대를 `docs/specs/687/skeleton.md`에 쓰도록 `out/skeleton.md`로 작성했습니다. 읽기 전용이라 레포의 `docs/specs/687/`에는 쓰지 않았고, 코드 대조는 Bash로 `lib/`·`macos/Runner`를 읽어 했습니다. 아직 `flutter analyze`와 테스트는 돌리지 않았고, 설계 문서만 만들었습니다. 우려는 Windows 쪽입니다.
+
+- **해석:** 권한 요청은 제외하고 배지와 'OS 알림 설정 열기'만 넣는 i1로 갑니다.
+- **권한 조회:** macOS용 MethodChannel을 직접 작성하고, 신규 플러그인은 추가하지 않습니다. 레포에 MethodChannel 선례가 없어 첫 사례가 됩니다. 채널 코드는 `lib/features/notification/data/` 한 곳에만 둡니다.
+- **Windows:** 비패키지 앱은 토스트 허용 여부를 조회할 수 있는 API가 없다고 판단해 조회 불가로 보고, 배지와 버튼을 숨깁니다. 설정 열기 대상(`ms-settings:notifications`)과 조회 불가 사실은 `ux.md` 표에만 기록합니다. 그래서 이번 범위의 실질 기능은 macOS 한정입니다.
+- **설정 열기:** 네이티브 코드 없이 기존 `Process.run` 선례를 따라 Dart에서 처리합니다.
+- **재조회:** 화면 진입 시와 앱 포커스 복귀 시 다시 조회합니다.
+- **조회 실패:** 예외나 타임아웃이면 `unknown`(알 수 없음)으로 표시하고, 이 상태에서는 버튼을 숨깁니다.
+- **파일 목록:** 실제 DI 조립 지점인 `lib/main.dart`를 수정 대상에 넣었습니다. 단위 테스트가 이 지점을 우회하면 배선 누락이 잡히지 않기 때문입니다.
+- **#539·#540:** 테스트 본문은 수정 금지이고, 생성자 헬퍼 시그니처 보정만 허용합니다.
+- **분할:** 하나의 기능 경로에 묶여 있고 네이티브 변경도 작아서 `{"split": false}`입니다.
+
+>>> RESULT <<<
+DONE_WITH_CONCERNS: skeleton at docs/specs/687/skeleton.md — 직접 MethodChannel(macOS)로 권한 조회, Windows는 조회 불가라 숨김(실질 macOS 한정), 분할 없음

@@ -20,6 +20,11 @@ from guildcore import schema as S
 SENTINEL = ">>> RESULT <<<"
 STATUSES = ("DONE", "DONE_WITH_CONCERNS", "BLOCKED", "NEEDS_CONTEXT", "FAIL")
 _STATUS_RE = re.compile(r"^(DONE)(?::\s*(.*))?$|^(DONE_WITH_CONCERNS|BLOCKED|NEEDS_CONTEXT|FAIL):\s*(\S.*)$")
+# 0.102.12 (one-man-company #687 / every real run since 0.101): the separators models actually write after a status —
+# `DONE — out/test-cases.md`, `DONE (out/i18n.md)`, `DONE - …`, a full-width colon, a bold / code-span status — 14
+# repair sessions in the real runs were for these alone. Read as `STATUS: text`.
+_LOOSE_RE = re.compile(r"^[*`_]{0,3}(DONE_WITH_CONCERNS|DONE|BLOCKED|NEEDS_CONTEXT|FAIL)[*`_]{0,3}"
+                       r"(?:\s*(?:[:：]|—|–|-{1,2}(?=\s))\s*(.*)|\s*\((.*)\)\s*(.*)|\s*)$")
 FENCE_RE = re.compile(r"```guild-result[ \t]*\n(.*?)\n```", re.S)
 
 _STR = {"type": "string"}
@@ -75,14 +80,54 @@ def parse_pres(reply, allowed=STATUSES):
     rest = [ln.strip() for ln in lines[idx[0] + 1:] if ln.strip()]
     if not rest:
         return Pres(False, violation="invalid")
-    m = _STATUS_RE.match(rest[0])
-    if not m:
+    status, text = _status_of(rest[0])
+    if status is None:
         return Pres(False, violation="invalid")
-    status = m.group(1) or m.group(3)
-    text = (m.group(2) if m.group(1) else m.group(4)) or None
     if status not in allowed:
-        return Pres(False, status=status, violation="narrowed")
+        p = Pres(False, status=status, violation="narrowed")
+        p.text = text
+        return p
     return Pres(True, status, text)
+
+
+def _status_of(line):
+    """(status, text) of one status line — the strict form, else the separators models write (`_LOOSE_RE`); a status
+    other than DONE still needs its one-line text. (None, None) when it is no status line."""
+    m = _STATUS_RE.match(line)
+    if m:
+        return m.group(1) or m.group(3), (m.group(2) if m.group(1) else m.group(4)) or None
+    m = _LOOSE_RE.match(line)
+    if not m:
+        return None, None
+    status = m.group(1)
+    if m.group(3) is not None:
+        text = ("%s %s" % (m.group(3).strip(), (m.group(4) or "").strip())).strip()
+    else:
+        text = (m.group(2) or "").strip()
+    text = text or None
+    if status != "DONE" and not text:
+        return None, None
+    return status, text
+
+
+def structured_pres(pres, obj, allowed=STATUSES):
+    """0.102.12 (one-man-company #687: tech-lead design wrote skeleton.md, split.json and a valid result.json, ended
+    `DONE_WITH_CONCERNS: …` where the task allows DONE / BLOCKED / NEEDS_CONTEXT / FAIL — three sessions, then a
+    pause): the status line could not be used but `out/result.json` validated — the structured result decides.
+    Its own `status` when it names an allowed one; else a DONE_WITH_CONCERNS line where only DONE is allowed is DONE
+    (the concern kept as the text); else a missing / unreadable line is DONE. Never BLOCKED / FAIL by inference: a
+    line that names one of those the task does not allow stays a violation. None when no status can be taken."""
+    st = obj.get("status") if isinstance(obj, dict) else None
+    if isinstance(st, str) and st.strip().upper() in allowed:
+        return Pres(True, st.strip().upper(), pres.text or "status from out/result.json")
+    if pres.violation == "narrowed":
+        if pres.status == "DONE_WITH_CONCERNS" and "DONE" in allowed:
+            return Pres(True, "DONE", "concerns — %s" % (pres.text or "-"))
+        return None
+    if pres.violation in ("none", "invalid", "duplicate") and "DONE" in allowed:
+        return Pres(True, "DONE", "status from out/result.json (the RESULT line was %s)" % (
+            {"none": "missing", "duplicate": "doubled"}.get(pres.violation, "unreadable")))
+    return None
 
 
 REPAIR_LINE = ("Your previous reply had %s `>>> RESULT <<<` — return EXACTLY one sentinel and one "
@@ -91,10 +136,13 @@ REPAIR_LINE = ("Your previous reply had %s `>>> RESULT <<<` — return EXACTLY o
 _VIOLATION_WORD = {"none": "no", "duplicate": "duplicate", "invalid": "an invalid", "narrowed": "a disallowed"}
 
 
-def repair_instruction(pres=None, result_errors=None):
+def repair_instruction(pres=None, result_errors=None, allowed=None):
     parts = []
     if pres is not None and not pres.ok:
         parts.append(REPAIR_LINE % _VIOLATION_WORD.get(pres.violation, "an invalid"))
+        if allowed and tuple(allowed) != STATUSES:
+            # 0.102.12 (#687): a narrowed task names ITS statuses — the general enum above lists all five
+            parts.append("This task allows only: %s." % " / ".join(allowed))
     if result_errors:
         parts.append("Your out/result.json is invalid (%s) — rewrite it to the schema in the task; "
                      "do not redo the work." % "; ".join(result_errors[:5]))

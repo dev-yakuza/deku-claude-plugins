@@ -125,7 +125,9 @@ class Driver(object):
         try:
             out = self._run(n, only)
         except Exception as ex:                                       # noqa: BLE001 — the contract's last line
-            out = end_of(ex, lambda reason, cls: self._defect(self.active or n, reason, cls))
+            import traceback as _tb
+            tb = _tb.format_exc()                  # 0.102.12: every engine FAIL journals its (redacted) traceback
+            out = end_of(ex, lambda reason, cls: self._defect(self.active or n, reason, cls, tb=tb))
         return self.retry_after(out)
 
     def retry_after(self, out):
@@ -135,7 +137,7 @@ class Driver(object):
             return out
         return retry_outcome(r, r.retry_at)
 
-    def _defect(self, n, reason, cls="defect"):
+    def _defect(self, n, reason, cls="defect", tb=None):
         try:
             if self.ports_for is None:
                 raise RuntimeError("no GitHub ports (setup failed before they existed)")
@@ -143,7 +145,10 @@ class Driver(object):
             if cls == "defect":
                 # K6 item 14: every engine FAIL is an escalation on the record — the §4.2 cap and repeat rule
                 from workflows.dev import escalation as ESC
-                reason = ESC.note(getattr(p, "journal", None), "engine:%s" % reason.split(" — ")[0][:40], reason)
+                reason = ESC.note(getattr(p, "journal", None), "engine:%s" % reason.split(" — ")[0][:40], reason,
+                                  traceback=tb)
+                if tb and WORKER_TRACE:
+                    _worker_trace(reason, tb)
             r = B.fail(p, "engine", reason, cls)
             return Outcome(r, 0)
         except (GhWriteError, GhError) as ex:
@@ -469,6 +474,21 @@ def service_wait(reason, ex):
     o = Outcome(None, 75, line, rl=_Reset(at))
     o.wait_reason = "gh-service"
     return o
+
+
+WORKER_TRACE = False          # set by the CLI for a `--worker` process (its stderr is worker.log)
+
+
+def _worker_trace(reason, tb):
+    """0.102.12: the same redacted traceback on stderr — a detached run's stderr is its worker log; stdout stays the
+    §2.4 event stream."""
+    import sys
+    from workflows.dev import escalation as ESC
+    try:
+        sys.stderr.write("guild engine FAIL — %s\n%s\n" % (reason, ESC.redacted_trace(tb)))
+        sys.stderr.flush()
+    except Exception:                                                 # noqa: BLE001 — a log that cannot be written
+        pass
 
 
 def end_of(ex, defect):

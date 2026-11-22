@@ -313,6 +313,8 @@ def read_allowlist(tree, run_dir):
                                                            for t in shared_tmp)]
     tools = os.path.join(os.path.expanduser("~"), ".cache", "guild-engine", "bin")
     out.append(tools + "/**")
+    from guildcore.checks import pmcache as PMC
+    out.append(PMC.home() + "/**")                 # 0.102.12 (M4): the engine's Corepack home
     if os.path.exists(os.path.join(tree, "pubspec.yaml")):
         # measured (K3, word_app): the flutter tool lists the Android SDK at startup (any command,
         # `pub get` included) and exits on EPERM — an SDK, so in the allowlist (read only)
@@ -374,6 +376,8 @@ def deps_sandbox(tree, run_dir, repo_root, copy_list=(), issue=None, extra_roots
     fs["denyWrite"] = list(fs.get("denyWrite") or []) + [r + "/**" for r in others] + [tr + "/.git/**"]
     fs["allowWrite"] = [a for a in fs.get("allowWrite") or [] if not a.startswith(tr)] + [tr + "/**"]
     fs["readOnlyAllow"] = read_allowlist(tree, run_dir)
+    from guildcore.checks import pmcache as PMC
+    fs["allowWrite"] = list(fs["allowWrite"]) + [PMC.home() + "/**"]     # 0.102.12 (M4): the deps step fills it
     fs["denyRead"] = list(fs["denyRead"]) + [os.path.join(pre, "etc", "npmrc") for pre in node_prefixes()]
     return dict(sb, filesystem=fs)
 
@@ -492,6 +496,9 @@ def deps_main(worktree, run_dir, env, copy_list=(), issue=None, timeout_s=1800, 
                 branch_mans[f] = fh.read()
     suite_node = None
     if "package.json" in branch_mans:
+        pm_note = prepare_corepack(worktree, run_dir, env, copy_list, issue, timeout_s)
+        if pm_note:
+            notes.append(pm_note)
         rb, pxb, bin_b = install_check_tools(worktree, run_dir, env, branch_mans, (), copy_list, issue, timeout_s,
                                              kind="suite")
         if bin_b:
@@ -518,6 +525,29 @@ def deps_main(worktree, run_dir, env, copy_list=(), issue=None, timeout_s=1800, 
     if first is not None:
         first.notes, first.node_bin = notes, node_bin
     return first
+
+
+def prepare_corepack(worktree, run_dir, env, copy_list=(), issue=None, timeout_s=600):
+    """0.102.12 (review-0102-11 M4, japanlifeinfo #227): the version package.json's `packageManager` pins, in the
+    engine's Corepack home before any offline check needs it — seeded from the user's own Corepack cache, else fetched
+    (`corepack install`, networked, registry hosts only). Best effort → a note (or None)."""
+    from guildcore.checks import pmcache as PMC
+    pm = PMC.package_manager(worktree)
+    if pm is None:
+        return None
+    note = PMC.seed(worktree, env)
+    if PMC.present(PMC.home(), *pm):
+        return note
+    try:
+        sb = deps_sandbox(worktree, run_dir, worktree, copy_list, issue)
+        r, _px = CH.deps_step(["corepack install"], worktree, sb, os.path.join(run_dir, "tmp"), env=env,
+                              hosts=REGISTRY_HOSTS["package.json"], timeout_s=timeout_s)
+    except Exception as e:                              # noqa: BLE001 — best effort; the offline check names it
+        return "corepack prefetch of %s@%s failed: %s" % (pm[0], pm[1], e)
+    if PMC.present(PMC.home(), *pm):
+        return "corepack: fetched %s@%s" % pm
+    return "corepack prefetch of %s@%s failed: %s" % (pm[0], pm[1], CH.redact_lines(
+        ((r.raw or "").strip().split("\n") or ["?"])[-1]))
 
 
 def keep_raw(run_dir, cmds, r):

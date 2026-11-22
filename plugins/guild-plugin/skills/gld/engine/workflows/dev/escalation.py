@@ -37,14 +37,31 @@ def allowed(journal):
     return len(this_epoch(journal)) < CAP
 
 
-def note(journal, step, line):
-    """Journal one escalation and return the pause line (`line`, or the cap / repeat form)."""
+TRACE_CAP = 12000
+
+
+def redacted_trace(tb):
+    """0.102.12 (word_app #1797 `engine FAIL — TypeError — sequence item 8 …` with no traceback anywhere): the engine's own
+    traceback, every line redacted on its own (a key-shaped line becomes the redaction mark, the rest stays), the
+    newest frames kept when it is long."""
+    if not tb:
+        return None
+    from guildcore.records import redact as RD
+    lines = [RD.redact(ln) for ln in str(tb).rstrip("\n").split("\n")]
+    text = "\n".join(lines)
+    return text if len(text) <= TRACE_CAP else "…\n" + text[-TRACE_CAP:]
+
+
+def note(journal, step, line, traceback=None):
+    """Journal one escalation and return the pause line (`line`, or the cap / repeat form). 0.102.12: an engine FAIL
+    carries its redacted traceback on the same entry (`traceback`) — the next one is diagnosable without guessing."""
     if journal is None:
         return line
     prior = this_epoch(journal)
     sig = _sig(step, line)
     repeat = any(e.get("sig") == sig for e in prior)
-    journal.append("mj", point="G-ESCALATE", step=str(step), sig=sig, choice="pause")
+    extra = {"traceback": redacted_trace(traceback)} if traceback else {}
+    journal.append("mj", point="G-ESCALATE", step=str(step), sig=sig, choice="pause", **extra)
     if len(prior) + 1 > CAP:
         return "escalation cap reached (%d this epoch) — %s" % (len(prior) + 1, line)
     if repeat:

@@ -141,11 +141,23 @@ def cap_stop(p, stage, from_, reason, sig, r):
     return pause(p, stage, "defect", line, "loop-back cap reached", question=q)
 
 
-def reset(p):
-    """The `reset` answer: a `### loopback-reset` block (by: human) on the loop-back record."""
-    blk = LB.render_reset(p.now(), by="human")
+def reset(p, from_=None):
+    """The `reset` answer: a `### loopback-reset` block (by: human) on the loop-back record. 0.102.12 (review-0102-11
+    m3): it GRANTS exactly one more loop-back for `from_` (`grant: 1`, `for: <the next n>`) — the counts and the
+    stagnation history before it stay; a resumed write never grants twice."""
+    rec = _record(p)
+    n = rec.next_n() if rec else 1
+    if rec is not None and rec.has_grant_for(n):
+        return
+    blk = LB.render_reset(p.now(), by="human", from_=from_, grant=1, for_n=n)
+
+    def present(body):
+        try:
+            return LB.LoopbackRecord.parse(body).has_grant_for(n)
+        except ValueError:
+            return blk in body
     p.writer.append_block(p.issue, LB.NAME, insert=lambda body: LB.append(body, blk),
-                          present=lambda body: blk in body, new_comment=lambda: LB.render_new_record(blk))
+                          present=present, new_comment=lambda: LB.render_new_record(blk))
 
 
 def _same_pending(body, from_, reason, sig, decided_human):

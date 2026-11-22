@@ -411,6 +411,9 @@ class Run(object):
             return self.start_attended()
         if not self.attended and a.detach and not a.worker:
             return self.start_unattended_detached()
+        if a.worker:                       # 0.102.12: a worker's stderr is its worker.log — engine FAIL tracebacks go there
+            from workflows.dev import fsm as _F
+            _F.WORKER_TRACE = True
         k = kill_switch(self.common)
         if k is not None:
             return self.stop(k)

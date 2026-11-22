@@ -203,6 +203,13 @@ def run(p, only=None, config_present=True):
     if not r.passed and bic:                         # K2r6-B1: env, never a loop-back
         return B.build_inputs_changed(bic, "suite", p.suite_warm, p.suite_warm_detail)
     summ = CH.parse_summary(r.raw, runner, (cfg.get("commands") or {}).get("test_summary"))
+    if summ is None and not r.timed_out and not r.passed:
+        # 0.102.12 (review-0102-11 M4, japanlifeinfo #227): the package manager could not be fetched offline — an
+        # environment stop naming the cache, never a runner-format question
+        from guildcore.checks import pmcache as PMC
+        if PMC.offline_fetch_failure(r.raw):
+            line = PMC.offline_line("test suite", r.raw, p.root)
+            return B.pause(p, STAGE, "env", line, "engine-env-package-manager-offline", env_key="other")
     if summ is None and not r.timed_out:
         d = p.judge(JG.spec(p, "RUNNER", [("raw", r.raw[-4000:])], STAGE, "T2.3"))
         if d.choice not in ("green", "red"):
@@ -433,11 +440,15 @@ def _judge_coverage(p, cfg, test_cases, covers, raw, ledger, visual_cases, tc_re
     # folded into that AC; the tester's covers are re-keyed to it, so the judge, the checks and the gap use the same ids
     # 0.102.11 (review-0102-10 B1, lead decision 1): the analyze stage's AC list joins the set — an AC no case names is
     # judged (no cover → a gap) instead of never being looked at
-    acs, members, amap = CS.judged_units(test_cases, deferred, analyze_acs(p))
-    covers = valid_covers(p, cfg, CS.rekey_covers(covers, amap))
+    an_acs = analyze_acs(p)
+    acs, members, amap = CS.judged_units(test_cases, deferred, an_acs)
+    # 0.102.12 (m2): an untagged (legacy) document — the analyze ACs are judged beside its ids, never a gap
+    soft = CS.soft_units(test_cases, acs, an_acs, deferred) if acs else []
+    acs = list(acs) + soft
+    covers = valid_covers(p, cfg, CS.rekey_visual(CS.rekey_covers(covers, amap), test_cases))
     ac_source = "test-cases"
     if not acs:                 # B2: legacy proceeds; the design→execute gap is recorded, not a stop
-        acs = sorted(set(c.get("ac") for c in covers if c.get("ac")) - set(deferred))
+        acs = sorted(set(c.get("ac") for c in covers if c.get("ac") and not c.get("visual")) - set(deferred))
         ac_source = "tester" if acs else "none"
     if not acs:                 # r2-B3: nothing to judge is not a pass — repair once, then AC gap
         rep = p.run_role(B.RoleCall("tester", "repair-mapping", STAGE, "T3.4", attempt=2,
@@ -447,8 +458,9 @@ def _judge_coverage(p, cfg, test_cases, covers, raw, ledger, visual_cases, tc_re
         o = B.role_outcome(p, STAGE, "tester", rep)
         if o is not None:
             return o
-        covers = valid_covers(p, cfg, CS.rekey_covers(rep.extras.get("covers") or [], amap))
-        acs = sorted(set(c.get("ac") for c in covers if c.get("ac")) - set(deferred))
+        covers = valid_covers(p, cfg, CS.rekey_visual(CS.rekey_covers(rep.extras.get("covers") or [], amap),
+                                                      test_cases))
+        acs = sorted(set(c.get("ac") for c in covers if c.get("ac") and not c.get("visual")) - set(deferred))
         if not acs:
             return _no_mapping(p, "%s has no case ids and the tester mapped none" % tc_rel)
     attempt, weak, outcomes, meta, d = 0, [], {}, {}, None
@@ -490,7 +502,8 @@ def _judge_coverage(p, cfg, test_cases, covers, raw, ledger, visual_cases, tc_re
         _record_test(p, d, acs, verdicts, outcomes, meta, ac_source, attempt, tool_mode, covers)
         if weak and attempt == 1:
             rep = p.run_role(B.RoleCall("tester", "repair-mapping", STAGE, "T3.4", attempt=2,
-                                        inputs={"weak-acs.txt": "\n".join(
+                                        inputs={"safety-net-deferred.txt": "\n".join(deferred or ()) or "none",
+                                                "weak-acs.txt": "\n".join(
                                             "%s (cases %s)" % (w, ", ".join(members[w])) if members.get(w) else w
                                             for w in weak)},
                                         addendum="Map these AC ids to the tests that cover them (or say none "
@@ -498,7 +511,8 @@ def _judge_coverage(p, cfg, test_cases, covers, raw, ledger, visual_cases, tc_re
             o = B.role_outcome(p, STAGE, "tester", rep)
             if o is not None:
                 return o
-            covers = merge_covers(covers, valid_covers(p, cfg, CS.rekey_covers(rep.extras.get("covers"), amap)),
+            covers = merge_covers(covers, valid_covers(p, cfg, CS.rekey_visual(
+                CS.rekey_covers(rep.extras.get("covers"), amap), test_cases)),
                                   set(weak))
             continue
         break
@@ -511,14 +525,23 @@ def _judge_coverage(p, cfg, test_cases, covers, raw, ledger, visual_cases, tc_re
     if case_gaps:
         B.record_code(p, STAGE, "case-uncovered", "graded", reason="cases without a covering test inside a covered AC: %s"
                       % case_gaps, refs="T-AC-COVER", extra={"grade": "trigger", "case_uncovered": case_gaps})
+    soft_open = [ac for ac in soft if verdicts.get(ac) not in ("effective", UNTESTABLE)]
+    if soft_open:
+        B.record_code(p, STAGE, "ac-untagged", "graded", reason="test-cases.md tags no case with an AC; the analysis "
+                      "ACs not confirmed by a cover: %s" % ", ".join("%s (%s)" % (a, verdicts.get(a)) for a in soft_open)[:600],
+                      refs="T-AC-COVER", extra={"grade": "trigger", "ac_untagged": ",".join(soft_open)})
+        for a in soft_open:
+            verdicts.pop(a, None)
+        acs = [a for a in acs if a not in soft_open]
     vac = [ac for ac, v in verdicts.items() if v == "vacuous"]
     unsure_acs = [ac for ac, v in verdicts.items() if v == "unsure"]
     uncovered = sorted(ac for ac, v in verdicts.items() if v not in ("effective", UNTESTABLE))
     # 0.102.11 (loop-back cap, lead decision 6): a gap while covers name ids the engine does not judge is an id-mapping
     # problem (a set difference) — never the developer's to fix, never a loop-back
-    judged = set(CS.ac_key(x) for x in list(acs) + list(deferred or ()))
-    orphans = sorted(set(CS.ac_key(c.get("ac")) for c in covers if covering(c) and c.get("ac")) - judged) \
-        if uncovered else []
+    judged = set(CS.ac_key(x) for x in list(acs) + list(deferred or ()) + list(soft))
+    # 0.102.12 (review-0102-11 M1): a visual row cover (`visual:*`, `VIS-n(…)`) is a visual case, never an orphan
+    orphans = sorted(set(CS.ac_key(c.get("ac")) for c in covers if covering(c) and c.get("ac") and not c.get("visual")
+                         and not CS.is_visual_id(c.get("case") or c.get("ac"))) - judged) if uncovered else []
     rows_unc = [r_.get("row") for r_ in d.fields.get("visual_rows") or [] if r_.get("verdict") != "covered"] \
         if visual_cases else []
     coverage = [(ac, verdicts[ac] if not (ac in outcomes and outcomes[ac].result in ("unverified", "n/a", "unsure")
@@ -546,7 +569,7 @@ VERDICT_ORDER = ("not_covering", "vacuous", "unsure", "effective")
 def covering(c):
     """0.102.10: a cover that names a test (`kind: none` / no test = the tester saying no test covers it)."""
     return isinstance(c, dict) and bool(str(c.get("test") or "").strip()) and \
-        str(c.get("kind") or "").strip().lower() != "none" and not c.get("invalid")
+        str(c.get("kind") or "").strip().lower() != "none" and not c.get("invalid") and not c.get("visual")
 
 
 UNTESTABLE = "untestable"
@@ -576,10 +599,65 @@ def cover_problem(p, runner, c, cache=None):
         return "cited test file not found: %s" % path
     if not name:
         return "no test name cited in %s" % path
-    short = re.split(r"::| › |/", name)[-1].strip()
-    if EFF.test_body(text, name, runner) is not None or name in text or (short and short in text):
+    if name_in_source(text, name, runner):
         return None
     return "cited test name not found in %s: %s" % (path, B.one_line(name, 80))
+
+
+# ---- 0.102.12 (review-0102-11 m4, lead decision m4): the cover name check is EXACT --------------------------------
+# A substring anywhere in the file (0.102.11) let a short name (`t`, `renders`) match a comment or another test. Now the
+# cited name must equal a string literal of the file after whitespace is normalised — or, as a reporter prints it, the
+# group names and the test name joined by spaces / ` › ` / ` > `. A literal with interpolation (`$x`, `${x}`, `%s`,
+# `{x}`) matches by its literal prefix before the first interpolation (≥ 8 characters), and so does a cited name that
+# still carries one (the tester quoted the source). pytest / unittest / go: the function name (`test_body`).
+_LIT_RE = re.compile(r"'((?:[^'\\\n]|\\.)*)'|\"((?:[^\"\\\n]|\\.)*)\"|`((?:[^`\\]|\\.)*)`")
+_INTERP_RE = re.compile(r"\$\{|\$[A-Za-z_]|%[sdrif]|\{[A-Za-z_][^{}]*\}")
+PREFIX_MIN = 8
+
+
+def _norm(x):
+    return " ".join(str(x or "").split())
+
+
+def _literal_prefix(x):
+    m = _INTERP_RE.search(x)
+    return x[:m.start()].rstrip() if m else None
+
+
+def name_in_source(text, name, runner=None):
+    """Is the cited test `name` a test of `text` (the test file)? See the block comment above."""
+    if runner in ("pytest", "unittest", "go"):
+        return EFF.test_body(text, name, runner) is not None
+    lits = set()
+    for m in _LIT_RE.finditer(text or ""):
+        v = _norm(next((g for g in m.groups() if g is not None), ""))
+        if v:
+            lits.add(v)
+    exact = set(x for x in lits if not _INTERP_RE.search(x))
+    prefixes = [p_ for p_ in (_literal_prefix(x) for x in lits) if p_ and len(p_) >= PREFIX_MIN]
+    n = _norm(str(name or "").replace("\\$", "$"))           # `\$x` — a JSON-escaped Dart interpolation (#1797)
+    segs = [_norm(x) for x in re.split(r"::| › | > ", n) if _norm(x)]
+    cands = [n] + ([" ".join(segs)] if len(segs) > 1 else []) + segs[-1:]
+    own = _literal_prefix(n)
+    if own is not None:                                   # the tester quoted an interpolated source name
+        def pref_ok(pre, depth=0):
+            if len(pre) >= PREFIX_MIN and any(x.startswith(pre) for x in lits):
+                return True
+            return depth < 6 and any(pre.startswith(x + " ") and pref_ok(pre[len(x) + 1:], depth + 1) for x in exact)
+        own_seg = _literal_prefix(segs[-1]) if segs else None
+        return any(pref_ok(pre) for pre in (own, own_seg) if pre)
+
+    def composed(s, depth=0):
+        """`s` = literals joined by single spaces (group names then the test name), interpolated ones by prefix."""
+        if s in exact:
+            return True
+        if depth > 6:
+            return False
+        for x in exact:
+            if s.startswith(x + " ") and composed(s[len(x) + 1:], depth + 1):
+                return True
+        return any(s.startswith(pre) for pre in prefixes)
+    return any(composed(c) for c in cands if c)
 
 
 def valid_covers(p, cfg, covers):
@@ -608,6 +686,14 @@ def untestable(ac, members, covers):
     cs = (members or {}).get(ac) or []
     if cs and all(why.get(x) for x in cs):
         return "; ".join("%s: %s" % (x, why[x]) for x in cs)
+    if not cs:
+        # 0.102.12 (review-0102-11 m1, lead decision m1): an AC whose only case was DEFERRED (it left the AC's case
+        # list) — the tester's `kind: none` + reason for that case (re-keyed to this AC) makes it a grading row
+        got = ["%s: %s" % (c.get("case"), " ".join(str(c.get("reason")).split())[:160]) for c in covers or []
+               if isinstance(c, dict) and c.get("ac") == ac and c.get("case") and
+               str(c.get("kind") or "").strip().lower() == "none" and str(c.get("reason") or "").strip()]
+        if got:
+            return "; ".join(got)
     return ""
 
 
@@ -752,7 +838,7 @@ def apply_answer(p, stage, output_name, q, res, comments):
     if not reason or not sig:
         return B.fail(p, stage, "loop-back answer without loopback-reason/-signature lines in %s" % output_name)
     if res.get("choice") == "reset":
-        LP.reset(p)
+        LP.reset(p, stage)
     out = LP.run(p, stage, stage, reason, sig, decided_human=True)
     if out.kind == B.StageResult.LOOPBACK:              # K2-m5: marked only after the block landed
         B.mark_applied(p, stage, res)

@@ -182,7 +182,8 @@ class M1CoverMustExist(unittest.TestCase):
         self.assertIn("name not found", T.cover_problem(P(), "flutter", {"test": "test/a_test.dart::nope"}))
         self.assertIn("file not found", T.cover_problem(P(), "flutter", {"test": "test/b_test.dart::t"}))
         self.assertIn("no test name", T.cover_problem(P(), "flutter", {"test": "test/a_test.dart"}))
-        self.assertIsNone(T.cover_problem(P(), "flutter", {"test": "test/a_test.dart::group t"}))   # flutter group
+        # 0.102.12 (review-0102-11 m4): exact — a group prefix counts only when it is a literal of the file
+        self.assertIn("name not found", T.cover_problem(P(), "flutter", {"test": "test/a_test.dart::group t"}))
         self.assertFalse(T.covering(dict({"test": "x_test.dart::t", "kind": "new"}, invalid="file not found")))
 
 
@@ -393,7 +394,9 @@ class LoopbackCap(unittest.TestCase):
         rec = LB.from_comments(h.gh.comments(7))
         self.assertEqual([LB.markers.clean(b.heading) for b in rec.blocks][-2:], ["### loopback-reset", "### loopback 3"])
         self.assertEqual(rec.latest_active().get("decided"), "human")
-        self.assertEqual(len(rec.active()), 1)
+        # 0.102.12 (review-0102-11 m3): the reset granted exactly this one — history kept, the cap reached again
+        self.assertEqual(len(rec.active()), 3)
+        self.assertTrue(rec.cap_reached("qa"))
 
     def test_a_gap_with_covers_naming_unjudged_ids_is_an_engine_defect(self):
         # #1945's first attempt shape: covers name `E1` / `M1` the engine does not judge (here: a document whose

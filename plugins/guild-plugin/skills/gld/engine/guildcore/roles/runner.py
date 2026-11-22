@@ -170,7 +170,7 @@ class RoleSpec(object):
 class RoleResult(object):
     def __init__(self, status, line=None, extras=None, artifacts=(), session_id=None, cost=0.0,
                  denials=(), violations=(), rl=None, run_dir=None, notes=(), pres=None, result_source=None,
-                 reverted=()):
+                 reverted=(), reverted_dir=None):
         self.status = status          # DONE | DONE_WITH_CONCERNS | BLOCKED | NEEDS_CONTEXT | FAIL
         self.line = line              # | INVALID | PERMISSION | TIMEOUT | HALTED | SCOPE
         self.extras = extras or {}
@@ -189,6 +189,9 @@ class RoleResult(object):
         # 0.102.11 (review-0102-10 M4): [(path, what the role wrote)] — writes outside a read-only role's scope the
         # engine put back after it (the stage turns them into a finding)
         self.reverted = list(reverted or ())
+        # 0.102.12 (review-0102-11 M2): where the engine copied every reverted path BEFORE putting it back
+        # (`<run>/out/reverted/` — the files, `<path>.diff`, manifest.json) — nothing it reverts is lost
+        self.reverted_dir = reverted_dir
 
 
 def _own_worktree(worktree):
@@ -640,6 +643,7 @@ class Runner(object):
                 return "TIMEOUT", "%s exceeded %d s" % (spec.who, spec.timeout_s)
             return None
         status, line, obj, pres = None, None, None, None
+        self._reply_notes = st_["notes"]           # 0.102.12: what _judge_reply decided on its own goes on record
         try:
             proc, st = session(task, "s1", "main", session_id=st_["sid"])
             st_["sid"] = st.session_id or st_["sid"]
@@ -669,7 +673,7 @@ class Runner(object):
                     return None
             if not pres.ok or errs:
                 st_["notes"].append("repair-resume")
-                instr = R.repair_instruction(pres, errs)
+                instr = R.repair_instruction(pres, errs, spec.allowed_status)
                 proc, st = session(instr, "s3-repair", "repair", resume=st_["sid"])
                 hit = stop()
                 if hit:
@@ -712,7 +716,7 @@ class Runner(object):
                                           branch=spec.branch)
                 except Exception as e:           # a check that cannot run is a violation
                     violations = ["post-role check failed: %s" % e]
-            reverted = []
+            reverted, reverted_dir = [], None
             if violations and not blocked and _own_worktree(spec.worktree):
                 # (never on a person's main checkout — a role there, e.g. design's tester, may sit beside their edits)
                 # 0.102.11 (review-0102-10 M4, lead decision 5): a read-only role's own file writes are put back and
@@ -721,15 +725,22 @@ class Runner(object):
                     rk = P.role_key(spec.role, spec.task)
                     paths = SC.revertable(spec.worktree, before, after, violations, rk)
                     if paths:
-                        got = SC.revert_writes(spec.worktree, paths)
+                        # 0.102.12 (review-0102-11 M2): every path is copied to the run dir first (never lost)
+                        keep = os.path.join(run_dir, "out", "reverted")
+                        got = SC.revert_writes(spec.worktree, paths, keep_dir=keep, after=after)
                         after = SC.snapshot(spec.worktree, remote=url, watch_files=watch)
                         left = SC.check(spec.worktree, before, after, [rk], issue=spec.issue, branch=spec.branch)
+                        if got:
+                            st_["notes"].append("copied before revert: %s" % keep)
+                            if self.journal is not None and hasattr(self.journal, "append"):
+                                self.journal.append("event", what="scope-reverted", role=spec.who,
+                                                    paths=[p for p, _t in got], kept=keep)
                         if not left:
-                            reverted, violations = got, []
-                            st_["notes"].append("reverted %s writes outside its scope: %s" % (
-                                spec.role, ", ".join(p for p, _t in got)))
+                            reverted, violations, reverted_dir = got, [], keep
+                            st_["notes"].append("reverted %s writes outside its scope: %s (copies: %s)" % (
+                                spec.role, ", ".join(p for p, _t in got), keep))
                         else:
-                            violations = left
+                            violations = left + (["the reverted paths are kept at %s" % keep] if got else [])
                 except Exception as e:           # a revert that cannot run leaves the stop
                     st_["notes"].append("revert failed: %s" % e)
             if violations:
@@ -748,12 +759,25 @@ class Runner(object):
             self._last = RoleResult(status or "INVALID", line, obj, session_id=st_["sid"],
                                     cost=st_["cost"], denials=st_["denials"], violations=violations,
                                     rl=RL.verdict(st_["rls"]), run_dir=run_dir, notes=st_["notes"],
-                                    pres=pres, result_source=st_["src"], reverted=reverted)
+                                    pres=pres, result_source=st_["src"], reverted=reverted,
+                                    reverted_dir=reverted_dir)
 
     def _judge_reply(self, spec, run_dir, st):
         pres = R.parse_pres(st.last_text, spec.allowed_status)
         obj, errs = None, []
         self._src = None
+        if spec.result_schema is not None and not pres.ok:
+            # 0.102.12 (one-man-company #687): an unusable status line beside a valid out/result.json — the structured
+            # result decides (R.structured_pres), never a repair session and a pause for a finished role
+            o_, s_, e_ = R.read_result_json(run_dir, st.last_text)
+            if not e_ and not R.validate(o_, spec.result_schema, None) and \
+                    not R.missing_artifacts(o_, spec.worktree, run_dir):
+                alt = R.structured_pres(pres, o_, spec.allowed_status)
+                if alt is not None:
+                    if isinstance(getattr(self, "_reply_notes", None), list):
+                        self._reply_notes.append("status from result.json: RESULT line %s → %s" % (
+                            pres.violation, alt.status))
+                    pres = alt
         if spec.result_schema is not None and pres.ok:
             obj, src, err = R.read_result_json(run_dir, st.last_text)
             self._src = src

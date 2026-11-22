@@ -165,7 +165,14 @@ def snapshot(worktree, remote=None, watch_files=()):
             continue
         st, p = e[:2], e[3:]
         if st[0] in "RC":          # rename/copy: the next field is the source
+            src = parts[i] if i < len(parts) else ""
             i += 1
+            if st[0] == "R" and src:
+                # 0.102.12 (review-0102-11 M3): a rename's SOURCE is a deletion of that path — kept beside the
+                # destination (each names the other), so a move out of an allowed path is seen and reverted as a pair
+                entries[src] = ["D ", None, "renamed-to:" + p]
+                entries[p] = [st, _hash(os.path.join(worktree, p)), "renamed-from:" + src]
+                continue
         entries[p] = [st, _hash(os.path.join(worktree, p))]
     head = _git(worktree, "rev-parse", "HEAD").decode().strip()
     try:
@@ -306,7 +313,8 @@ def check(worktree, before, after, roles, issue=None, branch=None, extra_globs=N
                               cwd=worktree).returncode != 0:
                 viol.append("%s moved by a non-fast-forward change" % ref)
                 continue
-            committed = [x for x in _git(worktree, "diff", "--name-only", "-z", "%s..%s" % (rb[ref], ra[ref]))
+            # 0.102.12 (M3): `--no-renames` — a moved source counts as deleted (rename detection showed the new path only)
+            committed = [x for x in _git(worktree, "diff", "--name-only", "--no-renames", "-z", "%s..%s" % (rb[ref], ra[ref]))
                          .decode("utf-8", "replace").split("\0") if x]
             paths = sorted(set(paths) | set(committed))
             continue
@@ -378,7 +386,7 @@ def revertable(worktree, before, after, violations, role):
     committed = set()
     if before.get("head") != after.get("head"):
         try:
-            committed = set(x for x in _git(worktree, "diff", "--name-only", "-z", "%s..%s" % (
+            committed = set(x for x in _git(worktree, "diff", "--name-only", "--no-renames", "-z", "%s..%s" % (
                 before["head"], after["head"])).decode("utf-8", "replace").split("\0") if x)
         except RuntimeError:
             return None
@@ -391,19 +399,80 @@ def revertable(worktree, before, after, violations, role):
         if protected(p) or p in committed or p in (before.get("status") or {}) or p not in (after.get("status") or {}):
             return None
         out.append(p)
+    # 0.102.12 (M3 / m6): a rename is reverted as a PAIR — the other side joins even when it is inside the scope
+    for p in list(out):
+        q = rename_partner(after, p)
+        if q and q not in out:
+            if protected(q) or q in committed or q in (before.get("status") or {}):
+                return None
+            out.append(q)
     return out
 
 
-def revert_writes(worktree, paths, cap=1200):
-    """Put each path back to HEAD (a new file is removed) → [(path, what the role wrote — its added lines, capped)]."""
-    out = []
+def rename_partner(snap, path):
+    """The other side of a staged rename `path` is part of in the snapshot `snap`, or None."""
+    e = (snap.get("status") or {}).get(path) or []
+    tag = e[2] if len(e) > 2 and isinstance(e[2], str) else ""
+    return tag.split(":", 1)[1] if ":" in tag else None
+
+
+def revert_writes(worktree, paths, cap=1200, keep_dir=None, after=None):
+    """Put each path back to HEAD (a new file is removed) → [(path, what the role wrote — its added lines, capped)].
+
+    0.102.12 (review-0102-11 M2, lead decision M2): NOTHING is lost — before any path is touched, its content is copied
+    to `keep_dir` (the role's `out/reverted/`: the file at its own relative path, `<path>.diff` against HEAD for a
+    tracked one) and `manifest.json` lists each path's state (modified / new / deleted / renamed from|to) and copy.
+    No stash, no `git clean` of anything not copied first: a path whose copy cannot be written is not reverted (the
+    caller's re-check then stops for a person, as before 0.102.11). A binary file's text is `(binary)`."""
+    import shutil
+    rows, keep = [], {}
     for p in paths:
         full = os.path.join(worktree, p)
         tracked = subprocess.run(["git", "cat-file", "-e", "HEAD:%s" % p], cwd=worktree,
                                  stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0
+        exists = os.path.lexists(full)
+        partner = rename_partner(after, p) if after else None
+        ent = ((after or {}).get("status") or {}).get(p) or []
+        state = ("renamed-to %s" % partner if ent[:1] and str(ent[0]).startswith("D") else "renamed-from %s" % partner) \
+            if partner else ("deleted" if not exists else ("modified" if tracked else "new"))
+        row = {"path": p, "state": state, "tracked": tracked, "copy": None, "diff": None}
+        if keep_dir:
+            try:
+                if exists and os.path.isfile(full):
+                    dst = os.path.join(keep_dir, p)
+                    os.makedirs(os.path.dirname(dst), exist_ok=True)  # fs-ok: engine-owned run dir out/reverted (copy before revert)
+                    shutil.copy2(full, dst)  # fs-ok: engine-owned run dir out/reverted (copy before revert)
+                    row["copy"] = dst
+                if tracked:
+                    d = _git(worktree, "diff", "--binary", "HEAD", "--", p)
+                    if d:
+                        dst = os.path.join(keep_dir, p + ".diff")
+                        os.makedirs(os.path.dirname(dst), exist_ok=True)  # fs-ok: engine-owned run dir out/reverted
+                        with open(dst, "wb") as fh:  # fs-ok: engine-owned run dir out/reverted (copy before revert)
+                            fh.write(d)
+                        row["diff"] = dst
+            except (OSError, RuntimeError, IOError) as e:
+                row["error"] = str(e)
+        rows.append(row)
+        keep[p] = row
+    if keep_dir:
+        try:
+            os.makedirs(keep_dir, exist_ok=True)  # fs-ok: engine-owned run dir out/reverted
+            with open(os.path.join(keep_dir, "manifest.json"), "w", encoding="utf-8") as fh:  # fs-ok: engine-owned run dir out/reverted
+                json.dump(rows, fh, ensure_ascii=False, indent=1, sort_keys=True)
+        except (OSError, IOError):
+            return []                                     # no record of what is kept → nothing is reverted
+    out = []
+    for p in paths:
+        row = keep[p]
+        if keep_dir and row.get("error"):
+            continue                                      # never revert what could not be copied
+        full = os.path.join(worktree, p)
         text = ""
         try:
-            if tracked:
+            if _binary(full):
+                text = "(binary)"
+            elif row["tracked"] and os.path.isfile(full):
                 diff = _git(worktree, "diff", "HEAD", "--", p).decode("utf-8", "replace")
                 text = "\n".join(l[1:] for l in diff.split("\n") if l.startswith("+") and not l.startswith("+++"))
             elif os.path.isfile(full):
@@ -411,13 +480,26 @@ def revert_writes(worktree, paths, cap=1200):
                     text = fh.read(cap * 2)
         except (RuntimeError, OSError):
             text = ""
-        if tracked:
+        if row["tracked"]:
+            G.run(worktree, "reset", "-q", "HEAD", "--", p, check=False)     # a staged rename / deletion side
             G.run(worktree, "checkout", "HEAD", "--", p)              # the git adapter: the one mutating door
         else:
+            # `reset` unstages a staged add / a rename's destination whatever its content (`rm --cached` refuses a
+            # path whose staged content differs from both the file and HEAD — an edited rename destination)
+            G.run(worktree, "reset", "-q", "HEAD", "--", p, check=False)
             G.run(worktree, "rm", "-q", "--cached", "--ignore-unmatch", "--", p, check=False)
-            G.run(worktree, "clean", "-f", "-q", "--", p, check=False)
+            if os.path.lexists(full) and (row.get("copy") or not keep_dir):
+                os.remove(full)  # fs-ok: an engine worktree path the role wrote outside its scope, copied to out/reverted first
         out.append((p, " ".join(text.split())[:cap]))
     return out
+
+
+def _binary(path):
+    try:
+        with open(path, "rb") as fh:
+            return b"\0" in fh.read(8192)
+    except (OSError, IOError):
+        return False
 
 
 def drift(baseline, now, worktree=None):

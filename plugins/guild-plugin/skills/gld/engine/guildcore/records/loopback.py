@@ -48,12 +48,38 @@ class LoopbackRecord(object):
     def numbered(self):
         return [b for b in self.blocks if NUMBERED_RE.match(markers.clean(b.heading))]
 
-    def active(self):
+    def _last_full_reset(self):
         last_reset = -1
         for i, b in enumerate(self.blocks):
-            if markers.clean(b.heading) == "### loopback-reset":
+            if markers.clean(b.heading) == "### loopback-reset" and not b.get("grant"):
                 last_reset = i
-        return [b for b in self.blocks[last_reset + 1:] if NUMBERED_RE.match(markers.clean(b.heading))]
+        return last_reset
+
+    def active(self):
+        """The numbered blocks after the last FULL reset (a rollback's). 0.102.12 (review-0102-11 m3, lead decision
+        m3): a cap answer's reset (`grant: 1`) clears nothing — it grants one more loop-back (`grants`) and the
+        stagnation history before it stays in view."""
+        return [b for b in self.blocks[self._last_full_reset() + 1:] if NUMBERED_RE.match(markers.clean(b.heading))]
+
+    def grants(self, from_=None):
+        """(total, for `from_`) extra loop-backs granted by cap-answer resets since the last full reset (a grant reset
+        with no `from:` grants every source)."""
+        tot = mine = 0
+        for b in self.blocks[self._last_full_reset() + 1:]:
+            if markers.clean(b.heading) == "### loopback-reset" and b.get("grant"):
+                try:
+                    g = int(b.get("grant"))
+                except (TypeError, ValueError):
+                    g = 1
+                tot += g
+                if not b.get("from") or b.get("from") == from_:
+                    mine += g
+        return tot, mine
+
+    def has_grant_for(self, n):
+        """A cap-answer reset already written for loop-back `n` (a resumed write never grants twice)."""
+        return any(markers.clean(b.heading) == "### loopback-reset" and b.get("grant") and b.get("for") == str(n)
+                   for b in self.blocks)
 
     def latest_active(self):
         act = self.active()
@@ -69,9 +95,10 @@ class LoopbackRecord(object):
     def cap_reached(self, from_=None, cap=CAP, total=TOTAL_CAP):
         """0.102.11: this source's active blocks ≥ `cap`, or all active blocks ≥ `total` (no source: the total only)."""
         act = self.active()
-        if len(act) >= total:
+        g_tot, g_mine = self.grants(from_)
+        if len(act) >= total + g_tot:
             return True
-        return from_ is not None and len([b for b in act if b.get("from") == from_]) >= cap
+        return from_ is not None and len([b for b in act if b.get("from") == from_]) >= cap + g_mine
 
     def active_from(self, from_):
         return len([b for b in self.active() if b.get("from") == from_])
@@ -125,8 +152,17 @@ def render_block(n, from_, at, branch, reason, signature, decided=None, override
     return markers.assert_own_markers(markers.finish("\n".join(lines)))
 
 
-def render_reset(at, by="human"):
-    return markers.assert_own_markers(markers.finish("\n".join(["### loopback-reset", "at: %s" % at, "by: %s" % by])))
+def render_reset(at, by="human", from_=None, grant=None, for_n=None):
+    """A reset block. Without `grant`: a FULL reset (a rollback — the history stops counting). With `grant` (0.102.12,
+    the cap answer `reset`): `grant` more loop-backs for `from_`, nothing cleared; `for_n` = the loop-back it is for."""
+    lines = ["### loopback-reset", "at: %s" % at, "by: %s" % by]
+    if grant:
+        if from_ in FROM_VALUES:
+            lines.append("from: %s" % from_)
+        lines.append("grant: %d" % int(grant))
+        if for_n is not None:
+            lines.append("for: %d" % int(for_n))
+    return markers.assert_own_markers(markers.finish("\n".join(lines)))
 
 
 def render_new_record(block_text):

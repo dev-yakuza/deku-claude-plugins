@@ -505,9 +505,11 @@ def role_outcome(p, stage, role, res):
         # 0.102.11 (review-0102-10 M4): the engine put back what a read-only role wrote outside its scope — on record
         # (a grading-sheet row); QA's also becomes a finding for the developer (stages.qa.reverted_findings)
         res._reverted_recorded = True
-        record_code(p, stage, "scope-reverted", "reverted", reason="%s wrote outside its scope; the engine put back: %s"
-                    % (role, ", ".join(x for x, _t in res.reverted))[:600], refs="P-SCOPE",
-                    extra={"grade": "trigger", "role": role})
+        # 0.102.12 (review-0102-11 M2): the row names where every reverted path was copied first (`out/reverted/`)
+        keep = getattr(res, "reverted_dir", None)
+        record_code(p, stage, "scope-reverted", "reverted", reason=("%s wrote outside its scope; the engine put back: %s"
+                    % (role, ", ".join(x for x, _t in res.reverted)))[:500] + (" — copies: %s" % keep if keep else ""),
+                    refs="P-SCOPE", extra={"grade": "trigger", "role": role, "reverted_copy": keep})
     if st == "HALTED":
         raise Halted()
     if st == "RATE_LIMITED":

@@ -20,6 +20,14 @@ import re
 import subprocess
 
 
+def search_text(text):
+    """0.102.12 (word_app #1797): a search text as ONE string — a list / tuple (a role's `keywords: [...]`) joined by
+    spaces; argv items are strings only."""
+    if isinstance(text, (list, tuple)):
+        return " ".join(" ".join(str(x).split()) for x in text if str(x).strip())
+    return "" if text is None else str(text)
+
+
 class GhError(Exception):
     pass
 
@@ -139,6 +147,7 @@ class GhCli(object):
         return [ln for ln in out.split("\n") if ln.strip()]
 
     def issue_search(self, text, limit=50):
+        text = search_text(text)                     # 0.102.12: never a list as one argv item (#1797)
         out = self._gh(["gh", "issue", "list", "--state", "all", "--limit", str(limit),
                         "--search", text, "--json", "number,title,body,state,labels"]
                        + self._repo_args())
@@ -306,6 +315,7 @@ class FakeGh(object):
         return list(self.fx.get("annotations", {}).get(str(run_id), []))
 
     def issue_search(self, text, limit=50):
+        text = search_text(text)
         self.calls.append(("issue_search", text))
         out = []
         seen = self._search_visible()

@@ -614,6 +614,12 @@ def evidence_step(p, cx, dev, attempt):
         reason = "suite timed out at %d ms — last running: %s" % (r.ceiling_s * 1000, r.last_running or "?")
         green = False
     elif summ is None:
+        # 0.102.12 (review-0102-11 M4, japanlifeinfo #227): a red run whose output shows the package manager could
+        # not be fetched offline is an environment stop that says so — never "set commands.test_summary"
+        from guildcore.checks import pmcache as PMC
+        if not r.passed and PMC.offline_fetch_failure(r.raw):
+            line = PMC.offline_line("execute suite", r.raw, getattr(p, "root", None))
+            return env_pause(p, line, "engine-env-package-manager-offline", "X2.3")
         return env_pause(p, "테스트 요약 형식을 읽지 못함 — commands.test_summary 를 설정하세요",
                          "테스트 요약 형식을 읽지 못함", "X2.3")
     else:

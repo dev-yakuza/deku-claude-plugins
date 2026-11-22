@@ -4,3 +4,5 @@ and return a corrected `covers` list for ALL ids (same shape: `{test: "<path>::<
 new|guard}`). Name a test only when it really exercises that AC and exists in the tree under that
 name; leave an id out when no test does. An id no automated test can verify gets `{test: "", ac,
 kind: "none", reason: "<why>"}` (a reason is required). Do not run the suite, do not edit anything.
+A safety-net case listed in `safety-net-deferred.txt` (the developer deferred it) is answered the same
+way: `{test: "", ac: "<its case id>", kind: "none", reason: "deferred: <the developer's reason>"}`.

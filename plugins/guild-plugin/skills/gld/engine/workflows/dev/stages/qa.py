@@ -201,7 +201,7 @@ def run(p, only=None, config_present=True, diff_paths=None):
 
     prev_qa = _prev_qa(comments)
     d, checklist = _judge(p, cfg, qres, dres, test_out, issue_brief, diff, prev_qa)  # Q2.5
-    defects = [x for x in d.fields.get("defects") or [] if x.get("blocking")] + reverted_findings(qres)
+    defects = [x for x in d.fields.get("defects") or [] if x.get("blocking")] + reverted_findings(qres, p.root)
     if dres is not None and dres.status == "BLOCKED" and not any(
             "designer" in (x.get("line") or "") or x.get("id", "").startswith("UX") for x in defects):
         defects.append({"id": "UX-1", "blocking": True, "fixable_in_code": "no",
@@ -253,24 +253,50 @@ RELEASE_NOTES_RE = re.compile(r"(^|/)(release[_-]?notes?|changelog|changes|news)
 DOCS_RE = re.compile(r"(^|/)(docs?|documentation)/|(^|/)readme[^/]*$|\.(md|mdx|rst|adoc)$", re.I)
 
 
-def reverted_findings(qres):
+SCRATCH_RE = re.compile(r"(^|/)(tmp|temp|\.tmp|scratch|\.scratch|\.cache)/|\.(png|jpe?g|gif|webp|mp4|mov|pdf|log)$", re.I)
+
+
+def scratch_path(path, root=None):
+    """0.102.12 (review-0102-11 m5, lead decision m5): a QA scratch write — under a tmp / scratch dir, a screenshot /
+    log / binary, or a path git ignores — is reverted silently (the grading-sheet row only), never a finding."""
+    if SCRATCH_RE.search(path or ""):
+        return True
+    if root and os.path.isdir(root):
+        from guildcore.adapters import git as G
+        try:
+            return G.ok(root, "check-ignore", "-q", "--no-index", "--", path)
+        except Exception:                              # noqa: BLE001 — unknown → not scratch (a finding)
+            return False
+    return False
+
+
+def reverted_findings(qres, root=None):
     """0.102.11 (review-0102-10 M4, lead decision 5): QA never writes repository files — what it wrote outside its
     scope the engine put back (`RoleResult.reverted`) and it becomes a FIXABLE finding for the developer, carrying
-    what QA proposed (`release notes missing: <path>: <text>`). Never a stop for a person."""
+    what QA proposed (`release notes missing: <path>: <text>`). Never a stop for a person.
+    0.102.12: the finding names where the engine kept the copy (`out/reverted/<path>`, M2); a scratch write
+    (`scratch_path`) or a binary one is no finding (m5) — its grading-sheet row is all."""
     out = []
-    for i, (path, text) in enumerate(getattr(qres, "reverted", None) or []):
+    keep = getattr(qres, "reverted_dir", None)
+    for path, text in getattr(qres, "reverted", None) or []:
+        if scratch_path(path, root) or text == "(binary)":
+            continue
         what = "release notes missing" if RELEASE_NOTES_RE.search(path) else \
             ("docs missing" if DOCS_RE.search(path) else "change missing")
-        out.append({"id": "QA-W%d" % (i + 1), "blocking": True, "fixable_in_code": "yes",
+        kept = (" — the engine kept qa's copy at %s" % os.path.join(keep, path)) if keep else ""
+        out.append({"id": "QA-W%d" % (len(out) + 1), "blocking": True, "fixable_in_code": "yes",
                     "line": "%s: %s — %s" % (what, path, text or "(qa wrote nothing readable)"),
-                    "evidence": "qa wrote %s outside its scope; the engine reverted it — qa never edits, the developer "
-                                "writes it (proposed text above)" % path})
+                    "evidence": "qa wrote %s outside its scope; the engine reverted it%s — qa never edits, the developer "
+                                "writes it (proposed text above)" % (path, kept)})
     return out
 
 
 def _plan_lines(qres):
     out = ["계획: %s" % x for x in qres.extras.get("plan_summary") or []]
     for path, text in getattr(qres, "reverted", None) or []:
+        if scratch_path(path) or text == "(binary)":
+            out.append("qa 범위 밖 임시 파일 — 엔진이 되돌림(사본 %s): %s" % (getattr(qres, "reverted_dir", None) or "-", path))
+            continue
         out.append("qa 범위 밖 쓰기 — 엔진이 되돌림, developer 에게: %s — %s" % (path, B.one_line(text or "-", 400)))
     plan = qres.extras.get("plan")
     if isinstance(plan, str) and plan.strip():
@@ -419,13 +445,27 @@ def _followup_items(qres):
         except ValueError:
             items = []
     out = []
-    for it in items or []:
+    for it in items if isinstance(items, list) else []:
         if isinstance(it, str):
             out.append({"title": it, "rationale": None, "keywords": it})
         elif isinstance(it, dict) and it.get("title"):
-            out.append({"title": it["title"], "rationale": it.get("rationale") or it.get("근거"),
-                        "keywords": it.get("keywords") or it["title"]})
+            # 0.102.12 (word_app #1797, 0.102.11 run 07:04Z — `TypeError — sequence item 8: expected str instance, list
+            # found`): the qa role wrote `keywords` as a LIST; it went as one argv item into `gh issue list --search`.
+            # Every field is normalised to one line of text here, at the source
+            out.append({"title": _text(it["title"]), "rationale": _text(it.get("rationale") or it.get("근거")) or None,
+                        "keywords": _text(it.get("keywords")) or _text(it["title"])})
     return out
+
+
+def _text(v):
+    """A role-written field as one line of text: a list / tuple joined by spaces (nested values flattened), None → ""."""
+    if v is None:
+        return ""
+    if isinstance(v, (list, tuple)):
+        return " ".join(x for x in (_text(y) for y in v) if x)
+    if isinstance(v, dict):
+        return " ".join(x for x in (_text(y) for y in v.values()) if x)
+    return " ".join(str(v).split())
 
 
 def narrowed_followups(comments):

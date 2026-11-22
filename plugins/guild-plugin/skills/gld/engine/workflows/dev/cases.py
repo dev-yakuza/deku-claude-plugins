@@ -229,15 +229,57 @@ def judged_units(text, deferred=(), acs=()):
     (`ac_refs` — lists and `[AC #n]` tags included) and `acs` — the analyze stage's AC list. An AC no case names is a
     unit with no cases (no cover → a gap, unless the tester marks it untestable)."""
     units, members, amap = _judged_units(text, deferred)
+    if not amap:
+        # 0.102.12 (review-0102-11 m2, lead decision m2): a document that tags no case with an AC (legacy) is judged by
+        # its own ids — the analyze ACs are judged beside them as SOFT units (`soft_units`: an unconfirmed one is a
+        # grading-sheet row for the untagged document, never a gap)
+        return units, members, amap
     dset = set(deferred or ()) | set(ac_key(x) for x in deferred or ())
     have = set(ac_key(u) for u in units)
-    for a in ac_refs(text) + [ac_key(x) for x in acs or ()]:
+    for a in doc_ac_refs(text) + [ac_key(x) for x in acs or ()]:
         if a not in have and a not in dset:
             units.append(a)
             have.add(a)
             if amap:
                 members.setdefault(a, [])
     return units, members, amap
+
+
+AC_DEF = re.compile(r"^[\s>]{0,8}\**\s{0,4}AC ?#?\d+\**\s{0,2}(?:[:：.)—–]|-\s)")    # `AC #3: …` — not `AC #7 은 …`
+LIST_ITEM = re.compile(r"^\s{0,8}(?:[-*+・•]|\d{1,3}[.)])\s")
+AC_TAG_BRACKET = re.compile(r"[\[(（【]\s*AC ?#? ?-?\d+[^\])）】\n]{0,40}[\])）】]")
+
+
+def doc_ac_refs(text):
+    """0.102.12 (m2): the ACs a document NAMES as units — on a list item, a table row or a heading, or in a bracketed
+    tag (`[AC #5]`, `(AC #1, #5)`) anywhere; an AC mentioned in a prose line ("AC #7 은 #1950 으로 분리") is not one."""
+    out = []
+    for ln in (text or "").split("\n"):
+        s_ = ln.strip()
+        if s_.startswith("|") or HEADING.match(ln) or LIST_ITEM.match(ln) or AC_DEF.match(ln):
+            got = ac_refs(ln)
+        else:
+            got = []
+            for m in AC_TAG_BRACKET.finditer(ln):
+                got += ac_refs(m.group(0))
+        for a in got:
+            if a not in out:
+                out.append(a)
+    return out
+
+
+def soft_units(text, units, acs=(), deferred=()):
+    """0.102.12 (m2): the analyze ACs judged as SOFT units — only for a document that tags no case with an AC; the ones
+    not already a unit (and not deferred)."""
+    if ac_map(text):
+        return []
+    have = set(ac_key(u) for u in units or ())
+    dset = set(deferred or ()) | set(ac_key(x) for x in deferred or ())
+    out = []
+    for a in [ac_key(x) for x in acs or ()]:
+        if a not in have and a not in dset and a not in out:
+            out.append(a)
+    return out
 
 
 def _judged_units(text, deferred=()):
@@ -286,4 +328,68 @@ def rekey_covers(covers, amap):
                 out.append(dict(c, ac=x, case=a))
         else:
             out.append(dict(c, ac=k) if k != a else c)
+    return out
+
+
+# ---- 0.102.12 (review-0102-11 M1, lead decision M1): a VISUAL row cover is a visual case, never an orphan id ---------
+# tester-verify puts the visual rows beside the case covers (word_app #1797 run 185 `ac: "visual:single"`, #1945 run 092
+# `ac: "VIS-1(일본어 모드·ko)"`). They are mapped to the ACs of their row in the `<!-- guild:visual-cases -->` table (kept
+# as `case`, marked `visual`) — the visual rows are judged on their own (`visual_rows`), so such a cover fills no AC gap
+# and never makes the id-mapping engine-defect stop.
+VISUAL_ID = re.compile(r"^\s*(?:visual\s*[:/]|VIS\s*-?\s*\d)", re.I)
+VIS_N = re.compile(r"^\s*(?:VIS\s*-?\s*|visual\s*[:/]\s*)(\d+)\b", re.I)
+
+
+def is_visual_id(x):
+    return bool(VISUAL_ID.match(str(x or "")))
+
+
+def visual_table(text):
+    """[(row text, [AC keys])] of the visual-cases table (the first table after `<!-- guild:visual-cases -->`)."""
+    t = text or ""
+    i = t.find("<!-- guild:visual-cases -->")
+    if i < 0:
+        return []
+    lines = t[i:].split("\n")[1:]
+    out, started = [], False
+    for ln in lines:
+        s = ln.strip()
+        if s.startswith("|"):
+            if SEP.match(s):
+                started = True
+                continue
+            if not started:
+                continue                                  # the header row
+            out.append((" ".join(s.strip("|").split()), ac_refs(s)))
+        elif started:
+            break
+    return out
+
+
+def visual_acs(vid, rows):
+    """The ACs of the visual row `vid` names — `VIS-n` / `visual:n` → row n; `visual:<words>` → the one row whose text
+    holds the words — else []."""
+    m = VIS_N.match(str(vid or ""))
+    if m:
+        k = int(m.group(1))
+        return list(rows[k - 1][1]) if 1 <= k <= len(rows) else []
+    w = re.sub(r"^\s*visual\s*[:/]\s*", "", str(vid or ""), flags=re.I).strip().lower()
+    hit = [acs for txt, acs in rows if w and w in txt.lower()]
+    return list(hit[0]) if len(hit) == 1 else []
+
+
+def rekey_visual(covers, text):
+    """Covers whose `ac` is a visual row id → re-keyed to each AC of that row (`case` = the visual id, `visual: True`);
+    a row id that maps to no AC keeps its id, marked `visual`. Every other cover unchanged."""
+    rows = visual_table(text)
+    out = []
+    for c in covers or []:
+        if isinstance(c, dict) and is_visual_id(c.get("ac")):
+            acs = visual_acs(c.get("ac"), rows)
+            if acs:
+                out += [dict(c, ac=a, case=c.get("ac"), visual=True) for a in acs]
+            else:
+                out.append(dict(c, visual=True))
+        else:
+            out.append(c)
     return out
