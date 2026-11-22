@@ -220,7 +220,10 @@ class B2Security(unittest.TestCase):
         self.assertFalse(CONS.posthoc(P(), "DE-ARB", spec))
 
     def test_qa_pass_over_a_security_finding_still_asks(self):
-        self.assertFalse(CONS.posthoc(P(), "QA", S("QA", [("qa", QA_SEC), ("bar", "-")])))
+        # 0.102.10 (lead decision 5): the brief's text is no signal — the QA judge's structured field is
+        self.assertTrue(CONS.posthoc(P(), "QA", S("QA", [("qa", QA_SEC), ("bar", "-")])))
+        self.assertFalse(CONS.posthoc(P(), "QA", S("QA", [("qa", QA_SEC), ("bar", "-")]),
+                                      decision=decision("pass", {"security_concern": True})))
 
     def _captured(self, group, build):
         """The spec the REAL call site builds (a judge that records it)."""
@@ -269,17 +272,19 @@ class B2Security(unittest.TestCase):
         from workflows.dev import exec_audit as XA
         sec_f = XA.Cur("BLOCKER", "spec", "lib/a.dart", 1, "the API key is written to the log in plain text")
         plain_f = XA.Cur("MAJOR", "spec", "lib/a.dart", 2, "the counter label is misaligned")
+        # 0.102.10 (lead decision 5): the spec alone (no judge decision) is security only through the security role —
+        # an issue named in the text by another role is the judge's `security_concern` to raise, no longer the text's
         rows = [
             ("DE-ARB security role", lambda: self._dearb("security", "which module?"), True),
-            ("DE-ARB security issue named by another role", lambda: self._dearb("tech-lead", SEC_LINE), True),
+            ("DE-ARB security issue named by another role", lambda: self._dearb("tech-lead", SEC_LINE), False),
             ("DE-ARB plain", lambda: self._dearb("tech-lead", "which module?"), False),
             ("DE-ARB a role named security-ish", lambda: self._dearb("security-reviewer", "which module?"), False),
             ("STAKES after the security role", lambda: self._stakes("security", "which module?"), True),
             ("STAKES plain", lambda: self._stakes("tech-lead", "which module?"), False),
-            ("QA security issue", lambda: self._qa(["API key is logged in plain text (security)"]), True),
+            ("QA security issue", lambda: self._qa(["API key is logged in plain text (security)"]), False),
             ("QA plain", lambda: self._qa(["실기기 확인 — iPhone"]), False),
             ("EX-ARB security role BLOCKED", lambda: self._exarb([("security", "BLOCKED", "token in a log")], []), True),
-            ("EX-ARB security finding", lambda: self._exarb([], [sec_f]), True),
+            ("EX-ARB security finding", lambda: self._exarb([], [sec_f]), False),
             ("EX-ARB plain", lambda: self._exarb([("tech-lead", "BLOCKED", "naming")], [plain_f]), False),
         ]
         for name, make, want in rows:
@@ -295,7 +300,7 @@ class B2Security(unittest.TestCase):
                  "QA": [n for n, _t in self._qa(["x"]).brief_parts],
                  "EX-ARB": [n for n, _t in self._exarb([], []).brief_parts]}
         for g, want in CONS.SECURITY_INPUTS.items():
-            for part in want["role"] + want["text"]:
+            for part in want["role"]:
                 with self.subTest(group=g, part=part):
                     self.assertIn(part, names[g])
 
@@ -633,9 +638,20 @@ class M4Effective(unittest.TestCase):
         rows = [({"test": "t.dart::vacuous", "kind": "new"}, "t.dart", "vacuous", 1, "vacuous"),
                 ({"test": "t.dart::other", "kind": "new"}, "t.dart", "other", 2, "other")]
         oc = EFF._outcome("AC1", rows, EFF._rerun(Pt(), "flutter", TT(), rows, 60))
+        # 0.102.10 (review-0102-9 m4, lead decision 6): the AC itself reacted (`other`) — `pass`, the still-passing test
+        # named as a regression guard; the AC is `unsure` only when none reacted (below) or one failed otherwise
+        self.assertEqual(oc.result, "pass")
+        self.assertIn("regression guard: t.dart::vacuous", oc.why)
+        out["other"] = Res(True, "00:01 +1: other\n00:01 +1: All tests passed!\n")
+        oc = EFF._outcome("AC1", rows, EFF._rerun(Pt(), "flutter", TT(), rows, 60))
         self.assertEqual(oc.result, "unsure")
         self.assertEqual(oc.test, "t.dart::vacuous")
-        self.assertIn("reacted: t.dart::other", oc.why)
+        out["other"] = Res(False, "00:01 +0: other\nBad state: boom\n00:01 +0 -1: other [E]\n"
+                                  "00:01 +0 -1: Some tests failed.\n")
+        oc = EFF._outcome("AC1", rows, EFF._rerun(Pt(), "flutter", TT(), rows, 60))
+        self.assertNotEqual(oc.result, "pass")
+        out["other"] = Res(False, "00:01 +0: other\nExpected: <1>\n  Actual: <2>\n00:01 +0 -1: other [E]\n"
+                                  "00:01 +0 -1: Some tests failed.\n")
         out["vacuous"] = Res(False, "00:01 +0: vacuous\nExpected: <1>\n  Actual: <2>\n00:01 +0 -1: vacuous [E]\n"
                                     "00:01 +0 -1: Some tests failed.\n")
         oc = EFF._outcome("AC1", rows, EFF._rerun(Pt(), "flutter", TT(), rows, 60))

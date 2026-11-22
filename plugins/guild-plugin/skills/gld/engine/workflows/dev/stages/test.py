@@ -139,7 +139,8 @@ def summary_line(raw, summ):
 def _covers_by_ac(covers):
     out = {}
     for c in covers or []:
-        out.setdefault(c.get("ac"), []).append(c)
+        if covering(c):                 # 0.102.10: `kind: none` / no test names no cover
+            out.setdefault(c.get("ac"), []).append(c)
     return out
 
 
@@ -310,24 +311,7 @@ def run(p, only=None, config_present=True):
         p.capture("verify-gap", STAGE, "tester", reason, s_line, area, False)
     if not p.unattended:
         return ask_loopback(p, STAGE, R.TEST, reason, sig, "tests not green / AC gap — %s" % reason)
-    # 0.102.9 (word_app #1797 — two loop-backs spent, "loop-back cap reached" after $8): when no test file (nor the
-    # test-cases document) changed since an earlier loop-back that already named this whole gap, another loop-back
-    # cannot change the outcome — stop now with what happened, never burn the cap
-    same = LP.unchanged_since(p, "test", sig, is_test_path)
-    if same is not None:
-        line = ("loop-back would repeat loop-back %d — no test file changed since it (%s..HEAD) and the same gap "
-                "remains: %s" % (same[0], same[1][:12], B.one_line(reason, 300)))
-        return B.pause(p, STAGE, "defect", line, "loop-back without test change")
     return LP.run(p, STAGE, "test", reason, sig, head=_head(p))
-
-
-TEST_PATH_RE = re.compile(r"(^|/)(tests?|spec|specs|__tests__|integration_test|test_driver|testing)/|"
-                          r"(_test|\.test|\.spec|_spec)\.\w+$|(^|/)test_[^/]*\.py$|(^|/)docs/specs/\d+/test-cases\.md$")
-
-
-def is_test_path(path):
-    """0.102.9: a test file, a golden under a test dir, or the Issue's test-cases document."""
-    return bool(TEST_PATH_RE.search(str(path or "").replace("\\", "/")))
 
 
 def _head(p):
@@ -470,6 +454,12 @@ def _judge_coverage(p, cfg, test_cases, covers, raw, ledger, visual_cases, tc_re
             if isinstance(a, dict):
                 per.setdefault(CS.ac_key(a.get("id")) if members else a.get("id"), a)
         verdicts = {ac: _unit_verdict(ac, per, members) for ac in acs}
+        # 0.102.10 (review-0102-9 B1): a unit with no covering test is never effective, whatever the judge said — the
+        # gap goes through the normal repair → loop-back path (the cases of a folded AC keep their own check below)
+        by_ac = _covers_by_ac(covers)
+        for ac in acs:
+            if not by_ac.get(ac) and verdicts.get(ac) != "not_covering":
+                verdicts[ac] = "not_covering"
         rows = [r_ for r_ in d.fields.get("visual_rows") or [] if isinstance(r_, dict)]
         if d.choice == "gap" and verdicts and all(v == "effective" for v in verdicts.values()) and \
                 not (visual_cases and any(r_.get("verdict") != "covered" for r_ in rows)):
@@ -500,6 +490,10 @@ def _judge_coverage(p, cfg, test_cases, covers, raw, ledger, visual_cases, tc_re
             covers = merge_covers(covers, CS.rekey_covers(rep.extras.get("covers"), amap), set(weak))
             continue
         break
+    case_gaps = case_without_cover(acs, members, covers, verdicts)
+    if case_gaps:
+        B.record_code(p, STAGE, "case-uncovered", "graded", reason="cases without a covering test inside a covered AC: %s"
+                      % case_gaps, refs="T-AC-COVER", extra={"grade": "trigger", "case_uncovered": case_gaps})
     vac = [ac for ac, v in verdicts.items() if v == "vacuous"]
     unsure_acs = [ac for ac, v in verdicts.items() if v == "unsure"]
     uncovered = sorted(ac for ac, v in verdicts.items() if v != "effective")
@@ -526,14 +520,39 @@ def _mismatch_field(m):
 VERDICT_ORDER = ("not_covering", "vacuous", "unsure", "effective")
 
 
+def covering(c):
+    """0.102.10: a cover that names a test (`kind: none` / no test = the tester saying no test covers it)."""
+    return isinstance(c, dict) and bool(str(c.get("test") or "").strip()) and \
+        str(c.get("kind") or "").strip().lower() != "none"
+
+
+def case_without_cover(acs, members, covers, verdicts):
+    """0.102.10 (review-0102-9 B1): every case folded into an AC keeps its own cover check — `AC #5: C18; AC #9: C31`
+    for each case no cover names, inside an AC that is otherwise covered (an AC with no cover at all is a gap, not this
+    row). A grading-sheet row, never a loop-back."""
+    by_ac = _covers_by_ac(covers)
+    out = []
+    for ac in acs:
+        cs = (members or {}).get(ac) or []
+        if not cs or not by_ac.get(ac):
+            continue
+        have = set(c.get("case") for c in by_ac[ac])
+        miss = [x for x in cs if x not in have]
+        if miss:
+            out.append("%s: %s" % (ac, ", ".join(miss)))
+    return "; ".join(out)
+
+
 def _unit_verdict(ac, per, members):
     """0.102.9: the judge's verdict on `ac`; when it answered the AC's CASES instead (an older brief's habit), the AC's
     verdict is the weakest of them, and only when every case has one — never a silent `uncovered` for an id mismatch."""
     v = (per.get(ac) or {}).get("verdict")
-    if v:
-        return v
     cs = (members or {}).get(ac) or []
     got = [(per.get(c) or {}).get("verdict") for c in cs]
+    if v:
+        # 0.102.10 (review-0102-9 B1 c): a weaker answer the judge gave for one of the AC's cases is never discarded
+        return min([v] + [g for g in got if g in VERDICT_ORDER], key=lambda x: VERDICT_ORDER.index(x)
+                   if x in VERDICT_ORDER else len(VERDICT_ORDER))
     if cs and all(g in VERDICT_ORDER for g in got):
         return min(got, key=VERDICT_ORDER.index)
     return "unsure"

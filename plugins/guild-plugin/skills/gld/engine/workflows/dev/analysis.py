@@ -486,8 +486,8 @@ NARROW_POST_HOC = "auto-narrow KICKOFF"
 
 
 # 0.102.8 (review-0102-7 M1/M4/M5, lead decision 3): auto-narrow is the INTERPRETATION choice only — it never clears a
-# security concern of any judgment (KICKOFF, every STAKES of the open dimensions, an issue phrase in what it drops or
-# keeps), an `unclear` dimension, or an open dimension whose question is not the choice between the readings
+# security concern of any judgment (KICKOFF, every STAKES of the open dimensions — 0.102.10: their structured field only),
+# an `unclear` dimension, or an open dimension whose question is not the choice between the readings
 # (`about_readings`); and it never drops an AC the Issue itself states — the engine checks the Issue's own AC lines
 # (`issue_ac_lines`) against the narrow reading's AC (`ac_covered`), not the judge's `keeps_issue_ac` alone.
 # 0.102.9 (review-0102-8 M1/M2/m4): the check is strict — broad AC-section titles, top-level items only, verbatim
@@ -496,13 +496,19 @@ ISSUE_AC_HEADING_RE = re.compile(r"^\s{0,3}(#{1,6})\s*(.*?)\s*#*\s*$")
 # 0.102.9 (review-0102-8 M1, lead decision 1): BROAD AC-section titles — #1797's own `## 인수 기준 (초안 — …)` was not
 # one. A title is a markdown heading (any level), a bold line alone (`**수용 기준**`, `__AC__:`) or a short plain line
 # ending in a colon (`受け入れ条件:`) that names acceptance criteria in en / ko / ja.
-ISSUE_AC_TITLE_RE = re.compile(r"acceptance|\bac\b|\bacs\b|criteria|definition of done|\bdod\b|done when|"
+# 0.102.10 (review-0102-9 m2, lead decision 3): only the explicit AC title set — a generic "criteria" (`## Search criteria
+# UI`) is not one.
+ISSUE_AC_TITLE_RE = re.compile(r"acceptance|\bac\b|\bacs\b|definition of done|\bdod\b|done when|"
                                r"受け入れ|受入|完了条件|完了基準|完了の定義|合格基準|"
                                r"수용 ?(기준|조건)|인수 ?(기준|조건)|완료 ?(기준|조건)|합격 ?기준|승인 ?기준|수락 ?기준|"
                                r"성공 ?기준|검수 ?기준", re.I)
 ISSUE_BOLD_TITLE_RE = re.compile(r"^\s{0,3}(\*\*|__)(.+?)\1\s*[:：]?\s*$")
 ISSUE_COLON_TITLE_RE = re.compile(r"^\s{0,3}([^\s\-*+>#|][^:：]{0,40})[:：]\s*$")
-ISSUE_LIST_RE = re.compile(r"^(\s*)(?:[-*+]|\d+[.)])\s+(?:\[[ xX]\]\s*)?(.+?)\s*$")
+# 0.102.10 (review-0102-9 M2/m2, lead decision 3): list items are `-` / `*` / `+` (then a space), `・` / `•`, and numbered
+# items with ASCII or full-width digits (`1.` `1)` then a space; `１．` `1、` `１）`)
+ISSUE_LIST_RE = re.compile(r"^(\s*)(?:[-*+]\s+|[・•]\s*|[0-9０-９]+[.)]\s+|[0-9０-９]+[．）、]\s*)"
+                           r"(?:\[[ xX]\]\s*)?(.+?)\s*$")
+ISSUE_BLANKISH_RE = re.compile(r"^\s*(?:<!--.*?-->\s*)*$|^\s*(?:[-*_]\s*){3,}$")
 
 
 def _ac_title(ln):
@@ -517,19 +523,28 @@ def _ac_title(ln):
     if b:
         return 7, b.group(2)
     c = ISSUE_COLON_TITLE_RE.match(ln)
-    if c and ISSUE_AC_TITLE_RE.search(c.group(1)):
+    if c:
+        # 0.102.10 (lead decision 3): any short `title:` line is a level-7 title — a colon-titled AC section ends at the
+        # next one (`備考:`); only an AC title opens a section
         return 7, c.group(1)
     return None
 
 
 def issue_ac_section(body):
-    """0.102.9: (has an AC section, the AC the Issue body itself states) — quotes excluded. `AC #n: …` lines anywhere,
-    and the TOP-LEVEL list items (review-0102-8 m4: a nested note / link is not an AC) of each section whose title names
-    acceptance criteria (`_ac_title`); a section ends at a title of the same or a higher level — a sub-heading inside it
-    does not end it (review-0102-8 M1). A section the parser reads no AC from is reported (`has` true, list empty) so the
-    caller never takes "unread" as "nothing dropped"."""
+    """(has an AC section, the AC the Issue body itself states) — `issue_ac_read` without the unread count."""
+    return issue_ac_read(body)[:2]
+
+
+def issue_ac_read(body):
+    """0.102.9/0.102.10: (has an AC section, the AC the Issue body itself states, unread lines) — quotes excluded.
+    `AC #n: …` lines anywhere, and the TOP-LEVEL list items (review-0102-8 m4: a nested note / link is not an AC) of each
+    section whose title names acceptance criteria (`_ac_title`); a section ends at a title of the same or a higher level
+    — a sub-heading inside it does not end it (review-0102-8 M1). 0.102.10 (review-0102-9 M2, lead decision 3): every
+    other non-empty line of a section must be an item or an item's continuation (indented, after an item); each line
+    that is neither is counted as unread — a section read in part is never taken as read whole (the caller asks)."""
     out = []
     has = False
+    unread = 0
     level = None                      # the open AC section's level, or None
     items = []                        # (indent, text) of the open section
     lines = unquoted(body or "").split("\n")
@@ -553,10 +568,13 @@ def issue_ac_section(body):
         if m and m.group(4).strip():
             out.append(m.group(4).strip())
             continue
-        if level is not None:
-            li = ISSUE_LIST_RE.match(ln)
-            if li and li.group(2).strip():
-                items.append((len(li.group(1).expandtabs(4)), li.group(2).strip()))
+        if level is None or not ln.strip() or ISSUE_BLANKISH_RE.match(ln):
+            continue
+        li = ISSUE_LIST_RE.match(ln)
+        if li and li.group(2).strip():
+            items.append((len(li.group(1).expandtabs(4)), li.group(2).strip()))
+        elif not (items and len(ln) - len(ln.lstrip()) > min(i for i, _t in items)):
+            unread += 1                 # neither an item nor an indented continuation of one
     close()
     seen, uniq = set(), []
     for a in out:
@@ -564,7 +582,7 @@ def issue_ac_section(body):
         if n and n not in seen:
             seen.add(n)
             uniq.append(a)
-    return has, uniq
+    return has, uniq, unread
 
 
 def issue_ac_lines(body):
@@ -575,7 +593,7 @@ def issue_ac_lines(body):
 # 0.102.9 (review-0102-8 M2, lead decision 1): no similarity — an Issue AC is kept only when the reading carries it
 # VERBATIM; the allowed differences are whitespace, markdown and numbering (`norm_issue_ac`). A rewording, a scope cut
 # ("와 실제 출제" removed), an addition or a negation is a dropped AC (→ a person, never an auto-narrow).
-_AC_NUMBERING_RE = re.compile(r"^\s*(?:(?:[-*+]|\d+[.)]|\(\d+\)|[①-⑳])\s+|\[[ xX]\]\s*|"
+_AC_NUMBERING_RE = re.compile(r"^\s*(?:(?:[-*+]|\d+[.)]|\(\d+\)|[①-⑳])\s+|[・•]\s*|\d+[．）、]\s*|\[[ xX]\]\s*|"
                               r"\**\s*AC\s*#?\s*-?\s*\d+\s*\**\s*(?:\(safety net\))?\s*[:：|.)\-—]\s*)+", re.I)
 _MD_LINK_RE = re.compile(r"!?\[([^\]]*)\]\([^)]*\)")
 
@@ -604,6 +622,8 @@ def ac_covered(issue_ac, acs):
 def issue_ac_check(issue_acs, acs, unread=False):
     """0.102.9 (lead decision 2): the Issue AC kept / dropped by `acs` — one line for a grading-sheet row."""
     if unread:
+        if issue_acs:
+            return "the Issue's AC section was read only in part (a line that is no list item) — not checked"
         return "the Issue has an AC section but no AC was read from it (0 parsed) — not checked"
     if not issue_acs:
         return "the Issue states no AC — nothing checked"
@@ -623,7 +643,6 @@ def narrowest(k, capture, root, irreversible_any, security_concern, globs=None, 
         return None, None, "irreversible area"
     if security_concern:
         return None, None, "security concern"
-    from workflows.dev import conservative as CONS
     owns = getattr(k, "own_footprints", {}) or {}
     cap = dict((e.get("token"), e) for e in capture)
     norm = lambda x: str(x or "").strip().casefold()                  # noqa: E731
@@ -657,11 +676,9 @@ def narrowest(k, capture, root, irreversible_any, security_concern, globs=None, 
     if len(found) != 1:
         return None, None, "no single strictly narrowest reading" if not found else "two narrowest readings"
     tok, own, drops = found[0]
-    # 0.102.8: what it drops or keeps names a security issue → a person (the judge's field is the primary signal)
-    if any(CONS.security_text(x) for x in list(drops) + list(own.get("ac") or [])):
-        return None, None, "security issue phrase in the narrow reading's drops / AC"
     if issue_ac_unread:
-        return None, None, "the Issue has an AC section but no AC was read from it"
+        return None, None, ("the Issue's AC section was read only in part" if issue_acs else
+                            "the Issue has an AC section but no AC was read from it")
     kept = narrow_acs(k, tok, own)
     lost = [a for a in issue_acs or () if not ac_covered(a, kept)]
     if lost:

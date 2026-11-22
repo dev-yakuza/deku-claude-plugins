@@ -74,11 +74,12 @@ class M1StakesSecurity(unittest.TestCase):
         self.assertEqual(r.kind, "PAUSE", r.token())
 
     def test_an_issue_phrase_in_what_it_drops_asks(self):
-        # the judges said false; the dropped part itself names a secret exposure → a person
+        # 0.102.10 (lead decision 5): the judges said false — an issue phrase in what it drops is no signal of its own
+        # (the text trigger is gone); the judges' structured fields are what refuse (the tests above)
         k = T7._nested({"drops": ["API 키가 로그에 평문으로 남는 문제 수정"]})
         h, r = _analyze(self, k, _sec_stakes(False))
-        self.assertIsNone(_kb(h).get("auto_narrow"))
-        self.assertEqual(r.kind, "PAUSE", r.token())
+        self.assertEqual(_kb(h).get("auto_narrow"), _kb(h).get("chosen"))
+        self.assertNotEqual(r.kind, "PAUSE", r.token())
 
     def test_no_concern_anywhere_still_narrows(self):
         h, r = _analyze(self, T7._nested(), _sec_stakes(False))
@@ -289,7 +290,9 @@ class m1EveryGroup(unittest.TestCase):
     def test_the_same_security_text_asks_in_every_post_hoc_group(self):
         # r0102_7/test_r4 — HANDOFF / INTEGRATE had no field: they ran post hoc
         qa = _S("QA", [("qa", "QA report: " + ISSUE), ("candidates", "-")])
-        self.assertFalse(CONS.posthoc(_P(), "QA", qa))
+        # 0.102.10 (lead decision 5): the text alone is no signal; a decision without the field still asks
+        self.assertTrue(CONS.posthoc(_P(), "QA", qa))
+        self.assertFalse(CONS.posthoc(_P(), "QA", qa, decision=decision("pass", {"verdict": "pass"})))
         for g, parts, ch in (("HANDOFF", [("boundary", "design→execute"), ("issue", ISSUE)], "ok_with_assumption"),
                              ("INTEGRATE", [("issue", ISSUE)], "clean")):
             with self.subTest(group=g):
@@ -317,20 +320,28 @@ FN = ["SQLインジェクションの恐れがある", "검색어가 SQL 인젝�
 
 
 class m2TextTrigger(unittest.TestCase):
+    """0.102.10 (lead decision 5): the text trigger is gone — the same sentences decide nothing; the QA judge's
+    structured `security_concern` does (true → a person, false → post hoc)."""
+
+    def _sec(self, t, field):
+        return CONS.security(_S("QA", [("qa", "QA report: " + t), ("candidates", "-")]),
+                             decision("pass", {CONS.SECURITY_FIELD: field, CONS.SECURITY_REASON: "r"}))
+
     def test_false_positives(self):
-        # r0102_7/test_r5
-        self.assertEqual([t for t in FP if CONS.security_text(t)], [])
+        # r0102_7/test_r5 — no longer a text question
+        self.assertFalse(hasattr(CONS, "security_text"))
+        self.assertEqual([t for t in FP if self._sec(t, False) or not self._sec(t, True)], [])
 
     def test_false_negatives(self):
-        self.assertEqual([t for t in FN if not CONS.security_text(t)], [])
+        self.assertEqual([t for t in FN if self._sec(t, False) or not self._sec(t, True)], [])
 
     def test_the_reason_comes_from_what_triggered(self):
         spec = _S("QA", [("qa", "QA report: API 키가 로그에 평문으로 기록됨"), ("candidates", "-")])
         quiet = decision("pass", {CONS.SECURITY_FIELD: False, CONS.SECURITY_REASON: "해당 없음"})
-        self.assertTrue(CONS.security(spec, quiet))
-        self.assertEqual(CONS.security_why(spec, quiet), "입력에 보안 사안")
+        self.assertFalse(CONS.security(spec, quiet))
         loud = decision("pass", {CONS.SECURITY_FIELD: True, CONS.SECURITY_REASON: "키 노출"})
         self.assertEqual(CONS.security_why(spec, loud), "키 노출")
+        self.assertEqual(CONS.security_why(_S("DE-ARB", [("role", "security returned BLOCKED")])), "security 역할의 판단")
 
 
 # ---- m3: the EX-ARB security BLOCKER rule under the unverified coercion ---------------------------------------------

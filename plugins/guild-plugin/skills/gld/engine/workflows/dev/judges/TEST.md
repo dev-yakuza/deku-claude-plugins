@@ -9,7 +9,9 @@ The suite already ran green (the engine ran it; the raw output is in the brief).
 `covered_by` lists the test references you relied on (copy them from the tester's `covers`).
 The brief names the ids to judge ("Judge exactly these ids") — give one `ac[]` entry per id and no other id.
 When cases are folded into an AC (`AC #3 (cases C7, C8)`), judge the AC: `effective` only when its cases' behaviour is
-covered by effective tests; the tester's covers are already listed under the AC id (`[case C7]`).
+covered by effective tests; the tester's covers are already listed under the AC id (`[case C7]`). If you also answer
+a case id, your weakest answer for the AC or any of its cases is the AC's verdict. An AC with no cover at all is never
+effective (the code makes it a gap); a case no cover names is recorded for grading.
 Visual rows: `covered` only when a comparing test that passed is named for that row.
 Your `effective` is re-checked by code (an assertion line must exist, and for new behaviour the
 test must fail with the implementation reverted) — do not call a test effective on its name alone.

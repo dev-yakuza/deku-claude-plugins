@@ -174,23 +174,24 @@ class M1StructuredField(_Briefs):
 
 
 class M1TextTrigger(_Briefs):
-    """The extra trigger (no decision yet): issue phrases in en / ko / ja — never feature or bug words (m1)."""
+    """0.102.7 m1's extra text trigger; 0.102.10 (lead decision 5) removed it — no brief text decides security."""
 
     def _check(self, rows):
         bad = ["%s: security=%s, want %s" % (n, CONS.security(m()), w) for n, m, w in rows if CONS.security(m()) != w]
         self.assertEqual(bad, [], "\n".join(bad))
 
     def test_issue_phrases_in_the_repos_language(self):
+        # 0.102.10 (lead decision 5): the text trigger is gone — an issue phrase in the brief is no signal by itself
         self._check([
-            ("QA ko", lambda: self._qa(["API 키가 로그에 평문으로 기록됨 — 보안 문제"]), True),
-            ("QA ja", lambda: self._qa(["APIキーが平文でログに出力される（セキュリティ上の問題）"]), True),
-            ("DE-ARB ko", lambda: self._dearb("tech-lead", "리프레시 토큰을 SharedPreferences 에 평문 저장 — 보안 취약점"), True),
-            ("STAKES ko", lambda: self._stakes("tech-lead", "토큰 저장 위치가 다른 앱에 노출된다(보안)"), True),
-            ("QA secret", lambda: self._qa(["the Firebase admin secret is committed in lib/config.dart"]), True),
-            ("QA credentials", lambda: self._qa(["store credentials are hard-coded in the app bundle"]), True),
-            ("QA password", lambda: self._qa(["the user's password is sent to the analytics event"]), True),
-            ("QA unencrypted", lambda: self._qa(["the refresh token is stored unencrypted on disk"]), True),
-            ("DE-ARB exposed", lambda: self._dearb("tech-lead", "the admin endpoint is exposed without a check"), True),
+            ("QA ko", lambda: self._qa(["API 키가 로그에 평문으로 기록됨 — 보안 문제"]), False),
+            ("QA ja", lambda: self._qa(["APIキーが平文でログに出力される（セキュリティ上の問題）"]), False),
+            ("DE-ARB ko", lambda: self._dearb("tech-lead", "리프레시 토큰을 SharedPreferences 에 평문 저장 — 보안 취약점"), False),
+            ("STAKES ko", lambda: self._stakes("tech-lead", "토큰 저장 위치가 다른 앱에 노출된다(보안)"), False),
+            ("QA secret", lambda: self._qa(["the Firebase admin secret is committed in lib/config.dart"]), False),
+            ("QA credentials", lambda: self._qa(["store credentials are hard-coded in the app bundle"]), False),
+            ("QA password", lambda: self._qa(["the user's password is sent to the analytics event"]), False),
+            ("QA unencrypted", lambda: self._qa(["the refresh token is stored unencrypted on disk"]), False),
+            ("DE-ARB exposed", lambda: self._dearb("tech-lead", "the admin endpoint is exposed without a check"), False),
         ])
 
     def test_feature_and_bug_words_are_not_issues(self):

@@ -465,8 +465,9 @@ class EffectiveRealTests(unittest.TestCase):
         return r
 
     def test_an_acs_cited_tests_must_each_react(self):
-        # 0.102.6 (review-0102-5 M4 a): `en` still passes with the impl reverted — the AC is `unsure` naming it (and
-        # that `ko` reacted); 0.102.5 called it `pass`. An unsure check never changes the verdict: graded after
+        # 0.102.6 (review-0102-5 M4 a): `en` still passes with the impl reverted — the AC was `unsure` naming it.
+        # 0.102.10 (review-0102-9 m4, lead decision 6): `ko` reacted, so the AC itself reacted — `pass`, `en` named as a
+        # regression guard (no grading row for a mixed AC)
         r = self._repo()
 
         def reverted(cwd):
@@ -479,9 +480,9 @@ class EffectiveRealTests(unittest.TestCase):
         cfg = {"commands": {"test": "flutter test"}}
         covers = {"AC #1": [{"kind": "new", "test": "test/a_test.dart::g en"}, {"kind": "new", "test": "test/a_test.dart::g ko"}]}
         out, _meta = EFF.run(p, cfg, ["AC #1"], covers, "main", ["lib/a.dart"])
-        self.assertEqual(out["AC #1"].result, "unsure", out["AC #1"].why)
-        self.assertEqual(out["AC #1"].test, "test/a_test.dart::g en")
-        self.assertIn("reacted: test/a_test.dart::g ko", out["AC #1"].why)
+        self.assertEqual(out["AC #1"].result, "pass", out["AC #1"].why)
+        self.assertIn("reacts to the reverted impl (test/a_test.dart::g ko)", out["AC #1"].why)
+        self.assertIn("regression guard: test/a_test.dart::g en", out["AC #1"].why)
 
     def test_a_test_that_fails_alone_runs_in_its_file(self):
         r = self._repo()

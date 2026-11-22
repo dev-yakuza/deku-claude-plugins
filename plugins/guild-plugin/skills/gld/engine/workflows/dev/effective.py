@@ -310,9 +310,8 @@ def has_assertion(snippet, runner):
 
 # 0.102.9 (word_app #1797 D26/D40): a golden test whose body is one call of a same-file helper
 # (`await _shoot(tester, …)` → `await expectLater(find…, matchesGoldenFile(…))`) has its assertion in the helper — the
-# static check follows calls of functions DEFINED IN THE SAME FILE (transitively, each once) before it calls the test
-# assertion-free. A helper imported from elsewhere is not read (the check stays as strict as before for it).
-CALL_RE = re.compile(r"(?<![\w.$])([A-Za-z_$][\w$]*)\s*(?:<[^<>()]*>)?\s*\(")
+# static check follows calls of functions DEFINED IN THE SAME FILE before it calls the test assertion-free (0.102.10:
+# only as narrowed below). A helper imported from elsewhere is not read (the check stays as strict as before for it).
 NOT_HELPERS = frozenset(("if", "for", "while", "switch", "catch", "return", "await", "function", "test", "testWidgets",
                          "group", "it", "describe", "setUp", "tearDown", "setUpAll", "tearDownAll", "main", "print"))
 
@@ -336,30 +335,121 @@ def _helper_body(code, name, runner):
     return None
 
 
-def helper_assertion(text, snippet, runner, depth=3):
-    """(bool, line_offset|None): an assertion inside a same-file helper the test calls (line = the call's line)."""
+# 0.102.10 (review-0102-9 M1, lead decision 2): a helper counts only when the test body calls it UNCONDITIONALLY at its
+# top level (a statement of its own — not inside an `if`, a closure or a callback argument), at most two helpers deep,
+# and only for a real matcher assertion of the helper's own top level (`expect(x, matcher)` / `expectLater(x, matcher)`,
+# jest `expect(x).toY(…)`) — never a bare truthy / not-null sanity check.
+SANITY_MATCHERS = frozenset(("isNotNull", "isTrue", "anything", "returnsNormally", "toBeTruthy", "toBeDefined"))
+CALL_STMT_RE = re.compile(r"^(?:await\s+)?([A-Za-z_$][\w$]*)\s*(?:<[^<>()]*>)?\s*\(")
+
+
+def _top_statements(block):
+    """The top-level statements of a block's contents (masked code: no strings, no comments)."""
+    out, depth, start = [], 0, 0
+    for i, c in enumerate(block):
+        if c in "({[":
+            depth += 1
+        elif c in ")}]":
+            depth -= 1
+            if depth == 0 and c == "}":
+                out.append(block[start:i + 1])
+                start = i + 1
+        elif c == ";" and depth == 0:
+            out.append(block[start:i])
+            start = i + 1
+    out.append(block[start:])
+    return [x.strip() for x in out if x.strip()]
+
+
+def _block_statements(code, runner):
+    """Top-level statements of a test's callback block (`test('n', (t) async { … })`) or of a helper body (`{ … }` /
+    `=> expr`)."""
+    code = code.strip()
+    arrow = re.match(r"^(?:async\*?|sync\*)?\s*=>", code)
+    if arrow:
+        return [code[arrow.end():].strip()]
+    open_ = code.find("{")
+    if open_ < 0:
+        return []
+    end = _balanced_end(code, open_, runner)
+    return _top_statements(code[open_ + 1:end - 1]) if end else []
+
+
+def _split_args(args):
+    out, depth, start = [], 0, 0
+    for i, c in enumerate(args):
+        if c in "({[":
+            depth += 1
+        elif c in ")}]":
+            depth -= 1
+        elif c == "," and depth == 0:
+            out.append(args[start:i])
+            start = i + 1
+    out.append(args[start:])
+    return [x.strip() for x in out if x.strip()]
+
+
+def matcher_assertion(stmt, runner):
+    """A statement that IS a real matcher assertion (see above)."""
+    st = re.sub(r"^await\s+", "", stmt.strip())
+    m = re.match(r"^(expect|expectLater)\s*\(", st)
+    if not m:
+        return False
+    end = _balanced_end(st, m.end() - 1, runner)
+    if not end:
+        return False
+    args = _split_args(st[m.end():end - 1])
+    if not args or _constant_only(args[0]):
+        return False
+    if runner in ("jest", "vitest"):
+        chain = re.findall(r"\.(\w+)\s*\(", st[end:])
+        if not chain:
+            return False
+        neg = ".not." in st[end:]
+        return not (chain[-1] in SANITY_MATCHERS or (neg and chain[-1] in ("toBeNull", "toBeUndefined")))
+    if len(args) < 2:
+        return False
+    name = re.match(r"^[A-Za-z_$][\w$]*", args[1])
+    return not (name and name.group(0) in SANITY_MATCHERS and args[1].strip() == name.group(0))
+
+
+def _called_helpers(stmts):
+    """Names of the calls that are whole top-level statements (`[await] name(…)`)."""
+    out = []
+    for st in stmts:
+        m = CALL_STMT_RE.match(st)
+        if not m or m.group(1) in NOT_HELPERS or re.match(r"^(expect|fail)", m.group(1)):
+            continue
+        end = _balanced_end(st, m.end() - 1, "dart")
+        if end and not st[end:].strip():
+            out.append((m.group(1), st))
+    return out
+
+
+def helper_assertion(text, snippet, runner, depth=2):
+    """(bool, line_offset|None): a real matcher assertion at the top level of a same-file helper the test calls
+    unconditionally at its own top level (≤ `depth` helpers deep); line = the call's line in the test."""
     if runner not in ("flutter", "dart", "jest", "vitest") or not text or not snippet:
         return False, None
     code = masked(text, runner)
     body = masked(snippet, runner)
     seen = set()
-    todo = [(body, None, 0)]
+    todo = [(_block_statements(body[body.find("{"):] if "{" in body else "", runner), None, 0)]
     while todo:
-        cur, line0, d = todo.pop(0)
-        for m in CALL_RE.finditer(cur):
-            name = m.group(1)
-            if name in NOT_HELPERS or name in seen or re.match(r"^(expect|fail)", name):
+        stmts, line0, d = todo.pop(0)
+        for name, st in _called_helpers(stmts):
+            if name in seen:
                 continue
             seen.add(name)
             hb = _helper_body(code, name, runner)
             if not hb:
                 continue
-            line = line0 if line0 is not None else body.count("\n", 0, m.start())
-            ok, _o = has_assertion(hb, runner)
-            if ok:
+            line = line0 if line0 is not None else body.count("\n", 0, max(body.find(st), 0))
+            hst = _block_statements(hb, runner)
+            if any(matcher_assertion(x, runner) for x in hst):
                 return True, line
             if d + 1 < depth:
-                todo.append((hb, line, d + 1))
+                todo.append((hst, line, d + 1))
     return False, None
 
 
@@ -1317,29 +1407,34 @@ def _phases(p, runner, pending, tt, base, impl, out, timeout_s):
 
 def _rerun(p, runner, tt, rows, timeout_s):
     """The AC's cited (new) tests re-run with the impl reverted. 0.102.6 (review-0102-5 M4 a): the AC's OWN cited tests
-    must react — every one of them fails with an assertion; one that still passes (or fails some other way) makes the
-    AC `unsure` with that test named (a reaction of another cited test no longer hides it: it may be another AC's
-    test). An unsure check does not change the verdict (0.102.5) — it is recorded (`check_unsure`) and graded after.
+    must react — every one of them fails with an assertion; one that fails some other way makes the AC `unsure` with
+    that test named. 0.102.10 (lead decision 6): one that still PASSES beside at least one that reacted is a regression
+    guard — the AC itself reacted (`pass`, the guard named); only an AC none of whose tests reacted is `unsure`.
+    An unsure check does not change the verdict (0.102.5) — it is recorded (`check_unsure`) and graded after.
     Returns (kind, cv, line, cmd, reacted): `assertion` only when all reacted; else a compile / collection error first
     (the partial revert retries it), else the first row that did not react, with the names of those that did."""
     files = getattr(tt, "file_cmds", None) or set()
-    load, other, reacted = None, None, []
+    load, other, reacted, still = None, None, [], []
     for cv, path, name, line, cmd in rows:
         r = p.check(cmd, tt.path, "tester", timeout_s, [tt.path])
         kind = _classify(p, runner, r, path, name, cmd, files)
         if kind == "assertion":
             reacted.append(cv.get("test") or name)
             continue
+        if kind == "passed":
+            still.append(cv.get("test") or name)
         if kind == "load_error" and load is None:
             load = (kind, cv, line, cmd)
         if other is None:
             other = (kind, cv, line, cmd)
     if load is not None:
         return load + (reacted,)
-    if other is not None:
+    if other is not None and not (reacted and len(still) == len(rows) - len(reacted)):
         return other + (reacted,)
+    # 0.102.10 (review-0102-9 m4, lead decision 6): the AC itself reacted — a cited test that still passes beside a
+    # reacting one is a regression guard (a case folded into the AC), recorded on the outcome, never an `unsure` row
     cv, _path, _name, line, cmd = rows[0]
-    return ("assertion", cv, line, cmd, reacted)
+    return ("assertion", cv, line, cmd, reacted, still)
 
 
 def _outcome(ac, rows, res, second=False):
@@ -1347,8 +1442,11 @@ def _outcome(ac, rows, res, second=False):
     reacted = list(res[4]) if len(res) > 4 else []
     t = cv.get("test")
     if kind == "assertion":
-        return CheckOutcome(ac, t, "pass", "assertion present; every cited test reacts to the reverted impl", kind,
-                            line, cmd)
+        still = list(res[5]) if len(res) > 5 else []
+        why = ("assertion present; every cited test reacts to the reverted impl" if not still else
+               "assertion present; reacts to the reverted impl (%s); still passing — regression guard: %s"
+               % (", ".join(reacted[:3]), ", ".join(still[:3])))
+        return CheckOutcome(ac, t, "pass", why, kind, line, cmd)
     also = "; reacted: %s" % ", ".join(reacted[:3]) if reacted else ""
     if kind in ("passed", "runtime", "none_ran"):
         why = {"passed": "test still passes with the impl reverted",

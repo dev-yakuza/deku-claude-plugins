@@ -206,17 +206,23 @@ FN = ["비밀번호를 로그로 출력한다", "パスワードをログ出力�
 
 
 class m1TextTrigger(unittest.TestCase):
+    """0.102.10 (lead decision 5): no text trigger — every sentence follows the QA judge's structured field."""
+
+    def _sec(self, t, field):
+        return CONS.security(T8._S("QA", [("qa", "QA report: " + t), ("candidates", "-")]),
+                             decision("pass", {CONS.SECURITY_FIELD: field, CONS.SECURITY_REASON: "r"}))
+
     def test_false_positives(self):
-        # r0102_8/test_r3 (+ more of each kind)
         for t in FP:
             with self.subTest(t=t):
-                self.assertFalse(CONS.security_text(t))
+                self.assertFalse(self._sec(t, False))
+                self.assertTrue(self._sec(t, True))
 
     def test_false_negatives(self):
-        # r0102_8/test_r3 (+ more of each kind)
         for t in FN:
             with self.subTest(t=t):
-                self.assertTrue(CONS.security_text(t))
+                self.assertFalse(self._sec(t, False))
+                self.assertTrue(self._sec(t, True))
 
 
 # ---- m2: the auditor's own run dir only ------------------------------------------------------------------------------
@@ -433,10 +439,13 @@ class R1797bHelperAssertion(unittest.TestCase):
 
 class R1797cUnsureCarriesItsReason(unittest.TestCase):
     def test_check_detail_names_why(self):
-        # AC #9's cases have no cover — the judge (wrongly) says effective; the check is `unsure` WITH its reason
-        h, r = _stage(self, [judge_test(ACS)], cases=["C%d" % n for n in range(1, 31)])
-        b = _tblocks(h)[0]
-        self.assertIn("AC #9|None|None|None|None|no covering test named by the tester", b.get("check_detail"))
+        # AC #9's cases have no cover — the judge (wrongly) says effective. 0.102.10 (review-0102-9 B1): an AC with no
+        # covering test is never effective — a gap (repair, then the loop-back); every check on record carries its reason
+        h, r = _stage(self, [judge_test(ACS)] * 2, cases=["C%d" % n for n in range(1, 31)],
+                      more_roles=[role("DONE", covers=[])])
+        self.assertNotEqual(r.token(), "OK ADVANCE: qa")
+        b = _tblocks(h)[-1]
+        self.assertIn("AC #9", b.get("choice").split(";uncovered:")[1])
         for part in (b.get("check_detail") or "").split(";"):
             self.assertNotEqual(part.split("|")[-1], "None", part)
 
@@ -461,12 +470,11 @@ class R1797dLoopBackWithoutTestChange(unittest.TestCase):
         return h, T.run(h.p)
 
     def test_the_same_gap_without_a_test_change_stops_with_what_happened(self):
-        from guildcore.records import needs_human as NH
+        # 0.102.10 (review-0102-9 m1, lead decision 4): `unchanged_since` is gone — the same case is the old stagnation
+        # stop, with its `stagnation` capture
         h, r = self._red(True, extra_commit="lib/b.dart")
-        self.assertEqual(r.token(), "OK PAUSE: needs-human — loop-back without test change")
-        line = NH.from_comments(h.gh.comments(7))[-1].cause_line
-        self.assertTrue(line.startswith("defect: loop-back would repeat loop-back 1 — no test file changed since it"),
-                        line)
+        self.assertTrue(r.token().startswith("OK PAUSE: needs-human — stagnant loop-back — "), r.token())
+        self.assertIn("stagnation", [c[0] for c in h.captures])
 
     def test_a_test_change_or_no_recorded_head_is_the_old_path(self):
         _h, r = self._red(True, extra_commit="test/b_test.dart")
@@ -484,13 +492,6 @@ class R1797dLoopBackWithoutTestChange(unittest.TestCase):
         self.assertEqual(r.token(), "OK LOOPBACK: execute")
         self.assertEqual(LB.from_comments(h.gh.comments(7)).latest_active().get("head"),
                          git(wt, "rev-parse", "HEAD").strip())
-
-    def test_test_paths(self):
-        for x, want in (("test/a_test.dart", True), ("lib/a.dart", False), ("src/a.test.ts", True),
-                        ("tests/test_x.py", True), ("docs/specs/7/test-cases.md", True),
-                        ("test/features/x/goldens/a.png", True), ("lib/testing_utils.dart", False)):
-            with self.subTest(path=x):
-                self.assertEqual(T.is_test_path(x), want)
 
 
 if __name__ == "__main__":

@@ -112,33 +112,6 @@ def run(p, stage, from_, reason, signature, decided_human=False, current_label=N
     return move_label(p, label, decided_human)                             # steps 6–7
 
 
-def unchanged_since(p, from_, signature, is_test_path):
-    """0.102.9 (word_app #1797 loop-back cap): (n, head) of an EARLIER active `from_` loop-back whose signature already
-    contained this one while no file `is_test_path` accepts changed between its recorded `head` and HEAD — the developer's
-    run changed no test, the same gap came back: another loop-back cannot change the outcome (the gap is the engine's
-    reading — the id mapping or a check — or needs a person). None otherwise (or no `head` recorded)."""
-    rec = _record(p)
-    if rec is None:
-        return None
-    sig = LB.signature_set(_sig(signature))
-    if not sig:
-        return None
-    for b in reversed(rec.active()):
-        if b.get("from") != from_ or not b.get("head"):
-            continue
-        if not sig <= LB.signature_set(b.get("signature") or ""):
-            continue
-        head = markers.clean(b.get("head")).strip()
-        if not (p.root and G.ok(p.root, "cat-file", "-e", "%s^{commit}" % head)):
-            continue                                 # an unknown commit proves nothing
-        out = G.run(p.root, "diff", "--name-only", "%s..HEAD" % head, check=False)
-        out = out.decode() if isinstance(out, bytes) else str(out or "")
-        changed = [x for x in out.split("\n") if x.strip()]
-        if not any(is_test_path(x) for x in changed):
-            return int(LB.NUMBERED_RE.match(markers.clean(b.heading)).group(1)), head
-    return None
-
-
 def _same_pending(body, from_, reason, sig, decided_human):
     """K2-m5: a resumed write must not append a twin — the latest active block, unconsumed, with
     the same from/reason/signature/decided IS this loop-back (its `at:` differs)."""
