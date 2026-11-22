@@ -1565,7 +1565,7 @@ def demote(root, cfg, tid, ids, kind=None, reason=None, own=False):
     """A captured screenshot becomes a human's: taken again (`kind` — a retake with the `--human`
     loopback's state change in the same write, so the writer runs next) or the human's own file
     from the inbox (`own` — on to import). State first, then the file moves (07 §2.5)."""
-    from .store import load_state, open_research_fix, save_state
+    from .store import load_state, open_research_fix, open_trim, save_state
     _human_only("demote")
     ids = _ids(ids)
     if bool(kind) == bool(own):
@@ -1578,7 +1578,7 @@ def demote(root, cfg, tid, ids, kind=None, reason=None, own=False):
                           "`HRD loopback --retake`")
     if open_research_fix(st):
         raise HeraldError("a research fix is open — the researcher runs first (`atoms/_stages.md` § research)")
-    if (st.get("trim") or {}).get("status") == "open":
+    if open_trim(st):
         raise HeraldError("a trim is open — `HRD trim --topic %s --abort` first (it restores the article)" % tid)
     rec = st.get("screenshots") or {}
     by_id = {s.get("id"): s for s in (load_manifest(root, tid) or {}).get("shots") or [] if isinstance(s, dict)}

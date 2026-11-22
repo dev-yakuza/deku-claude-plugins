@@ -1073,8 +1073,9 @@ class ReviewRound1Tests(SceneCase):
                 from hrdlib.hashing import bundle_hash
                 self.write(W + "/verify.md", "ok\n")
                 self.write(W + "/verify.json", json.dumps({"body_hash": bundle_hash(self.root, self.cfg, SLUG),
-                                                           "counts": {"supported": 1, "unsupported": 0,
-                                                                      "contradicted": 0, "unmapped": 0}}))
+                                                           "counts": {"supported": 0, "unsupported": 0,
+                                                                      "contradicted": 0, "unmapped": 0},
+                                                           "verdicts": []}))
                 st = self.state()
                 st["stage"] = "verify"
                 store.save_state(self.root, TID, st)

@@ -15,7 +15,7 @@ which denies base commits/pushes, merges outside `HRD_AUTO_PRS`, and deploys.
    no budget enforcement).
 2. Tell the user what will happen: N topics (`HRD select --n N`), mode (`approve` → PRs only;
    `auto` → up to `throttle.max_per_day` auto publishes today, excluding PRs with dismissals,
-   assumptions, deferred audit findings, a skipped audit round, a trim, framings or image changes), the per-article budget, and that the run may take a long
+   assumptions, deferred audit findings, a skipped audit round, a trim or a narrowing, framings or image changes), the per-article budget, and that the run may take a long
    time: on a Claude usage limit it waits until the reset (up to 5h per wait, 12h per run) and resumes
    the topic; a longer limit stops the run cleanly. While it waits, every `/hrd` command in this
    repo is blocked by the checkout lock (the refusal names the pid to `kill`).

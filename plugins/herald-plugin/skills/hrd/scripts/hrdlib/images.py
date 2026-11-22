@@ -2678,7 +2678,7 @@ def reject(root, cfg, tid, iid, reason=None, drop=False, refetch=False, regenera
     human's "a generic AI picture instead" for an external image of a place or thing; an agent
     drops a place's photo only after two rejects of it."""
     from .shots import _agent_allowed, hold_note
-    from .store import load_state, open_research_fix, save_state
+    from .store import load_state, open_research_fix, open_trim, save_state
     _human_only("reject")
     if sum(map(bool, (drop, refetch, regenerate))) > 1:
         raise HeraldError("give at most one of --drop, --refetch and --regenerate")
@@ -2694,7 +2694,7 @@ def reject(root, cfg, tid, iid, reason=None, drop=False, refetch=False, regenera
         raise HeraldError("reject is for an image waiting in draft — later, a loopback with --theme images")
     if open_research_fix(st):
         raise HeraldError("a research fix is open — the researcher runs first")
-    if (st.get("trim") or {}).get("status") == "open":
+    if open_trim(st):
         raise HeraldError("a trim is open — `HRD trim --topic %s --abort` first" % tid)
     it = next((i for i in _items(load_manifest(root, tid)) if i.get("id") == iid), None)
     scene = bool(it) and it.get("kind") == "scene"

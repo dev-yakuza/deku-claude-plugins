@@ -3,7 +3,7 @@
 Picks the next queued topic (planning first when the queue is empty), writes it to a PR and
 ships it: brief → … → PR → merge → deploy → URL check, one article per run, with no human look
 (0.20.0). Running it is the human's request to publish this article without reading it first, so
-`ship` accepts the agents' logged decisions, a trim, the fact-checker's framings and Herald-made
+`ship` accepts the agents' logged decisions, trims (narrowings included), the fact-checker's framings and Herald-made
 images (`--consent`, `ship.md`), and — the run carries `write --ship`'s mark — screenshots and
 external images a fresh agent review confirmed in draft (`atoms/_images.md` §2a); the guard lets
 the verified merge and the deploy through (`ship.md` §6–§7). Still stopping it: a blocking
@@ -27,7 +27,7 @@ no lock itself: `plan` and `write` take their own.
    questions still apply (`atoms/_contract.md` §C).
 6. Report in one short block: the published URL and what was accepted unread (ship §10: the
    accepted exclusions, the deferred auditor findings, dismissals and assumptions with their
-   reasons, the trimmed sentences, the framings and the sentences they covered, the Herald-made images,
+   reasons, the trimmed sentences and narrowings (before → after), the framings and the sentences they covered, the Herald-made images,
    the images and screenshots the agent review confirmed or turned down — id, kind, its one-line
    note (`HRD image status` `agent`, `HRD shot status` `agent_confirmed`) — a deferred or
    out-of-scope MAJOR is published as is, so name each one) — or where it stopped and what to do next

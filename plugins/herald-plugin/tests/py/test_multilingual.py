@@ -191,12 +191,24 @@ class TranslationFlow(MultiCase):
     def tpass(self, tid, check=True):
         return self.hrd("stage", "pass", "--topic", tid, "--stage", "translation", check=check)
 
+    def verdicts(self, lang=None):
+        """`supported` for every entry of the language's claims map (0.24.0, 15 D1)."""
+        name = "claims-map.%s.json" % lang if lang else "claims-map.json"
+        with open(os.path.join(self.root, self.w + name), encoding="utf-8") as f:
+            sents = json.load(f).get("sentences") or []
+        return [{"text": e["text"], "verdict": "supported", "claims": e["claims"]} for e in sents]
+
+    def ver_pass(self, slug):
+        vs = self.verdicts()
+        return {"counts": {"supported": len(vs), "unsupported": 0, "contradicted": 0, "unmapped": 0},
+                "verdicts": vs, "body_hash": bundle_hash(self.root, self.cfg, slug)}
+
     def verify(self, tid, slug, langs=("ko", "ja")):
         by = {"en": {"hash": self.hrd("hash", "--slug", slug, "--source")[0]["hash"],
-                     "counts": {"supported": 1, "unsupported": 0, "contradicted": 0}}}
+                     "counts": {"supported": 1, "unsupported": 0, "contradicted": 0}, "verdicts": self.verdicts()}}
         for l in langs:
             by[l] = {"hash": self.hrd("hash", "--slug", slug, "--lang", l)[0]["hash"],
-                     "counts": {"supported": 1, "unsupported": 0, "contradicted": 0}}
+                     "counts": {"supported": 1, "unsupported": 0, "contradicted": 0}, "verdicts": self.verdicts(l)}
         ver = {"counts": {"supported": 1 + len(langs), "unsupported": 0, "contradicted": 0, "unmapped": 0},
                "body_hash": bundle_hash(self.root, self.cfg, slug), "by_lang": by}
         self.write(self.w + "verify.md", "ok")
@@ -435,7 +447,7 @@ class TranslationStageTests(TranslationFlow):
         st = store.load_state(self.root, tid)
         self.assertEqual(st["stage"], "verify")
         self.write(self.w + "verify.md", "ok")
-        self.write(self.w + "verify.json", json.dumps(dict(VER_PASS, body_hash=bundle_hash(self.root, self.cfg, slug))))
+        self.write(self.w + "verify.json", json.dumps(self.ver_pass(slug)))
         self.hrd("stage", "pass", "--topic", tid, "--stage", "verify")
 
     def test_draft_requires_map_text_in_body(self):
@@ -590,7 +602,7 @@ class LaterTranslationTests(TranslationFlow):
         """A published Herald article with no translation (languages []), on main."""
         self.to_critique(tid, slug, languages=[])
         self.write(self.w + "verify.md", "ok")
-        self.write(self.w + "verify.json", json.dumps(dict(VER_PASS, body_hash=bundle_hash(self.root, self.cfg, slug))))
+        self.write(self.w + "verify.json", json.dumps(self.ver_pass(slug)))
         self.hrd("stage", "pass", "--topic", tid, "--stage", "verify")
         self.hrd("finalize", "--topic", tid)
         self.hrd("ledger", "record", "--topic", tid)

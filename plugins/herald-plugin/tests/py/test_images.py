@@ -1049,8 +1049,9 @@ class StagePassTests(ImageCase):
 
         def verify(sentence, **extra):
             self.write(W + "/verify.json", json.dumps(dict({"body_hash": cur, "counts": {
-                "supported": 1, "unsupported": 1, "contradicted": 0, "unmapped": 0},
-                "unsupported_sentences": [sentence]}, **extra)))
+                "supported": 0, "unsupported": 1, "contradicted": 0, "unmapped": 1},
+                "unsupported_sentences": [sentence], "verdicts": [
+                    {"text": sentence, "verdict": "unsupported", "claims": [], "why": "no claim"}]}, **extra)))
         verify("Someone")  # a value inside the attribution (the credit)
         with self.assertRaises(Exception) as cm:
             store.trim_begin(self.root, self.cfg, TID)
@@ -1061,7 +1062,7 @@ class StagePassTests(ImageCase):
         self.assertIn("unsupported text in a diagram is never trimmed", str(cm.exception))
         verify("That is all.")  # the same sentence, nothing about images: the trim opens
         store.trim_begin(self.root, self.cfg, TID)
-        self.assertEqual(self.state()["trim"]["status"], "open")
+        self.assertEqual(self.state()["trims"][-1]["status"], "open")
 
     def test_ship5_settings_change_needs_no_render(self):
         """M2 (implementation review): after publish the repo changes diagrams.width and a human

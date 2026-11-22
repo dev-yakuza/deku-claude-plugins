@@ -14,6 +14,8 @@ from hrdlib.util import HeraldError
 def write_machine(case, tid, name, obj, slug=None):
     """Verdict files carry the hash of the article they evaluated (plan §3.2)."""
     obj = json.loads(json.dumps(obj))
+    if name == "verify.json" and "verdicts" not in obj and "by_lang" not in obj:
+        obj = with_verdicts(obj)
     if slug:
         h = worktree_hash(case.root, case.cfg, slug)
         if name == "critique.json":
@@ -24,6 +26,18 @@ def write_machine(case, tid, name, obj, slug=None):
         else:
             obj["body_hash"] = h
     case.write(".claude/herald/work/%s/%s" % (tid, name), json.dumps(obj))
+
+
+def with_verdicts(ver):
+    """A 0.24.0 verify.json from an older fixture (15 D1): the claims map of these flows is empty, so
+    each listed text is an unmapped `unsupported` verdict and the counts follow the verdicts."""
+    listed = [x for x in ver.get("unsupported_sentences") or [] if isinstance(x, str)]
+    ver["verdicts"] = [{"text": x, "verdict": "unsupported", "claims": [], "why": "no claim says it"} for x in listed]
+    c = ver.setdefault("counts", {})
+    if listed:
+        c.update(unsupported=len(listed), unmapped=len(listed))
+    c["supported"] = 0
+    return ver
 
 
 CRIT_PASS = {"final_round": {"round": 1, "verdict": "PASS", "audit": {"blocker": 0, "major": 0},
@@ -119,7 +133,9 @@ class AccuracyTests(Flow):
     VER_SUSPECT = {"counts": {"supported": 2, "unsupported": 0, "contradicted": 1, "unmapped": 0},
                    "research_suspects": [{"claim": "C1", "reason": "example sits under sense 1",
                                           "sentences": ["x"]}]}
-    VER_CONTRA = {"counts": {"supported": 2, "unsupported": 0, "contradicted": 1, "unmapped": 0}}
+    VER_CONTRA = {"counts": {"supported": 0, "unsupported": 0, "contradicted": 1, "unmapped": 0},
+                  "verdicts": [{"text": "Body text for new-post.", "verdict": "contradicted", "claims": ["C1"],
+                                "why": "C1 says otherwise"}]}
 
     def spend(self, tid, n=3):
         for _ in range(n):
@@ -207,6 +223,8 @@ class AccuracyTests(Flow):
         self.spend(tid)
         out, _ = self.hrd("loopback", "--topic", tid, "--cause", "revise", "--theme", "depth")
         self.assertTrue(out["exhausted"])  # readability and audit never reach it
+        self.write(".claude/herald/work/%s/claims-map.json" % tid,
+                   json.dumps({"sentences": [{"text": "Body text for new-post.", "claims": ["C1"]}]}))
         write_machine(self, tid, "verify.json", self.VER_CONTRA, slug)
         out, _ = self.hrd("loopback", "--topic", tid, "--cause", "verify")
         self.assertEqual((out["exhausted"], out["accuracy_reserve"], out["escalate_tier"]), (False, True, True))
@@ -382,8 +400,8 @@ class TrimTests(Flow):
         write_machine(self, tid, "verify.json", VER_PASS, slug)
         self.hrd("stage", "pass", "--topic", tid, "--stage", "verify")
         self.hrd("finalize", "--topic", tid)  # critique hash == verify hash == the trimmed body
-        _, p = self.hrd("trim", "--topic", tid, "--begin", check=False)
-        self.assertIn("already trimmed", p.stderr)
+        self.assertEqual([t["status"] for t in store.load_state(self.root, tid)["trims"]], ["done"])
+        self.assertFalse(os.path.isdir(os.path.join(self.root, ".claude/herald/memory/trim", tid)))  # re-verified
         with open(os.path.join(self.root, ".claude/herald/signals.jsonl")) as f:
             gaps = [json.loads(x) for x in f if '"verify-gap"' in x]
         self.assertEqual(len(gaps), 1)
@@ -423,7 +441,7 @@ class TrimTests(Flow):
         _, p = self.hrd("trim", "--topic", tid, "--finish", check=False)
         self.assertIn("no open trim", p.stderr)
         _, p = self.hrd("trim", "--topic", tid, "--begin", check=False)
-        self.assertIn("already trimmed", p.stderr)  # used once, even when aborted
+        self.assertIn("already tried on this verify result", p.stderr)  # an aborted trim ends this gap's trims
         self.hrd("loopback", "--topic", tid, "--cause", "verify")
         with open(os.path.join(self.root, ".claude/herald/signals.jsonl")) as f:
             self.assertEqual(sum('"verify-gap"' in x for x in f), 1)
@@ -522,6 +540,10 @@ class TrimTests(Flow):
         from hrdlib.hashing import file_hash
         st["stages"]["draft"]["outputs"]["claims-map.json"] = file_hash(self.root, store.work_rel(tid, "claims-map.json"))
         store.save_state(self.root, tid, st)
+        ver = with_verdicts({"unsupported_sentences": [self.S1, self.S2]})
+        ver["verdicts"].append({"text": "Body text for new-post.", "verdict": "supported", "claims": ["C1"]})
+        ver["counts"]["supported"] = 1
+        write_machine(self, tid, "verify.json", ver, slug)
         self.hrd("trim", "--topic", tid, "--begin")
         self.write(".claude/herald/work/%s/claims-map.json" % tid, json.dumps(
             {"sentences": [{"text": "Body text for new-post.", "claims": ["C9"]}]}))
@@ -583,6 +605,447 @@ class TrimTests(Flow):
         self.write("src/content/blog/new-post.md", self.body("new-post") + "x")
         _, p = self.hrd("trim", "--topic", "t0001", "--begin", check=False)
         self.assertIn("critique did not pass on the current article", p.stderr)
+
+
+# t0010 (ildangongbu-website 2f2c172, body lines 86–109): a table cell copied inside a later FAQ
+# sentence (89/105) and one sentence written twice (93/109)
+T0010 = ("---\ntitle: t\n---\n"
+         '| --- | --- | --- | --- |\n'
+         '| 〜ぞ | 문장 끝의 종조사 | 결의를 스스로 다짐하거나 자기 생각을 강하게 주장하며 다짐합니다. | 「<ruby>明日<rp>(</rp><rt>あした</rt><rp>)</rp></ruby>は<ruby>必<rp>(</rp><rt>かなら</rt><rp>)</rp></ruby>ず<ruby>早<rp>(</rp><rt>はや</rt><rp>)</rp></ruby>く<ruby>起<rp>(</rp><rt>お</rt><rp>)</rp></ruby>きるぞ。」 |\n'
+         '일상에서 쓸 때의 수위는 표현마다 다릅니다. 「<ruby>読<rp>(</rp><rt>よ</rt><rp>)</rp></ruby>んでやる」처럼 내가 해낼 일에 붙이면 강한 의지를 나타냅니다. 「ぜ」는 윗사람에게 쓰지 않는 말이므로 학교나 직장에서는 피합니다.\n'
+         '### 「ぞ」와 「ぜ」는 무엇이 다른가요?\n'
+         '「ぞ」는 결의를 스스로 다짐하거나 자기 생각을 강하게 주장하며 다짐합니다. 「ぜ」는 친근함을 담아 가볍게 다짐하는 뜻이고, 남성어이며 다소 거친 느낌이 따릅니다.\n'
+         '### 「〜てやる」는 윗사람에게 써도 되나요?\n'
+         '상대를 위한 행동에 붙이는 「〜てやる」는 아랫사람을 위해 생색내는 느낌이 있어 윗사람에게 맞지 않습니다. 「<ruby>読<rp>(</rp><rt>よ</rt><rp>)</rp></ruby>んでやる」처럼 내가 해낼 일에 붙이면 강한 의지를 나타냅니다.\n')
+T0010_CELL = "결의를 스스로 다짐하거나 자기 생각을 강하게 주장하며 다짐합니다."
+T0010_FAQ = "「ぞ」는 결의를 스스로 다짐하거나 자기 생각을 강하게 주장하며 다짐합니다."
+T0010_TWICE = "「<ruby>読<rp>(</rp><rt>よ</rt><rp>)</rp></ruby>んでやる」처럼 내가 해낼 일에 붙이면 강한 의지를 나타냅니다."
+
+
+class CoverageTests(unittest.TestCase):
+    """15 D1: every claims-map entry gets a verdict, matched by body span (store.coverage)."""
+
+    def check(self, body, entries, verdicts, framings=None, **counts):
+        body = "---\ntitle: t\n---\n" + body if not body.startswith("---") else body
+        c = {"supported": 0, "unsupported": 0, "contradicted": 0, "unmapped": 0}
+        for v in verdicts:
+            if v["verdict"] != "not-factual":
+                c[v["verdict"]] += 1
+            v.setdefault("why", "one line")
+        c.update(counts)
+        rec = {"verdicts": verdicts, "counts": c,
+               "unsupported_sentences": [v["text"] for v in verdicts if v["verdict"] == "unsupported"]}
+        return store.coverage(body, store._body_start(body), entries, rec, framings)
+
+    @staticmethod
+    def v(text, verdict="supported"):
+        return {"text": text, "verdict": verdict, "claims": ["C1"]}
+
+    def test_a_missing_entry_and_an_old_verify_json_are_refused(self):
+        r = self.check("One fact. Two fact.\n", ["One fact.", "Two fact."], [self.v("One fact.")])
+        self.assertIn("no verdict for the claims-map entry 'Two fact.'", " ".join(r["problems"]))
+        body = "---\ntitle: t\n---\nOne fact.\n"
+        r = store.coverage(body, store._body_start(body), ["One fact."], {"counts": {"supported": 1}})
+        self.assertIn("no `verdicts` list", r["problems"][0])
+        r = self.check("One fact.\n", ["One fact.", "Gone fact."], [self.v("One fact.")])
+        self.assertEqual((r["problems"], r["unplaced"]), ([], ["Gone fact."]))  # no place: no verdict needed
+        r = self.check("One fact.\n", ["One fact.", "Gone fact."], [self.v("One fact."), self.v("Gone fact.", "unsupported")])
+        self.assertEqual(r["problems"], [])  # a verdict on it is counted, never placed or refused
+        r = self.check("Big: it runs. Small: it runs.\n", ["Big: it runs.", "Small: it runs.", "it runs."],
+                       [self.v("Big: it runs."), self.v("Small: it runs."), self.v("it runs.", "contradicted")])
+        self.assertEqual((r["problems"], r["unplaced"]), ([], ["it runs."]))  # nested in both, repeated: ignored
+
+    def test_a_map_text_without_markup_is_placed_markdown_insensitively(self):
+        from hrdlib import translation
+        body = ("---\nt: x\n---\n「<ruby>紅葉<rp>(</rp><rt>もみじ</rt><rp>)</rp></ruby>」는 **단풍**입니다. "
+                "[가이드](/g/)를 보세요.\n")
+        lo = store._body_start(body)
+        self.assertEqual(store._norm_tracked(body, lo)[0], translation.normalize(body[lo:]))
+        entry = "「 紅葉 ( もみじ ) 」는 단풍입니다."  # t0011: the map wrote the ruby flattened
+        r = self.check(body, [entry, "가이드를 보세요."], [self.v(entry), self.v("가이드를 보세요.")])
+        self.assertEqual((r["problems"], r["unplaced"]), ([], []))
+        a, b = r["spans"][entry][0]
+        self.assertTrue(body[a:b].startswith("「<ruby>紅葉") and body[a:b].endswith("입니다."))
+
+    def test_an_aside_or_one_sentence_marks_its_entry_and_a_listed_text_may_hold_entries(self):
+        entry = "Listening daily helps (often called shadowing)."
+        r = self.check(entry + "\n", [entry], [self.v("(often called shadowing)", "unsupported")])
+        self.assertEqual(r["problems"], [])  # the aside's verdict marks the entry: mapped, not unmapped
+        multi = "It runs at night. It stops at dawn."
+        r = self.check(multi + "\n", [multi], [self.v("It stops at dawn.", "unsupported")])
+        self.assertEqual(r["problems"], [])
+        r = self.check(multi + "\n", ["It runs at night.", "It stops at dawn."], [self.v(multi, "contradicted")])
+        self.assertEqual(r["problems"], [])  # one listed text marks both entries, counted once
+        self.assertEqual(sorted(r["listed"]), [multi])
+
+    def test_duplicates_are_refused_unless_the_entry_itself_repeats(self):
+        body = "It is free. Later: it is free.\n"
+        r = self.check(body, [], [self.v("it is free.", "unsupported")], unmapped=1)
+        self.assertEqual(r["problems"], [])
+        r = self.check(body.replace("Later: it", "Later: It"), [], [self.v("It is free.", "unsupported")], unmapped=1)
+        self.assertIn("found 2 times", r["problems"][0])
+        r = self.check("It is free.\n\nIt is free.\n", ["It is free."], [self.v("It is free.")])
+        self.assertEqual((r["problems"], r["dup"]), ([], {"It is free."}))  # both share the verdict
+
+    def test_nested_entries_belong_to_the_longest_t0010(self):
+        entries = [T0010_CELL, T0010_FAQ, T0010_TWICE]
+        r = self.check(T0010, entries, [self.v(T0010_FAQ), self.v(T0010_TWICE), self.v(T0010_CELL)])
+        self.assertEqual(r["problems"], [])
+        line = lambda sp: T0010[:sp[0]].count("\n") + 1  # noqa: E731
+        self.assertEqual([line(sp) for sp in r["spans"][T0010_CELL]], [5])  # body line 89: the cell only
+        self.assertEqual(len(r["spans"][T0010_TWICE]), 2)  # body lines 93 and 109: one entry, written twice
+        self.assertEqual(r["dup"], {T0010_TWICE})
+        r = self.check(T0010, entries, [self.v(T0010_FAQ), self.v(T0010_TWICE)])  # the FAQ verdict covers no cell
+        self.assertIn("no verdict for the claims-map entry %r" % T0010_CELL, " ".join(r["problems"]))
+
+    def test_alt_and_label_entries_and_not_factual_needs_a_framing(self):
+        body = "Shops open early.\n\n![The shop front at dawn](/img/a.png)\n\n| Form | Use |\n"
+        entries = ["Shops open early.", "The shop front at dawn", "Form"]
+        ok = [self.v("Shops open early."), self.v("The shop front at dawn", "not-factual"),
+              self.v("Form", "not-factual")]
+        self.assertEqual(self.check(body, entries, ok)["problems"], [])
+        bad = [self.v("Shops open early.", "not-factual")] + ok[1:]
+        self.assertIn("without a framing", " ".join(self.check(body, entries, bad, supported=0)["problems"]))
+        framed = self.check(body, entries, bad, [{"framing": "the example below", "covers": ["Shops open early."]}],
+                            supported=0)
+        self.assertEqual(framed["problems"], [])
+        r = self.check(body, entries, [self.v("The shop front at dawn", "unsupported")] + ok[:1] + ok[2:])
+        self.assertEqual(r["problems"], [])  # an alt is judged like a sentence
+
+    def test_counts_follow_the_verdicts(self):
+        body = "One fact. Two fact. Three fact.\n"
+        vs = [self.v("One fact."), self.v("Two fact.", "unsupported"), self.v("Three fact.", "unsupported")]
+        self.assertEqual(self.check(body, ["One fact.", "Two fact."], vs, unmapped=1)["problems"], [])
+        for k, n in (("supported", 2), ("unsupported", 1), ("unmapped", 0), ("contradicted", 1)):
+            r = self.check(body, ["One fact.", "Two fact."], [dict(x) for x in vs], **dict({"unmapped": 1}, **{k: n}))
+            self.assertIn("counts do not follow", " ".join(r["problems"]), k)
+        r = self.check(body, ["One fact."], [self.v("One fact."), self.v("Two fact.", "contradicted")])
+        self.assertIn("an unmapped factual text is `unsupported`", " ".join(r["problems"]))
+        rec = {"verdicts": [self.v("One fact.", "unsupported")],
+               "counts": {"supported": 0, "unsupported": 1, "contradicted": 0, "unmapped": 0},
+               "unsupported_sentences": []}
+        text = "---\na: b\n---\n" + body
+        r = store.coverage(text, store._body_start(text), ["One fact."], rec)
+        self.assertIn("needs its one-line `why`", " ".join(r["problems"]))
+        self.assertIn("unsupported_sentences must be exactly", " ".join(r["problems"]))
+
+
+class NarrowingTests(unittest.TestCase):
+    def test_whole_tokens_only_and_never_a_digit_markup_quote_quotation_or_negation(self):
+        self.assertEqual(store._narrowing("Luffy is the 주인공 of it.", "Luffy is the of it."), (["주인공"], None))
+        self.assertEqual(store._narrowing("A big\ncat sat.", "A\ncat sat.")[0], ["big"])
+        for orig, new, why in (
+                ("It took 3 days.", "It took days.", "digit"),
+                ("See the **bold** part.", "See the part.", "markup"),
+                ("See [the] part.", "See part.", "markup"),
+                ("He said 'yes' today.", "He said today.", "quote"),
+                ("He said “a big win” today.", "He said “a win” today.", "inside a quotation"),
+                ("그는 「정말 큰 승리」라고 했다.", "그는 「정말 승리」라고 했다.", "inside a quotation"),
+                ("It does not hurt.", "It does hurt.", "negation"),
+                ("It isn’t cheap.", "It cheap.", "quote"),
+                ("It cannot fail.", "It fail.", "negation"),
+                ("Do it, not later.", "Do it, later.", "negation"),
+                ("《원피스》 주인공 루피.", "주인공 루피.", "quote"),
+                ("그는 ‘아주 큰 승리’라 했다.", "그는 ‘아주 승리’라 했다.", "inside a quotation"),
+                ("먹지 말고 기다리세요.", "먹지 기다리세요.", "negation"),
+                ("그것은 못했다 정말.", "그것은 정말.", "negation"),
+                ("이 약은 안 써도 됩니다.", "이 약은 써도 됩니다.", "negation"),
+                ("Never mix them.", "mix them.", "negation"),
+                ("It helps a lot.", "It helps a", "sentence end"),
+                ("It helps a lot.", "It helps a lot!", "whole words"),
+                ("It helps a lot.", "It  a lot.", "whole words"),   # the seam keeps one space
+                ("It helps\nbeginners a lot.", "It beginners a lot.", "line break")):
+            removed, reason = store._narrowing(orig, new)
+            self.assertIsNone(removed, (orig, new))
+            self.assertIn(why, reason, (orig, new))
+        for orig, new in (("안내 문구를 읽습니다.", "문구를 읽습니다."), ("매우 안전한 길입니다.", "매우 길입니다."),
+                          ("주말 수업이 있습니다.", "수업이 있습니다."), ("말하는 연습을 합니다.", "연습을 합니다."),
+                          ("I know it well.", "I it well."), ("Take a note today.", "Take a today."),
+                          ("Call whenever you like.", "Call you like."), ("말고 다른 것도 됩니다.", "다른 것도 됩니다.")):
+            self.assertIsNotNone(store._narrowing(orig, new)[0], (orig, new))  # not negations
+
+
+class NarrowTrimTests(Flow):
+    """15 D2: up to three uncounted trims, narrowing, revert."""
+    EXTRA = "\nListening daily surely helps beginners. The app does not read examples aloud. Tests run fast.\n"
+    S1 = "Listening daily surely helps beginners."
+    N1 = "Listening daily helps beginners."
+    S2 = "The app does not read examples aloud."
+    S3 = "Tests run fast."
+    to_verify_gap = TrimTests.to_verify_gap
+    body = TrimTests.body
+    finish_with = TrimTests.finish_with
+
+    def gap(self, tid, slug, listed):
+        write_machine(self, tid, "verify.json", {"unsupported_sentences": listed}, slug)
+
+    def wfile(self, rel):
+        with open(os.path.join(self.root, rel), encoding="utf-8") as f:
+            return f.read()
+
+    def test_a_narrowing_is_checked_excluded_and_accepted_by_consent(self):
+        tid, slug = self.to_verify_gap(ver={"unsupported_sentences": [self.S1, self.S2]})
+        out, _ = self.hrd("trim", "--topic", tid, "--begin")
+        self.assertEqual(out["may_narrow"], [self.S1, self.S2])
+        body = self.body(slug)
+        _, p = self.finish_with(tid, slug, body.replace(" not read", " read"))
+        self.assertIn("negation", p.stderr)
+        _, p = self.finish_with(tid, slug, body.replace("helps beginners.", "helps."))
+        self.assertIn("changed beyond", p.stderr)  # a whole token, but its sentence end goes with it
+        self.write(".claude/herald/work/%s/claims-map.json" % tid,
+                   json.dumps({"sentences": [{"text": self.N1, "claims": ["C1"]}]}))
+        out, _ = self.finish_with(tid, slug, body.replace(" surely", "").replace(" " + self.S2, ""))
+        self.assertEqual(out["status"], "done")
+        self.assertEqual(out["removed"], [self.S2])
+        self.assertEqual([(n["before"], n["after"], n["removed"]) for n in out["narrowed"]],
+                         [(self.S1, self.N1, ["surely"])])
+        reasons = self.hrd("auto-exclusion", "--topic", tid)[0]
+        self.assertTrue({"trimmed", "narrowed"} <= set(reasons["blocking"]))
+        consent = self.hrd("auto-exclusion", "--topic", tid, "--consent")[0]
+        self.assertFalse({"trimmed", "narrowed"} & set(consent["blocking"]))
+        self.write(".claude/herald/work/%s/verify.json" % tid, json.dumps(
+            dict(VER_PASS, body_hash=worktree_hash(self.root, self.cfg, slug))))  # made before 0.24.0
+        _, p = self.hrd("stage", "pass", "--topic", tid, "--stage", "verify", check=False)
+        self.assertIn("no `verdicts` list", p.stderr)
+        write_machine(self, tid, "verify.json", {"verdicts": [
+            {"text": self.N1, "verdict": "supported", "claims": ["C1"]}],
+            "counts": {"supported": 1, "unsupported": 0, "contradicted": 0, "unmapped": 0}}, slug)
+        self.hrd("stage", "pass", "--topic", tid, "--stage", "verify")
+
+    def test_the_claims_map_follows_a_narrowing_and_a_deletion(self):
+        tid, slug = self.to_verify_gap(ver={"unsupported_sentences": [self.S1]})
+        cm = {"sentences": [{"text": t, "claims": ["C1"]} for t in (self.S1, self.S2, self.S3)]}
+        self.write(".claude/herald/work/%s/claims-map.json" % tid, json.dumps(cm))
+        write_machine(self, tid, "verify.json", {"verdicts": [
+            {"text": self.S1, "verdict": "unsupported", "claims": ["C1"], "why": "C1 says no degree"},
+            {"text": self.S2, "verdict": "unsupported", "claims": ["C1"], "why": "C1 is silent"},
+            {"text": self.S3, "verdict": "supported", "claims": ["C1"]}],
+            "counts": {"supported": 1, "unsupported": 2, "contradicted": 0, "unmapped": 0},
+            "unsupported_sentences": [self.S1, self.S2]}, slug)
+        self.hrd("trim", "--topic", tid, "--begin")
+        self.finish_with(tid, slug, self.body(slug).replace(" surely", "").replace(" " + self.S2, ""))  # map untouched
+        texts = [e["text"] for e in json.loads(self.wfile(".claude/herald/work/%s/claims-map.json" % tid))["sentences"]]
+        self.assertEqual(texts, [self.N1, self.S3])
+        from hrdlib.hashing import file_hash
+        st = store.load_state(self.root, tid)
+        self.assertEqual(st["stages"]["draft"]["outputs"]["claims-map.json"],
+                         file_hash(self.root, store.work_rel(tid, "claims-map.json")))
+
+    def test_who_may_narrow(self):
+        self.EXTRA = "\n## Setup. Run it fast now.\n\n- Item big one.\n\nSee it (big aside) here.\n"
+        tid, _ = self.to_verify_gap(ver={"unsupported_sentences": ["Run it fast now.", "Item big one.", "(big aside)"]})
+        out, _ = self.hrd("trim", "--topic", tid, "--begin")
+        self.assertEqual(out["may_narrow"], ["Item big one."])  # not a heading's sentence, not an aside
+
+    def test_three_trims_counting_aborted_and_reverted_at_exhaustion(self):
+        tid, slug = self.to_verify_gap(ver={"unsupported_sentences": [self.S1, self.S2]})
+        st = store.load_state(self.root, tid)
+        st["loopbacks"] = 3  # the shared loopbacks are spent: a trim is still eligible
+        store.save_state(self.root, tid, st)
+        pre_out = dict(st["stages"]["draft"]["outputs"])
+        pre_crit = st["stages"]["critique"]["body_hash"]
+        self.hrd("trim", "--topic", tid, "--begin")
+        self.hrd("trim", "--topic", tid, "--abort")  # 1: aborted
+        self.gap(tid, slug, [self.S1])  # a new verify result on the same body: a new gap
+        pre_ver = self.wfile(".claude/herald/work/%s/verify.json" % tid)
+        base = worktree_hash(self.root, self.cfg, slug)
+        self.hrd("trim", "--topic", tid, "--begin")
+        self.write(".claude/herald/work/%s/claims-map.json" % tid,
+                   json.dumps({"sentences": [{"text": self.N1, "claims": ["C1"]}]}))
+        self.finish_with(tid, slug, self.body(slug).replace(" surely", ""))
+        self.assertEqual(store.load_state(self.root, tid)["trims"][-1]["status"], "done")
+        _, p = self.hrd("trim", "--topic", tid, "--revert", check=False)
+        self.assertIn("run verify first", p.stderr)  # the re-verify has not run
+        self.gap(tid, slug, [self.S2])
+        _, p = self.hrd("trim", "--topic", tid, "--revert", check=False)
+        self.assertIn("no narrowed text is contradicted", p.stderr)
+        self.write(".claude/herald/work/%s/verify.md" % tid, "re-verify: N1 contradicted")
+        write_machine(self, tid, "verify.json", {
+            "verdicts": [{"text": self.N1, "verdict": "contradicted", "claims": ["C1"], "why": "C1 says only adults"}],
+            "counts": {"supported": 0, "unsupported": 0, "contradicted": 1, "unmapped": 0},
+            "unsupported_sentences": []}, slug)
+        out, _ = self.hrd("trim", "--topic", tid, "--revert")  # 2: reverted
+        self.assertTrue(out["restored"])
+        st = store.load_state(self.root, tid)
+        self.assertEqual(worktree_hash(self.root, self.cfg, slug), base)
+        self.assertEqual(self.wfile(".claude/herald/work/%s/verify.json" % tid), pre_ver)
+        self.assertEqual(self.wfile(".claude/herald/work/%s/verify.md" % tid), "two unsupported")
+        self.assertEqual(self.wfile(".claude/herald/work/%s/claims-map.json" % tid), "{}")
+        self.assertEqual((st["stages"]["draft"]["outputs"], st["stages"]["critique"]["body_hash"]), (pre_out, pre_crit))
+        _, p = self.hrd("trim", "--topic", tid, "--begin", check=False)
+        self.assertIn("already tried on this verify result (reverted)", p.stderr)
+        self.gap(tid, slug, [self.S3])
+        self.hrd("trim", "--topic", tid, "--begin")
+        self.finish_with(tid, slug, self.body(slug).replace(" " + self.S3, ""))  # 3: done
+        self.gap(tid, slug, [self.S2])
+        _, p = self.hrd("trim", "--topic", tid, "--begin", check=False)
+        self.assertIn("trimmed 3 times already (aborted, reverted, done)", p.stderr)
+        self.assertEqual(store.load_state(self.root, tid)["loopbacks"], 3)  # trims never count
+
+    def test_a_narrowed_span_is_never_narrowed_again_and_only_the_last_done_trim_reverts(self):
+        tid, slug = self.to_verify_gap(ver={"unsupported_sentences": [self.S1]})
+        self.hrd("trim", "--topic", tid, "--begin")
+        self.finish_with(tid, slug, self.body(slug).replace(" surely", ""))
+        self.gap(tid, slug, [self.N1])
+        out, _ = self.hrd("trim", "--topic", tid, "--begin")
+        self.assertEqual(out["may_narrow"], [])  # narrowed once: delete or map only
+        self.hrd("trim", "--topic", tid, "--abort")
+        write_machine(self, tid, "verify.json", {
+            "verdicts": [{"text": self.N1, "verdict": "contradicted", "claims": [], "why": "broadened"}],
+            "counts": {"supported": 0, "unsupported": 0, "contradicted": 1, "unmapped": 0}}, slug)
+        _, p = self.hrd("trim", "--topic", tid, "--revert", check=False)
+        self.assertIn("last trim: aborted", p.stderr)  # only the last trim is reverted
+
+    def test_revert_force_when_the_snapshot_is_lost(self):
+        import shutil
+        tid, slug = self.to_verify_gap(ver={"unsupported_sentences": [self.S1]})
+        self.hrd("trim", "--topic", tid, "--begin")
+        self.finish_with(tid, slug, self.body(slug).replace(" surely", ""))
+        write_machine(self, tid, "verify.json", {
+            "verdicts": [{"text": self.N1, "verdict": "contradicted", "claims": [], "why": "broadened"}],
+            "counts": {"supported": 0, "unsupported": 0, "contradicted": 1, "unmapped": 0}}, slug)
+        shutil.rmtree(os.path.join(self.root, ".claude/herald/memory/trim", tid))
+        _, p = self.hrd("trim", "--topic", tid, "--revert", check=False)
+        self.assertIn("--revert --force", p.stderr)
+        _, p = self.hrd("trim", "--topic", tid, "--finish", "--force", check=False)
+        self.assertIn("--force goes with --abort or --revert", p.stderr)
+        out, _ = self.hrd("trim", "--topic", tid, "--revert", "--force")
+        self.assertEqual((out["restored"], out["hold"], out["trim"]["status"]), (False, "needs-human", "reverted"))
+
+    def test_no_narrowing_in_a_language_written_without_spaces(self):
+        cfg = json.loads(self.wfile(".claude/herald/config.json"))
+        self.write(".claude/herald/config.json", json.dumps(dict(cfg, language="ja")))
+        self.commit("ja")
+        sh(self.root, "git", "push", "-q", "origin", "main")  # the herald branch forks from origin
+        tid, slug = self.to_verify_gap(ver={"unsupported_sentences": [self.S1]})
+        out, _ = self.hrd("trim", "--topic", tid, "--begin")
+        self.assertEqual(out["may_narrow"], [])
+        _, p = self.finish_with(tid, slug, self.body(slug).replace(" surely", ""))
+        self.assertIn("changed beyond", p.stderr)
+
+    def test_coverage_gates_verify_pass_and_loopback_and_old_trim_dicts_still_exclude(self):
+        tid, slug = self.run_flow()
+        self.write(".claude/herald/work/%s/verify.json" % tid, json.dumps(
+            dict(VER_PASS, body_hash=worktree_hash(self.root, self.cfg, slug))))  # made before 0.24.0
+        _, p = self.hrd("loopback", "--topic", tid, "--cause", "verify", check=False)
+        self.assertIn("no `verdicts` list", p.stderr)
+        self.hrd("loopback", "--topic", tid, "--human")  # a human's loopback is not refused
+        st = store.load_state(self.root, tid)
+        st.pop("trims", None)  # a state written before 0.24.0
+        st["trim"] = {"status": "done", "base_hash": "sha256:a", "hash": "sha256:b", "removed": ["x"]}
+        self.assertEqual(store.auto_exclusion({}, st), ["trimmed"])
+        st["trim"]["narrowed"] = [{"before": "a b.", "after": "a."}]
+        self.assertEqual(store.auto_exclusion({}, st), ["narrowed", "trimmed"])
+        store.save_state(self.root, tid, st)
+        self.assertIn("narrowed", self.hrd("auto-exclusion", "--topic", tid)[0]["reasons"])
+        sh(self.root, "git", "add", "-A", ".claude/herald/work/%s" % tid)
+        sh(self.root, "git", "commit", "-qm", "a PR head written before 0.24.0")
+        reasons = store.exclusion_reasons(self.root, self.cfg, tid, rev="HEAD")
+        self.assertTrue({"trimmed", "narrowed"} <= set(reasons), reasons)
+        self.assertEqual(store.trims_of(st)[0]["status"], "done")
+
+
+class MapBoundTests(Flow):
+    """Review 2: `unplaced` is bounded at draft (max(3, 10%)), a warning at verify; a sentence written
+    once plainly and once with markup is repeated, not single; the trim's map step and dup check
+    work in normalised space."""
+
+    def to_draft(self, tid="t0001", slug="new-post"):
+        store.save_topics(self.root, {"version": 1, "topics": [{"id": tid, "title": "T", "state": "queued",
+                                                                 "history": [], "reverted_by": []}]})
+        self.commit("topics")
+        self.hrd("begin", "--topic", tid)
+        self.write(".claude/herald/work/%s/brief.md" % tid, "brief")
+        self.hrd("branch", "--topic", tid, "--slug", slug)
+        self.hrd("stage", "pass", "--topic", tid, "--stage", "brief")
+        self.write(".claude/herald/work/%s/research.md" % tid, "C1. source")
+        self.hrd("stage", "pass", "--topic", tid, "--stage", "research")
+        self.article(slug)
+        return tid, slug
+
+    def cmap(self, tid, texts):
+        self.write(".claude/herald/work/%s/claims-map.json" % tid,
+                   json.dumps({"sentences": [{"text": t, "claims": ["C1"]} for t in texts]}))
+
+    def test_draft_refuses_an_unmatched_map_and_verify_only_warns(self):
+        tid, slug = self.to_draft()
+        body = "Body text for new-post."
+        self.cmap(tid, ["Gone %d." % i for i in range(4)] + [body])
+        _, p = self.hrd("stage", "pass", "--topic", tid, "--stage", "draft", check=False)
+        self.assertIn("4 of 5 entries with no place", p.stderr)
+        self.assertIn("copy each map text from the article", p.stderr)
+        self.cmap(tid, ["Gone %d." % i for i in range(3)] + [body])
+        out, _ = self.hrd("stage", "pass", "--topic", tid, "--stage", "draft")
+        self.assertEqual(len(out["map_warnings"]), 3)  # within the bound: the writer's to fix, no refusal
+        self.write(".claude/herald/work/%s/critique.md" % tid, "ok")
+        write_machine(self, tid, "critique.json", CRIT_PASS, slug)
+        self.hrd("stage", "pass", "--topic", tid, "--stage", "critique")
+        self.cmap(tid, ["Gone %d." % i for i in range(4)] + [body])  # a later map change past the bound
+        from hrdlib.hashing import file_hash
+        st = store.load_state(self.root, tid)
+        st["stages"]["draft"]["outputs"]["claims-map.json"] = file_hash(self.root, store.work_rel(tid, "claims-map.json"))
+        store.save_state(self.root, tid, st)
+        self.write(".claude/herald/work/%s/verify.md" % tid, "ok")
+        write_machine(self, tid, "verify.json", {"verdicts": [{"text": body, "verdict": "supported", "claims": ["C1"]}],
+                                                 "counts": {"supported": 1, "unsupported": 0, "contradicted": 0,
+                                                            "unmapped": 0}}, slug)
+        out, _ = self.hrd("stage", "pass", "--topic", tid, "--stage", "verify")
+        self.assertEqual(len(out["unplaced"]), 4)
+        self.assertIn("4 of 5", out["unplaced_warning"])
+        self.assertEqual(store.unplaced_bound(5), 3)
+        self.assertEqual(store.unplaced_bound(132), 13)
+
+    def test_nested_entries_do_not_count_toward_the_bound(self):
+        # review 3 m1: a table cell copied into a sentence has a place in the article — only
+        # entries found nowhere count toward the draft bound
+        tid, slug = self.to_draft()
+        body = "Body text for new-post."
+        self.cmap(tid, ["Body", "text", "for", "new-post", body])
+        out, _ = self.hrd("stage", "pass", "--topic", tid, "--stage", "draft")
+        self.assertEqual(out.get("map_warnings") or [], [])
+
+    def test_plain_and_marked_up_copies_are_repeated(self):
+        body = "---\nt: x\n---\nIt is **free** today. Later: It is free today.\n"
+        lo = store._body_start(body)
+        self.assertEqual(len(store._Body(body, lo).find("It is free today.")), 2)
+        rec = {"verdicts": [{"text": "It is free today.", "verdict": "unsupported", "claims": [], "why": "x"}],
+               "counts": {"supported": 0, "unsupported": 1, "contradicted": 0, "unmapped": 1},
+               "unsupported_sentences": ["It is free today."]}
+        self.assertIn("found 2 times", " ".join(store.coverage(body, lo, [], rec)["problems"]))
+        r = store.coverage(body, lo, ["It is free today."], dict(rec, counts=dict(rec["counts"], unmapped=0)))
+        self.assertEqual((r["problems"], r["dup"]), ([], {"It is free today."}))
+
+    def test_trim_refuses_a_repeated_entry_and_keeps_a_normalised_map_in_step(self):
+        tid, slug = self.to_draft()
+        self.write("src/content/blog/%s.md" % slug, self.body_text(slug) +
+                   "\nIt is **free** today. It is free today.\n")
+        self.cmap(tid, [])
+        self.hrd("stage", "pass", "--topic", tid, "--stage", "draft")
+        self.write(".claude/herald/work/%s/critique.md" % tid, "ok")
+        write_machine(self, tid, "critique.json", CRIT_PASS, slug)
+        self.hrd("stage", "pass", "--topic", tid, "--stage", "critique")
+        self.cmap(tid, ["It is free today."])
+        write_machine(self, tid, "verify.json", {
+            "verdicts": [{"text": "It is free today.", "verdict": "unsupported", "claims": ["C1"], "why": "x"}],
+            "counts": {"supported": 0, "unsupported": 1, "contradicted": 0, "unmapped": 0},
+            "unsupported_sentences": ["It is free today."]}, slug)
+        _, p = self.hrd("trim", "--topic", tid, "--begin", check=False)
+        self.assertIn("repeated in the article", p.stderr)
+        # the map step in normalised space: a t0011-style entry written without the ruby
+        self.write(".claude/herald/work/t9/claims-map.json", json.dumps({"sentences": [
+            {"text": "「 紅葉 ( もみじ ) 」는 정말 아름답습니다.", "claims": ["C1"]},
+            {"text": "「 紅葉 ( もみじ ) 」는 가을에 핍니다.", "claims": ["C1"]},
+            {"text": "Kept.", "claims": ["C1"]}]}))
+        ruby = "「<ruby>紅葉<rp>(</rp><rt>もみじ</rt><rp>)</rp></ruby>」는"
+        store._trim_map_in_step(self.root, "t9", [ruby + " 가을에 핍니다."],
+                                [{"before": ruby + " 정말 아름답습니다.", "after": ruby + " 아름답습니다."}])
+        with open(os.path.join(self.root, ".claude/herald/work/t9/claims-map.json"), encoding="utf-8") as f:
+            texts = [e["text"] for e in json.load(f)["sentences"]]
+        self.assertEqual(texts, ["「 紅葉 ( もみじ ) 」는 아름답습니다.", "Kept."])
+
+    def body_text(self, slug):
+        with open(os.path.join(self.root, "src/content/blog/%s.md" % slug), encoding="utf-8") as f:
+            return f.read()
 
 
 class ConsentTests(Flow):
@@ -1324,7 +1787,8 @@ class AutoSignalTests(Flow):
         _, p = self.hrd("loopback", "--topic", tid, "--cause", "revise", check=False)
         self.assertIn("--theme", p.stderr)
         self.hrd("loopback", "--topic", tid, "--cause", "revise", "--theme", "intro", "--note", "weak hook")
-        gap = {"counts": {"supported": 2, "unsupported": 1, "contradicted": 0, "unmapped": 0}}
+        gap = {"counts": {"supported": 0, "unsupported": 1, "contradicted": 0, "unmapped": 1},
+               "unsupported_sentences": ["Body text for new-post."]}
         write_machine(self, tid, "verify.json", gap, slug)
         self.hrd("loopback", "--topic", tid, "--cause", "verify", "--note", "s1")
         self.hrd("loopback", "--topic", tid, "--human")

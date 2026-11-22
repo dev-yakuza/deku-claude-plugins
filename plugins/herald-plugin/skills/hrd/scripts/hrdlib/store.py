@@ -195,7 +195,7 @@ def artifact_hash(root, cfg, st, name):
 def entry_check(root, cfg, st, stage):
     """Plan §3.2 entry condition: every input file still matches the hash its producer recorded."""
     problems = []
-    if (st.get("trim") or {}).get("status") == "open":
+    if open_trim(st):
         problems.append("a trim is open — `HRD trim --topic %s --abort` first" % st.get("topic_id"))
     from .translation import langs_of, verify_entry_problems
     for producer, name in CONSUMES.get(stage, []):
@@ -316,12 +316,36 @@ def verify_passed(ver):
     return int(c.get("unsupported", 1)) == 0 and int(c.get("contradicted", 1)) == 0 and not suspects
 
 
+def trims_of(st):
+    """Every trim of the article, oldest first: `trims` (0.24.0), or the one `trim` dict a state
+    written before 0.24.0 carries (a pending PR's head keeps its `trimmed` exclusion)."""
+    st = st or {}
+    if isinstance(st.get("trims"), list):
+        return [t for t in st["trims"] if isinstance(t, dict)]
+    old = st.get("trim")
+    return [old] if isinstance(old, dict) and old else []
+
+
+def open_trim(st):
+    return next((t for t in trims_of(st) if t.get("status") == "open"), None)
+
+
+def _trims_rw(st):
+    """`trims` to write to: an old `trim` dict moves into the list."""
+    trs = trims_of(st)
+    st["trims"] = trs
+    st.pop("trim", None)
+    return trs
+
+
 def auto_exclusion(crit, st=None):
     """Reasons a PR may not be auto-published (plan §3.2.2 ③). Empty list = eligible."""
     reasons = []
-    tr = (st or {}).get("trim") or {}
-    if tr.get("status") == "done" and tr.get("hash") != tr.get("base_hash"):
+    done = [t for t in trims_of(st) if t.get("status") == "done" and t.get("hash") != t.get("base_hash")]
+    if done:
         reasons.append("trimmed")  # the agents changed the body after critique
+    if any(t.get("narrowed") for t in done):
+        reasons.append("narrowed")  # a listed sentence lost words: the re-verify judged before → after
     for d in (crit or {}).get("decision_log") or []:
         if isinstance(d, dict) and d.get("kind") in ("dismissal", "assumption", "deferral"):
             reasons.append("decision:%s" % d.get("kind"))
@@ -361,9 +385,11 @@ def auto_exclusion(crit, st=None):
 # attribution are confirmed in `/hrd ship` too (08-images.md §2.13)
 # `audit-log:out-of-scope` (0.22.0, 13 §1.4): a MAJOR in text a refresh did not touch, left for the
 # next refresh — the same trust as a deferred one
+# `narrowed` (0.24.0, 15 D2.4): a trim deleted whole words inside a listed sentence; the full
+# before/after re-verify and the revert are its safeguard
 CONSENT_ACCEPTS = ("decision:dismissal", "decision:assumption", "decision:deferral",
-                   "audit-dismissed", "audit-log:deferred", "audit-log:out-of-scope", "trimmed", "images", "framed",
-                   "translated")
+                   "audit-dismissed", "audit-log:deferred", "audit-log:out-of-scope", "trimmed", "narrowed", "images",
+                   "framed", "translated")
 
 
 # 0.20.0 (design/herald/11-ship-consent.md §2.4, §9 R2-5): a `--ship` run (the lock's ship mark for
@@ -823,7 +849,7 @@ def stage_pass(root, cfg, tid, stage, amend=False, rerun=False):
     if why:
         raise HeraldError(why)
     rerun = rerun and _is_repass(st, stage)  # only a real re-pass lifts what a re-pass may change
-    if (st.get("trim") or {}).get("status") == "open":
+    if open_trim(st):
         raise HeraldError("a trim is open — `HRD trim --topic %s --finish` or `--abort` first" % tid)
     if stage != "research" and open_research_fix(st):
         raise HeraldError("a research fix is open (%s) — the researcher corrects those claims and `stage pass --stage "
@@ -886,6 +912,11 @@ def stage_pass(root, cfg, tid, stage, amend=False, rerun=False):
     if stage == "draft":
         from .shots import draft_problems
         problems = draft_problems(root, cfg, tid, st)
+        gone, n = unplaced_entries(root, cfg, tid, st["slug"])
+        if len(gone) > unplaced_bound(n):  # 15 D1 bound (review 2): an unmatched map would switch coverage off
+            problems.append("claims-map.json has %d of %d entries with no place of their own in the article (at most %d) "
+                            "— copy each map text from the article as it stands, e.g. %r"
+                            % (len(gone), n, unplaced_bound(n), gone[0][:80]))
         from .images import draft_problems as image_problems, label_problems
         problems += image_problems(root, cfg, tid, st)  # diagrams, external images, OG (08-images.md §2.10)
         problems += label_problems(root, cfg, tid, st)  # every scene of the slug keeps its AI label (09 §2.8)
@@ -944,9 +975,9 @@ def stage_pass(root, cfg, tid, stage, amend=False, rerun=False):
         rec["body_hash"] = worktree_hash(root, cfg, st["slug"])
         # git blob ids too: a PR head is compared by blob, which line-ending filters keep equal
         rec["blobs"] = {n: _git_blob(root, None, work_rel(tid, n)) for n in ("critique.md", "critique.json")}
-        tr = st.get("trim") or {}
-        if tr.get("status") == "done" and tr.get("hash") != rec["body_hash"]:
-            tr["status"] = "superseded"  # a fresh critique evaluated a later body: the trim is history
+        for tr in trims_of(st):  # an old `trim` dict is updated in place
+            if tr.get("status") == "done" and tr.get("hash") != rec["body_hash"]:
+                tr["status"] = "superseded"  # a fresh critique evaluated a later body: the trim is history
         # dismissals are recorded from the decision log, not from memory (abuse watch, auditor
         # prompt material); also on audit loopbacks, so a topic that never passes keeps them
         record_dismissals(root, tid, crit)
@@ -956,6 +987,9 @@ def stage_pass(root, cfg, tid, stage, amend=False, rerun=False):
         if research_suspects(ver):
             raise HeraldError("verify.json lists research_suspects — a claim the article rests on is wrong; "
                               "`HRD loopback --cause research` first")
+        cov = verify_coverage(root, cfg, tid, st, ver)
+        if cov["problems"]:
+            raise HeraldError("; ".join(cov["problems"][:4]))
         if not verify_passed(ver):
             raise HeraldError("verify.json has unsupported or contradicted claims")
         from .translation import lang_record, verify_problems
@@ -968,8 +1002,18 @@ def stage_pass(root, cfg, tid, stage, amend=False, rerun=False):
         bh = bundle_hash(root, cfg, st["slug"])
         rec["body_hash"] = bh
         rec["blobs"] = {"verify.json": _git_blob(root, None, work_rel(tid, "verify.json"))}
+        if cov["unplaced"]:  # map entries with no place in the body: shown in the PR, never refused (15 D1)
+            rec["unplaced"] = [t[:200] for t in cov["unplaced"]][:20]
+            n = sum(len(p.get("spans") or {}) for p in cov["parts"].values())
+            if len(cov["unplaced"]) > unplaced_bound(n):  # draft enforced it; a later map change only warns
+                rec["unplaced_warning"] = "%d of %d claims-map entries have no place in the article (bound %d)" \
+                    % (len(cov["unplaced"]), n, unplaced_bound(n))
         rec["research"] = artifact_hash(root, cfg, st, "research.md")  # the evidence it checked against
         st["verified_hash"] = bh
+        last = (trims_of(st) or [{}])[-1]
+        if last.get("status") == "done":  # its re-verify passed: nothing left to revert
+            import shutil
+            shutil.rmtree(_trim_dir(root, tid), ignore_errors=True)
         # what was verified, file by file: integrity's cause basis on a machine without a ledger
         # line (01-multilingual.md §3, basis 3)
         if cfg.translations():
@@ -1016,7 +1060,7 @@ def stage_pass(root, cfg, tid, stage, amend=False, rerun=False):
     return st
 
 
-# --- trim: the one deletion-only repair of a verify gap (contract §F) ----------------------
+# --- trim: the uncounted repair of a late verify gap (contract §F, 15 D2) --------------------
 
 TRIM_MAX_UNSUPPORTED = 3   # more unsupported sentences than this is a writing problem: loop back
 TRIM_MAX_SENTENCE = 400    # characters: a longer "sentence" is a passage
@@ -1107,10 +1151,270 @@ def _protected(text):
     return [(m.start(), m.end()) for m in _PROTECTED_RE.finditer(text)]
 
 
-def _kept_pattern(old, spans):
+# --- verify coverage: a verdict for every claims-map entry (15 D1, 0.24.0) --------------------
+
+VERDICTS = ("supported", "unsupported", "contradicted", "not-factual")
+_SENT_END_RE = re.compile(r"[.!?。！？][%s]*(?=\s|$)" % _CLOSERS)
+# translation.normalize, step by step, so a match in its space maps back to the raw body
+_NORM_STEPS = ((re.compile(r"!\[[^\]]*\]\([^)]*\)"), " "), (re.compile(r"\[([^\]]*)\]\([^)]*\)"), 1),
+               (re.compile(r"<[^>]+>"), " "), (re.compile(r"[*_`~]+"), ""),
+               (re.compile(r"^[ \t]*(?:[-+>]|#{1,6}|\d+[.)])[ \t]+", re.M), ""), (re.compile(r"\s+"), " "))
+
+
+def _occurrences(text, part, lo=0):
+    out, i = [], text.find(part, lo) if part else -1
+    while i != -1:
+        out.append((i, i + len(part)))
+        i = text.find(part, i + 1)
+    return out
+
+
+def _norm_tracked(text, lo=0):
+    """translation.normalize(text[lo:]) and, for each of its characters, the raw offset it came from."""
+    s, pos = text[lo:], list(range(lo, len(text)))
+    for rx, rep in _NORM_STEPS:
+        out, opos, last = [], [], 0
+        for m in rx.finditer(s):
+            out.append(s[last:m.start()])
+            opos += pos[last:m.start()]
+            if rep == 1:
+                out.append(m.group(1))
+                opos += pos[m.start(1):m.end(1)]
+            else:
+                out.append(rep)
+                opos += [pos[m.start()]] * len(rep)
+            last = m.end()
+        out.append(s[last:])
+        opos += pos[last:]
+        s, pos = "".join(out), opos
+    a, b = len(s) - len(s.lstrip()), len(s.rstrip())
+    return s[a:b], pos[a:b]
+
+
+class _Body:
+    """Where a text lies in the body (from `lo`: frontmatter excluded): verbatim, and — the
+    writer's map is markdown-insensitive in places (ruby, emphasis, links) — in
+    translation.normalize space, mapped back to raw offsets; a normalised hit no verbatim hit
+    covers is one more occurrence (a sentence written once plain and once with emphasis is
+    repeated, not single)."""
+
+    def __init__(self, text, lo):
+        self.text, self.lo, self._n = text, lo, None
+
+    def find(self, part):
+        occ = _occurrences(self.text, part, self.lo)
+        from .translation import normalize
+        npart = normalize(part) if part else ""
+        if not npart:
+            return occ
+        if self._n is None:
+            self._n = _norm_tracked(self.text, self.lo)
+        ns, pos = self._n
+        more = [(pos[a], pos[b - 1] + 1) for a, b in _occurrences(ns, npart)]
+        return sorted(occ + [sp for sp in more if not _overlaps([sp], occ)])
+
+
+def map_spans(text, lo, texts, body=None):
+    """Each map text's spans in the body, longest entry first and exclusively: an occurrence
+    inside a longer entry's assigned span belongs to that entry (t0010: a table cell copied
+    inside a later sentence)."""
+    body = body or _Body(text, lo)
+    assigned, out = [], {}
+    for t in sorted(set(texts), key=len, reverse=True):
+        occ = [(a, b) for a, b in body.find(t) if not any(x <= a and b <= y for x, y in assigned)]
+        out[t] = occ
+        assigned.extend(occ)
+    return out
+
+
+def _overlaps(spans, others):
+    return any(a < y and x < b for a, b in spans for x, y in others)
+
+
+def coverage(text, lo, entries, rec, framings=None, where="verify.json"):
+    """D1 on one body and its claims map. `problems`: what this verify.json gets wrong (a missing
+    or malformed verdict, a listed text not unique, counts). `unplaced`: map entries with no span
+    of their own — not in the body (the frontmatter, a paraphrase), or only inside a longer entry —
+    need no verdict, and a verdict on one is ignored (information for the PR, never a refusal).
+    `spans`/`dup`/`listed`: what the trim reads (D2)."""
+    out = {"problems": [], "unplaced": [], "dup": set(), "spans": {}, "listed": {}}
+    p = out["problems"]
+    texts = [t for t in entries if t]
+    body = _Body(text, lo)
+    spans = map_spans(text, lo, texts, body)
+    out["spans"] = spans
+    out["dup"] = {t for t, sp in spans.items() if len(sp) > 1}
+    own = {t: sp for t, sp in spans.items() if sp}
+    out["unplaced"] = sorted(t for t in spans if not spans[t])
+    vs = (rec or {}).get("verdicts")
+    if not isinstance(vs, list):
+        p.append("%s has no `verdicts` list — one per claims-map entry (0.24.0; a verify.json made before it: run "
+                 "verify again)" % where)
+        return out
+    cov = {}
+    n = {k: 0 for k in VERDICTS}
+    unmapped, uns_texts = 0, []
+    cover = {str(c).strip() for f in framings or [] if isinstance(f, dict) for c in f.get("covers") or []}
+
+    def resolve(t):
+        if own.get(t):
+            return own[t]
+        occ = body.find(t)
+        if len(occ) != 1:
+            p.append("%s: %r is found %d times in the article (a listed text is unique, or equals a map entry that "
+                     "is itself repeated)" % (where, t[:80], len(occ)))
+            return None
+        return occ
+
+    for v in vs:
+        if not (isinstance(v, dict) and isinstance(v.get("text"), str) and v["text"].strip()
+                and v.get("verdict") in VERDICTS and isinstance(v.get("claims", []), list)):
+            p.append('%s verdicts entry is malformed — {"text": "<verbatim>", "verdict": "%s", "claims": ["C1"], '
+                     '"why": "…"}' % (where, "|".join(VERDICTS)))
+            continue
+        t, kind = v["text"].strip(), v["verdict"]
+        if kind != "supported" and not str(v.get("why") or "").strip():
+            p.append("%s: the %s verdict on %r needs its one-line `why`" % (where, kind, t[:80]))
+        n[kind] += 1
+        if kind == "unsupported":
+            uns_texts.append(t)
+        if t in spans and not spans[t]:
+            continue  # an unplaced entry: its verdict is counted, not placed
+        sp = resolve(t)
+        if sp is None:
+            continue
+        out["listed"][t] = sp
+        marked = [e for e, es in own.items() if _overlaps(sp, es)]
+        if not marked:  # outside the map: the checker found a factual text the writer did not map
+            if kind != "unsupported":
+                p.append("%s: %r is in no claims-map entry — an unmapped factual text is `unsupported` (and counted "
+                         "in `unmapped`)" % (where, t[:80]))
+            unmapped += 1
+        for e in marked:
+            cov.setdefault(e, []).append(kind)
+            if kind == "not-factual" and _SENT_END_RE.search(e) and e not in cover and t not in cover:
+                p.append("%s: %r is a mapped sentence judged not-factual without a framing covering it — only a "
+                         "label or table header (no sentence end) is, else `framings[].covers` names it" % (where, e[:80]))
+    for e in sorted(own, key=lambda x: own[x][0]):
+        if e not in cov:
+            p.append("%s has no verdict for the claims-map entry %r" % (where, e[:80]))
+    c = (rec or {}).get("counts")
+    c = c if isinstance(c, dict) else {}
+    want = {"supported": n["supported"], "unsupported": n["unsupported"], "contradicted": n["contradicted"],
+            "unmapped": unmapped}
+    bad = ["%s %s ≠ %d" % (k, c.get(k), x) for k, x in want.items() if _int(c.get(k)) != x]
+    if bad:
+        p.append("%s counts do not follow its verdicts (%s)" % (where, ", ".join(bad)))
+    listed = (rec or {}).get("unsupported_sentences") or []
+    if not isinstance(listed, list) or sorted(str(x).strip() for x in listed) != sorted(uns_texts):
+        p.append("%s unsupported_sentences must be exactly the texts of its unsupported verdicts" % where)
+    return out
+
+
+def _map_texts(root, tid, map_rel):
+    """The `text` of every claims-map entry, or None when the map is missing; [] when unreadable."""
+    mp = os.path.join(root, work_rel(tid, map_rel))
+    if not os.path.isfile(mp):
+        return None
+    cm = read_json(mp)
+    sents = cm.get("sentences") if isinstance(cm, dict) else None
+    return [str(e.get("text") or "").strip() for e in sents or [] if isinstance(e, dict)]
+
+
+UNPLACED_MIN = 3  # unplaced map entries tolerated: max(3, 10% of the entries) — more is a map that does not match
+
+
+def unplaced_bound(n):
+    return max(UNPLACED_MIN, n // 10)
+
+
+def unplaced_entries(root, cfg, tid, slug):
+    """(map texts not in the body at all, number of distinct entries) for the source body and
+    claims-map.json — the bound's count. An entry found only inside a longer entry (a table cell
+    copied into a sentence) has a place in the article: it is `unplaced` for coverage, not here."""
+    texts = [t for t in dict.fromkeys(_map_texts(root, tid, "claims-map.json") or []) if t]
+    try:
+        with open(os.path.join(root, cfg.body_path(slug)), encoding="utf-8", newline="") as f:
+            text = f.read()
+    except (OSError, UnicodeDecodeError):
+        return [], len(texts)
+    lo = _body_start(text)
+    if not texts or lo is None:
+        return [], len(texts)
+    body = _Body(text, lo)
+    return [t for t in texts if not body.find(t)], len(texts)
+
+
+def map_text_warnings(root, cfg, tid, slug):
+    """Map texts with no place in the source body (verbatim or markdown-insensitive): the
+    writer fixes them in its own pass — a warning up to `unplaced_bound`, beyond it `stage pass
+    --stage draft` refuses (an unbounded `unplaced` would switch D1 off)."""
+    gone, _ = unplaced_entries(root, cfg, tid, slug)
+    return ["claims-map.json text with no place of its own in the article (copy each sentence as it stands): %r"
+            % t[:80] for t in gone[:5]]
+
+
+def verify_coverage(root, cfg, tid, st, ver):
+    """D1 for this topic's verify.json: the source body with claims-map.json, or — in a
+    translation repo with `by_lang` — each language that has a claims map. A translation repo
+    matches markdown-insensitively throughout, as its draft gate does."""
+    from . import translation
+
+    out = {"problems": [], "unplaced": [], "parts": {}}
+    slug = st.get("slug")
+    ver = ver if isinstance(ver, dict) else {}
+    if not slug:
+        return out
+    by = ver.get("by_lang")
+    norm = bool(cfg.translations())
+    jobs = []
+    if norm and isinstance(by, dict):
+        for lang in sorted(by):
+            lang_arg = None if lang == cfg.source_lang() else lang
+            jobs.append((lang, by[lang] if isinstance(by[lang], dict) else {}, cfg.body_path(slug, lang_arg),
+                         translation.map_name(lang_arg)))
+    else:
+        jobs.append((None, ver, cfg.body_path(slug), "claims-map.json"))
+    framings = ver.get("framings")
+    for lang, rec, body_rel, map_rel in jobs:
+        texts = _map_texts(root, tid, map_rel)
+        if texts is None:
+            continue  # D1 applies where the language has a claims map
+        try:
+            with open(os.path.join(root, body_rel), encoding="utf-8", newline="") as f:
+                text = f.read()
+        except (OSError, UnicodeDecodeError):
+            continue  # a missing translation file is translation's own refusal
+        where = "verify.json" if lang is None else "verify.json by_lang.%s" % lang
+        fr = framings
+        if norm:
+            nz = translation.normalize
+            text = nz(translation._FM_RE.sub("", text.replace("\r\n", "\n"), count=1))
+            texts = [nz(t) for t in texts]
+            vs = rec.get("verdicts")
+            rec = dict(rec, verdicts=[dict(v, text=nz(v["text"])) if isinstance(v, dict) and isinstance(v.get("text"), str)
+                                      else v for v in vs] if isinstance(vs, list) else vs,
+                       unsupported_sentences=[nz(str(x)) for x in rec.get("unsupported_sentences") or []])
+            fr = [dict(f, covers=[nz(str(c)) for c in f.get("covers") or []]) for f in framings or []
+                  if isinstance(f, dict)]
+            lo = 0
+        else:
+            lo = _body_start(text)
+            if lo is None:
+                out["problems"].append("the article's frontmatter does not close")
+                continue
+        part = coverage(text, lo, texts, rec, fr, where)
+        out["problems"] += part["problems"]
+        out["unplaced"] += part["unplaced"]
+        out["parts"][lang] = part
+    return out
+
+
+def _kept_pattern(old, spans, narrow=()):
     """The trimmed body must be the snapshot minus `spans`, byte for byte. At each seam only the
     whitespace the deletion left may change: within a line it may close up to one space or none;
-    across lines the line break and indentation before the next kept text stay as they were."""
+    across lines the line break and indentation before the next kept text stay as they were. Each
+    `narrow` span (inside kept text) becomes a group the caller checks (`_narrowing`)."""
     merged = []
     for a, b in sorted(spans):  # deletions separated only by whitespace form one seam
         if merged and not old[merged[-1][1]:a].strip():
@@ -1119,18 +1423,27 @@ def _kept_pattern(old, spans):
             merged.append([a, b])
     pieces, last = [], 0
     for a, b in merged:
-        pieces.append(old[last:a])
+        pieces.append((last, old[last:a]))
         last = b
-    pieces.append(old[last:])
+    pieces.append((last, old[last:]))
     out = []
-    for i, p in enumerate(pieces):
+    for i, (at, p) in enumerate(pieces):
         lead = re.match(r"\s*", p).group(0) if i > 0 else ""
         core = p[len(lead):]
         trail = re.search(r"\s*$", core).group(0) if i < len(pieces) - 1 else ""
         core = core[:len(core) - len(trail)] if trail else core
-        out.append((lead, core, trail))
+        out.append((lead, core, trail, at + len(lead)))
+
+    def esc(core, at):
+        res, pos = [], at
+        for a, b in sorted(narrow):
+            if at <= a and b <= at + len(core):
+                res += [re.escape(old[pos:a]), "(.*?)"]
+                pos = b
+        return "".join(res) + re.escape(old[pos:at + len(core)])
+
     pat = []
-    for i, (lead, core, trail) in enumerate(out):
+    for i, (lead, core, trail, at) in enumerate(out):
         if i > 0:
             wl, wr = out[i - 1][2], lead
             if i == len(out) - 1 and not core:
@@ -1148,21 +1461,135 @@ def _kept_pattern(old, spans):
                         _cjk(left) and _cjk(right)):
                     opts.add("")  # as it was, before punctuation ("helps (x)." → "helps."), or between CJK
             pat.append("(?:%s)" % "|".join(re.escape(o) for o in sorted(opts, key=len, reverse=True)))
-        pat.append(re.escape(core))
+        pat.append(esc(core, at))
     return re.compile("".join(pat), re.S)
 
 
+# --- narrowing: whole tokens deleted inside a listed sentence (15 D2.2, 0.24.0) --------------
+
+# a removed token never holds a digit, markup or a link, emphasis, table, quote or title character
+_NARROW_BAD_RE = re.compile(r"[\d<>\[\]()`*_~|「」『』“”‘’《》〈〉\"']")
+_QUOTATION_RE = re.compile(r"「[^」]*」|『[^』]*』|“[^”]*”|‘[^’]*’|《[^》]*》|〈[^〉]*〉|\"[^\"]*\"")
+# negations (15 D2.2, rule of review 1): en as a whole word or a token ending in n't; ko by form —
+# 안/못 alone, 못하-/못했-/못한-/못할-, 말고-/말라-/말아-/말자- after a -지 token, or any token holding
+# one of _KO_NEG (so 안내, 안전, 주말, 말하는, know, note are no negations)
+_EN_NEG_RE = re.compile(r"\b(?:not|no|never|without|cannot|none|nor|neither|nothing|nobody|except|unless|hardly)\b"
+                        r"|n['’]t$")
+_KO_NEG = ("않", "없", "아니", "아닌", "아님", "아냐", "마세요", "마라", "맙시다")
+_TOKEN_PUNCT = ".,!?;:…。、！？"
+
+
+def _negation(tok, prev=""):
+    t = tok.lower().strip(_TOKEN_PUNCT)
+    if _EN_NEG_RE.search(t) or any(w in t for w in _KO_NEG) or t in ("안", "못"):
+        return True
+    if t.startswith(("못하", "못했", "못한", "못할")):
+        return True
+    return t.startswith(("말고", "말라", "말아", "말자")) and prev.strip(_TOKEN_PUNCT).endswith("지")
+
+
+NO_SPACE_LANGS = ("ja", "zh")  # written without spaces: delete or map only
+
+
+def _narrowing(orig, new):
+    """`new` is `orig` with whole whitespace-separated tokens removed: (removed tokens, None), or
+    (None, why). Single spaces at the seams collapse; no line break is added or removed; the rest
+    is non-empty and still ends with its sentence end; a removed token holds no digit, markup,
+    quote or emphasis character, lies in no quotation and is no negation."""
+    if not new.strip() or new != new.strip():
+        return None, "a narrowed text is the listed text with whole words removed, nothing around it"
+    if new.count("\n") != orig.count("\n"):
+        return None, "a narrowing adds or removes no line break"
+    if not re.search(r"[.!?。！？][%s]*$" % _CLOSERS, new):
+        return None, "a narrowed sentence still ends with its sentence end"
+    parts = re.split(r"(\s+)", orig)
+    toks, seps = parts[0::2], parts[1::2]
+    starts, pos = [], 0
+    for i, t in enumerate(toks):
+        starts.append(pos)
+        pos += len(t) + (len(seps[i]) if i < len(seps) else 0)
+    quotes = [(m.start(), m.end()) for m in _QUOTATION_RE.finditer(orig)]
+
+    def why_not(i):
+        t = toks[i]
+        if _NARROW_BAD_RE.search(t):
+            return "it holds a digit, markup or a quote, emphasis or table character"
+        if any(x < starts[i] + len(t) and starts[i] < y for x, y in quotes):
+            return "it lies inside a quotation"
+        if _negation(t, toks[i - 1] if i else ""):
+            return "it is a negation"
+        return None
+
+    nparts = re.split(r"(\s+)", new)
+    ntoks, nseps = nparts[0::2], nparts[1::2]
+
+    def align(ok):
+        import functools
+
+        @functools.lru_cache(None)
+        def go(i, j):
+            if i == len(ntoks) - 1:
+                rest = tuple(range(j + 1, len(toks)))
+                return rest if all(ok(k) for k in rest) else None
+            for j2 in range(j + 1, len(toks)):
+                if toks[j2] != ntoks[i + 1] or not all(ok(k) for k in range(j + 1, j2)):
+                    continue
+                allowed = {seps[j]} if j2 == j + 1 else set(seps[j:j2]) | {" "}
+                if nseps[i] not in allowed:
+                    continue
+                r = go(i + 1, j2)
+                if r is not None:
+                    return tuple(range(j + 1, j2)) + r
+            return None
+
+        for j0 in range(len(toks)):
+            if toks[j0] == ntoks[0] and all(ok(k) for k in range(j0)):
+                r = go(0, j0)
+                if r is not None:
+                    return tuple(range(j0)) + r
+        return None
+
+    removed = align(lambda k: why_not(k) is None)
+    if removed:
+        return [toks[k] for k in removed], None
+    shape = align(lambda k: True)
+    if not shape:
+        return None, "not the listed text with whole words removed"
+    bad = [(toks[k], why_not(k)) for k in shape if why_not(k)]
+    return None, "a narrowing never removes %r: %s" % bad[0] if bad else "not a narrowing"
+
+
+# --- trim: begin, finish, abort, revert ------------------------------------------------------
+
+def _gap_key(ver):
+    """A verify gap is its listed texts on one body: the same texts again is the same gap."""
+    import hashlib
+
+    listed = sorted(str(x).strip() for x in ver.get("unsupported_sentences") or [] if isinstance(x, str))
+    return "sha256:" + hashlib.sha256(json.dumps(listed, ensure_ascii=False).encode()).hexdigest()
+
+
+TRIM_MAX_PER_ARTICLE = 3  # trims per article, an aborted or reverted one included; none counts as a loopback
+
+
 def trim_begin(root, cfg, tid):
-    """Open the trim after a failed verify. The fact-checker lists the unsupported text verbatim
-    — whole sentences, or a parenthetical aside when that aside alone is unsupported; the writer
-    may then only delete a listed text whole, or map it to an existing claim. The article
-    critique passed is snapshotted."""
+    """Open a trim after a failed verify. The fact-checker lists the unsupported text verbatim —
+    whole sentences, or a parenthetical aside when that aside alone is unsupported; the writer
+    may then only delete a listed text whole, map it to an existing claim, or narrow it (delete
+    whole words inside it — not an aside, a heading, a span narrowed before, nor in a language
+    written without spaces). Eligibility is decided here, before any loopback: up to three per
+    article, never twice for one gap. The article, claims map, verify result and the hashes
+    critique passed are snapshotted."""
     import shutil
 
     st = load_state(root, tid)
     slug = st.get("slug")
-    if st.get("trim"):
-        raise HeraldError("%s was already trimmed once (%s) — loop back or hold" % (tid, st["trim"].get("status")))
+    trs = trims_of(st)
+    if open_trim(st):
+        raise HeraldError("a trim is open — `HRD trim --topic %s --finish` or `--abort` first" % tid)
+    if len(trs) >= TRIM_MAX_PER_ARTICLE:
+        raise HeraldError("%s was trimmed %d times already (%s) — loop back or hold"
+                          % (tid, len(trs), ", ".join(str(t.get("status")) for t in trs)))
     if st.get("stage") != "verify" or not slug:
         raise HeraldError("trim repairs a failed verify (stage is %s)" % st.get("stage"))
     if "translator" in ((cfg.get("roles", "conditional") or [])):
@@ -1173,6 +1600,11 @@ def trim_begin(root, cfg, tid):
     ver = load_machine(root, tid, "verify.json") or {}
     if ver.get("body_hash") != cur:
         raise HeraldError("verify.json does not evaluate the current article — run verify first")
+    gap = _gap_key(ver)
+    tried = [t for t in trs if t.get("base_hash") == cur and t.get("gap", gap) == gap]
+    if tried:
+        raise HeraldError("a trim was already tried on this verify result (%s) — loop back or hold"
+                          % tried[-1].get("status"))
     counts = ver.get("counts") if isinstance(ver.get("counts"), dict) else {}
     con, uns = _int(counts.get("contradicted")), _int(counts.get("unsupported"))
     if con:
@@ -1183,15 +1615,14 @@ def trim_begin(root, cfg, tid):
     if isinstance(ver.get("images"), dict) and ver["images"].get("unsupported"):
         raise HeraldError("unsupported text in a diagram is never trimmed (trim deletes body sentences only) — "
                           "`HRD loopback --cause verify` (08-images.md §2.12)")
-    if not 1 <= uns <= TRIM_MAX_UNSUPPORTED:
-        raise HeraldError("trim takes 1 to %d unsupported sentences, not %d — loop back"
-                          % (TRIM_MAX_UNSUPPORTED, uns))
     sents = ver.get("unsupported_sentences")
+    if not 1 <= (len(sents) if isinstance(sents, list) else uns) <= TRIM_MAX_UNSUPPORTED:
+        raise HeraldError("trim takes 1 to %d listed unsupported texts, not %d — loop back"
+                          % (TRIM_MAX_UNSUPPORTED, len(sents) if isinstance(sents, list) else uns))
     if not isinstance(sents, list) or len(sents) != uns or not all(isinstance(x, str) and x.strip() for x in sents):
         raise HeraldError("verify.json must list the %d unsupported sentences verbatim (unsupported_sentences) — "
                           "loop back" % uns)
-    quals = ver.get("unsupported_qualifiers") or []
-    if not isinstance(quals, list) or any(isinstance(q, str) and q.strip() in [x.strip() for x in sents] for q in quals):
+    if ver.get("unsupported_qualifiers"):
         raise HeraldError("an unsupported warning or limit is never trimmed (deleting it broadens what remains) — "
                           "loop back")
     body_path = os.path.join(root, cfg.body_path(slug))
@@ -1203,6 +1634,9 @@ def trim_begin(root, cfg, tid):
     prot = _protected(old)
     from .images import snippet_spans
     attribution = snippet_spans(root, cfg, tid, st, old)  # 08-images.md §2.6.5: never cut into one
+    narrowed_before = [sp for t in trs for nr in t.get("narrowed") or [] if isinstance(nr, dict)
+                       for sp in _occurrences(old, str(nr.get("after") or ""), b0)]
+    spaced = str(cfg.source_lang() or "").split("-")[0].lower() not in NO_SPACE_LANGS
     units, taken = [], []
     for text in sents:
         text = text.strip()
@@ -1212,8 +1646,11 @@ def trim_begin(root, cfg, tid):
             raise HeraldError("unsupported text found %d times in the article body (need exactly once, "
                               "verbatim): %r — loop back" % (len(hits), text[:80]))
         a, b = hits[0], hits[0] + len(text)
+        ta = a
         if any(a < y and x < b for x, y in attribution):
             raise HeraldError("%r overlaps an image attribution — loop back (the illustrator fixes the alt)" % text[:80])
+        ls = old.rfind("\n", 0, a) + 1
+        heading = re.match(r"[ \t]*#{1,6}[ \t]", old[ls:a]) is not None  # a sentence of a heading line
         if aside:
             # an aside the fact-checker named as the unsupported part, never inside code or a link
             if old[a - 1:a] == "]" or any(a < y and x < b for x, y in prot):
@@ -1230,7 +1667,6 @@ def trim_begin(root, cfg, tid):
             if any(a < m.end() and m.start() < b for m in _IMG_REF_RE.finditer(old)):
                 # trim never touches images: deleting the reference would leave the file deployed
                 raise HeraldError("%r holds an image reference — loop back" % text[:80])
-            ls = old.rfind("\n", 0, a) + 1
             le = old.find("\n", b)
             mark = old[ls:a]
             if mark.strip() and _LINE_MARK_RE.fullmatch(mark) and not old[b:le if le != -1 else None].strip():
@@ -1247,39 +1683,57 @@ def trim_begin(root, cfg, tid):
         if any(a < y and x < b for x, y in taken):
             raise HeraldError("unsupported texts overlap — loop back")
         taken.append((a, b))
-        units.append({"text": text, "span": [a, b], "aside": aside})
+        narrow = spaced and not aside and not heading and not any(ta < y and x < b for x, y in narrowed_before)
+        units.append({"text": text, "span": [a, b], "tspan": [ta, b], "aside": aside, "narrow": narrow})
+    cov = verify_coverage(root, cfg, tid, st, ver)  # after the texts' own refusals, which say more
+    if cov["problems"]:
+        raise HeraldError("; ".join(cov["problems"][:4]))
+    from .translation import normalize
+    dups = {normalize(t) for t in (cov["parts"].get(None) or {}).get("dup", ())}
+    dup = [u["text"] for u in units if normalize(u["text"]) in dups]
+    if dup:
+        raise HeraldError("%r is a claims-map entry repeated in the article — never trimmed; loop back" % dup[0][:80])
     d = _trim_dir(root, tid)
     if os.path.isdir(d):
         shutil.rmtree(d)
     os.makedirs(d)
     shutil.copyfile(body_path, os.path.join(d, "body"))
-    cmap = os.path.join(root, work_rel(tid, "claims-map.json"))
-    if os.path.isfile(cmap):
-        shutil.copyfile(cmap, os.path.join(d, "claims-map.json"))
+    for name in ("claims-map.json", "verify.json", "verify.md"):
+        src = os.path.join(root, work_rel(tid, name))
+        if os.path.isfile(src):
+            shutil.copyfile(src, os.path.join(d, name))
     img = os.path.join(root, cfg.image_dir(slug))
     if os.path.isdir(img):
         shutil.copytree(img, os.path.join(d, "images"))
-    st["trim"] = {"status": "open", "base_hash": cur, "images": _image_hash(root, cfg, slug),
-                  "snapshot": file_hash(root, os.path.relpath(os.path.join(d, "body"), root)),
-                  "unsupported": uns, "sentences": units, "at": now_iso()}
+    out = st["stages"].get("draft", {}).get("outputs") or {}
+    pre = {"@article": out.get("@article"), "claims-map.json": out.get("claims-map.json"),
+           "critique": (st["stages"].get("critique") or {}).get("body_hash")}
+    _trims_rw(st).append({"status": "open", "base_hash": cur, "images": _image_hash(root, cfg, slug),
+                          "snapshot": file_hash(root, os.path.relpath(os.path.join(d, "body"), root)),
+                          "gap": gap, "pre": pre, "unsupported": uns, "sentences": units, "at": now_iso()})
     save_state(root, tid, st)
     # the gap is the writer's, even when no loopback follows
     safe_signal(root, "verify-gap", tid, {"note": "trim", "trim": True, "counts": counts,
                                           "loopback": _int(st.get("loopbacks"))})
-    return {"status": "open", "sentences": [u["text"] for u in units]}
+    return {"status": "open", "sentences": [u["text"] for u in units], "trim": len(_trims_rw(st)),
+            "may_narrow": [u["text"] for u in units if u["narrow"]]}
 
 
 def _trim_choices(units):
-    """Each listed sentence or aside is kept or deleted whole."""
+    """Each listed sentence or aside is kept, deleted whole or — where allowed — narrowed:
+    (deleted spans, narrowed spans)."""
     import itertools
 
-    for combo in itertools.product(*[[None, tuple(u["span"])] for u in units]):
-        yield sorted(sp for sp in combo if sp)
+    opts = [[None, ("del", tuple(u["span"]))] + ([("nar", tuple(u.get("tspan") or u["span"]))]
+                                                  if u.get("narrow") else []) for u in units]
+    for combo in itertools.product(*opts):
+        yield sorted(c[1] for c in combo if c and c[0] == "del"), sorted(c[1] for c in combo if c and c[0] == "nar")
 
 
-def _claims_map_problems(root, tid, d, units):
+def _claims_map_problems(root, tid, d, units, narrowed=()):
     """The writer may add, change or drop only the claims-map entries of the listed texts (an
-    entry whose text contains one, or a sentence that lost a listed aside)."""
+    entry whose text contains one, a sentence that lost a listed aside, or one whose listed
+    sentence was narrowed)."""
     snap = os.path.join(d, "claims-map.json")
     if not os.path.isfile(snap):
         return []
@@ -1298,11 +1752,13 @@ def _claims_map_problems(root, tid, d, units):
     def key(e):
         return json.dumps(e, sort_keys=True, ensure_ascii=False)
 
-    listed = [u["text"] for u in units]
+    listed = [u["text"] for u in units] + [n["after"] for n in narrowed]
     asides = [u["text"] for u in units if u.get("aside")]
     o, n = entries(old), entries(new)
     shorter = {re.sub(r"[ \t]*" + re.escape(x), "", str(e.get("text", ""))) for e in o for x in asides
                if x in str(e.get("text", ""))}
+    shorter |= {str(e.get("text", "")).replace(nr["before"], nr["after"]) for e in o for nr in narrowed
+                if nr["before"] in str(e.get("text", ""))}
     ok = set(map(key, o)) & set(map(key, n))
     bad = [e for e in o + n if key(e) not in ok and not any(x in str(e.get("text", "")) for x in listed)
            and str(e.get("text", "")) not in shorter]
@@ -1310,21 +1766,61 @@ def _claims_map_problems(root, tid, d, units):
                                                                        for e in bad[:3])] if bad else []
 
 
+def _trim_map_in_step(root, tid, removed, narrowed):
+    """The claims map follows the trimmed body (review 1 M1): an entry that is a deleted text goes,
+    a deleted text inside an entry leaves it, a narrowed text becomes its narrowed form."""
+    from .translation import normalize as nz
+
+    rel = work_rel(tid, "claims-map.json")
+    cm = read_json(os.path.join(root, rel))
+    sents = cm.get("sentences") if isinstance(cm, dict) else None
+    if not isinstance(sents, list):
+        return
+    kept, changed = [], False
+    for e in sents:
+        t = e.get("text") if isinstance(e, dict) else None
+        if isinstance(t, str):
+            new = t
+            for nr in narrowed:
+                if nr["before"] in new:
+                    new = new.replace(nr["before"], nr["after"])
+                elif nz(nr["before"]) and nz(nr["before"]) in nz(new):  # a markdown-free entry (t0011)
+                    new = nz(new).replace(nz(nr["before"]), nz(nr["after"]))
+            for x in removed:
+                x = re.sub(r"^(?:[-*+]|\d+[.)])[ \t]+", "", x)  # a list item's text, without its mark
+                if x and (new.strip() == x or nz(new) == nz(x)):
+                    new = ""
+                elif x and x in new:
+                    new = re.sub(r"[ \t]*" + re.escape(x), "", new, count=1).strip()
+                elif nz(x) and nz(x) in nz(new):
+                    new = re.sub(r"[ \t]*" + re.escape(nz(x)), "", nz(new), count=1).strip()
+            if new != t:
+                changed = True
+                if not new.strip():
+                    continue
+                e = dict(e, text=new)
+        kept.append(e)
+    if changed:
+        cm["sentences"] = kept
+        write_json(os.path.join(root, rel), cm)
+
+
 def _trim_open(root, tid):
     st = load_state(root, tid)
-    if (st.get("trim") or {}).get("status") != "open":
+    if not open_trim(st):
         raise HeraldError("%s has no open trim (`HRD trim --topic %s --begin` first)" % (tid, tid))
     return st
 
 
 def trim_finish(root, cfg, tid):
-    """Accept the trim only if the body equals the snapshot minus whole listed texts (only the
-    seam whitespace may differ), the images and critique files are untouched and the gate passes;
-    then critique's verdict carries over to the shorter body and verify runs again on it."""
-    import shutil
-
+    """Accept the trim only if the body equals the snapshot with each listed text kept, deleted
+    whole or narrowed (only the seam whitespace may differ), the images and critique files are
+    untouched and the gate passes; then critique's verdict carries over to the shorter body and
+    verify runs again on it — in full, with the before/after pairs. The snapshot stays until that
+    verify (`--revert`)."""
     st = _trim_open(root, tid)
-    tr, slug = st["trim"], st["slug"]
+    _trims_rw(st)
+    tr, slug = open_trim(st), st["slug"]
     if st.get("stage") != "verify":
         raise HeraldError("the trim belongs to verify, but the stage is %s — `HRD trim --topic %s --abort`"
                           % (st.get("stage"), tid))
@@ -1339,19 +1835,36 @@ def trim_finish(root, cfg, tid):
             new = f.read()
     except (OSError, UnicodeDecodeError) as e:
         raise HeraldError("cannot compare the trimmed body with its snapshot: %s" % e)
-    chosen = None
-    for spans in _trim_choices(tr.get("sentences") or []):
-        if (not spans and new == old) or (spans and _kept_pattern(old, spans).fullmatch(new)):
-            chosen = spans
+    chosen, why = None, []
+    for dels, nars in _trim_choices(tr.get("sentences") or []):
+        if not dels and not nars:
+            if new == old:
+                chosen = ([], [])
+                break
+            continue
+        m = _kept_pattern(old, dels, nars).fullmatch(new)
+        if not m:
+            continue
+        narrowed = []
+        for (a, b), after in zip(nars, m.groups()):
+            removed, reason = _narrowing(old[a:b], after)
+            if reason or after == old[a:b]:
+                why.append(reason or "")
+                break
+            narrowed.append({"before": old[a:b], "after": after, "removed": removed})
+        else:
+            chosen = (dels, narrowed)
             break
     problems = []
     if chosen is None:
-        problems.append("the body changed beyond deleting listed texts whole")
+        reason = next((w for w in why if w), None)
+        problems.append("the body changed beyond deleting listed texts whole or narrowing them" +
+                        (" (%s)" % reason if reason else ""))
     crit_out = (st["stages"].get("critique") or {}).get("outputs") or {}
     for name in ("critique.md", "critique.json"):
         if file_hash(root, work_rel(tid, name)) != crit_out.get(name):
             problems.append("%s changed since critique passed" % name)
-    problems.extend(_claims_map_problems(root, tid, d, tr.get("sentences") or []))
+    problems.extend(_claims_map_problems(root, tid, d, tr.get("sentences") or [], chosen[1] if chosen else ()))
     if _image_hash(root, cfg, slug) != tr.get("images"):
         problems.append("the images changed — a trim touches only the body text")
     if problems:
@@ -1360,50 +1873,109 @@ def trim_finish(root, cfg, tid):
     if not gate["ok"]:
         raise HeraldError("deterministic gate failed on the trimmed body: %s (`HRD trim --topic %s --abort` "
                           "restores the article)" % ("; ".join(gate["errors"][:5]), tid))
+    _trim_map_in_step(root, tid, [old[a:b].strip() for a, b in chosen[0]], chosen[1])
     cur = worktree_hash(root, cfg, slug)
     out = st["stages"].setdefault("draft", {}).setdefault("outputs", {})
     out["@article"] = cur
     out["claims-map.json"] = file_hash(root, work_rel(tid, "claims-map.json"))
     st["stages"].setdefault("critique", {})["body_hash"] = cur  # critique's verdict covers the shorter body
-    tr.update({"status": "done", "hash": cur, "removed": [old[a:b].strip() for a, b in chosen],
-               "done_at": now_iso()})
+    tr.update({"status": "done", "hash": cur, "removed": [old[a:b].strip() for a, b in chosen[0]],
+               "narrowed": chosen[1], "done_at": now_iso()})
     save_state(root, tid, st)
-    shutil.rmtree(d, ignore_errors=True)
     return tr
 
 
 def trim_abort(root, cfg, tid, force=False):
-    """Put back the article, claims map and images critique passed; the trim stays used. With
+    """Put back the article, claims map and images critique passed; the trim stays counted. With
     `force` and the snapshot gone (it is local), only close the trim: the article then differs
     from what critique passed, so the entry checks send it back through draft."""
     import shutil
 
     st = _trim_open(root, tid)
+    _trims_rw(st)
+    tr = open_trim(st)
     d = _trim_dir(root, tid)
     body = os.path.join(d, "body")
     if not os.path.isfile(body):
         if not force:
             raise HeraldError("the trim snapshot is gone (%s) — `HRD trim --topic %s --abort --force` closes the "
                               "trim; then loop back" % (d, tid))
-        st["trim"].update({"status": "aborted", "done_at": now_iso(), "note": "snapshot lost"})
+        tr.update({"status": "aborted", "done_at": now_iso(), "note": "snapshot lost"})
         save_state(root, tid, st)
-        return {"restored": False, "trim": st["trim"]}
+        return {"restored": False, "trim": tr}
     slug = st["slug"]
     shutil.copyfile(body, os.path.join(root, cfg.body_path(slug)))
     if os.path.isfile(os.path.join(d, "claims-map.json")):
         shutil.copyfile(os.path.join(d, "claims-map.json"), os.path.join(root, work_rel(tid, "claims-map.json")))
     img = os.path.join(root, cfg.image_dir(slug))
-    if _image_hash(root, cfg, slug) != st["trim"].get("images"):
+    if _image_hash(root, cfg, slug) != tr.get("images"):
         if os.path.isdir(img):
             shutil.rmtree(img)
         if os.path.isdir(os.path.join(d, "images")):
             shutil.copytree(os.path.join(d, "images"), img)
-    if worktree_hash(root, cfg, slug) != st["trim"].get("base_hash"):
+    if worktree_hash(root, cfg, slug) != tr.get("base_hash"):
         raise HeraldError("could not restore the article critique passed (snapshot kept in %s)" % d)
-    st["trim"].update({"status": "aborted", "done_at": now_iso()})
+    tr.update({"status": "aborted", "done_at": now_iso()})
     save_state(root, tid, st)
     shutil.rmtree(d, ignore_errors=True)
-    return {"restored": True, "trim": st["trim"]}
+    return {"restored": True, "trim": tr}
+
+
+def trim_revert(root, cfg, tid, force=False):
+    """15 D2.3: the re-verify judged a narrowed text `contradicted` → put back the pre-trim
+    article, claims map, verify result and hashes, so the normal routes act on that gap (a
+    loopback, or a hold at exhaustion). The trim stays counted and this gap is never trimmed
+    again. With `force` and the snapshot gone (local, gitignored): only mark it reverted — the
+    caller holds `needs-human`."""
+    import shutil
+
+    st = load_state(root, tid)
+    trs = _trims_rw(st)
+    tr = trs[-1] if trs else {}
+    slug = st.get("slug")
+    if tr.get("status") != "done" or st.get("stage") != "verify" or not slug:
+        raise HeraldError("--revert undoes the last trim while its re-verify is current (last trim: %s, stage %s)"
+                          % (tr.get("status") or "none", st.get("stage")))
+    cur = worktree_hash(root, cfg, slug)
+    ver = load_machine(root, tid, "verify.json") or {}
+    if cur != tr.get("hash") or ver.get("body_hash") != cur:
+        raise HeraldError("--revert needs the trimmed article and its re-verify (verify.json evaluating it) — "
+                          "run verify first, or the article changed since")
+    contra = [v["text"].strip() for v in ver.get("verdicts") or [] if isinstance(v, dict)
+              and v.get("verdict") == "contradicted" and isinstance(v.get("text"), str) and v["text"].strip()]
+    with open(os.path.join(root, cfg.body_path(slug)), encoding="utf-8", newline="") as f:
+        body = f.read()
+    after = [sp for nr in tr.get("narrowed") or [] if isinstance(nr, dict)
+             for sp in _occurrences(body, str(nr.get("after") or ""))]
+    if not any(_overlaps(_occurrences(body, t), after) for t in contra):
+        raise HeraldError("--revert undoes a narrowing the re-verify judged contradicted — no narrowed text is "
+                          "contradicted here; the normal routes go on")
+    d = _trim_dir(root, tid)
+    snap = os.path.join(d, "body")
+    if file_hash(root, os.path.relpath(snap, root)) != tr.get("snapshot"):
+        if not force:
+            raise HeraldError("the trim snapshot is gone or changed (%s) — `HRD trim --topic %s --revert --force` "
+                              "marks the trim reverted; then hold needs-human" % (d, tid))
+        tr.update({"status": "reverted", "reverted_at": now_iso(), "note": "snapshot lost"})
+        save_state(root, tid, st)
+        return {"restored": False, "hold": "needs-human", "trim": tr}
+    shutil.copyfile(snap, os.path.join(root, cfg.body_path(slug)))
+    for name in ("claims-map.json", "verify.json", "verify.md"):
+        if os.path.isfile(os.path.join(d, name)):
+            shutil.copyfile(os.path.join(d, name), os.path.join(root, work_rel(tid, name)))
+    if worktree_hash(root, cfg, slug) != tr.get("base_hash"):
+        raise HeraldError("could not restore the pre-trim article (snapshot kept in %s)" % d)
+    pre = tr.get("pre") or {}
+    out = st["stages"].setdefault("draft", {}).setdefault("outputs", {})
+    for name in ("@article", "claims-map.json"):
+        if pre.get(name):
+            out[name] = pre[name]
+    if pre.get("critique"):
+        st["stages"].setdefault("critique", {})["body_hash"] = pre["critique"]
+    tr.update({"status": "reverted", "reverted_at": now_iso()})
+    save_state(root, tid, st)
+    shutil.rmtree(d, ignore_errors=True)
+    return {"restored": True, "trim": tr}
 
 
 # --- ledger ---------------------------------------------------------------------------------
