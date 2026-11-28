@@ -1,0 +1,129 @@
+{
+  "format": 1,
+  "issue": 42,
+  "revision": 1,
+  "origin": {
+    "template": "feature",
+    "version": "fixture-1",
+    "start": "fixture-1"
+  },
+  "steps": [
+    {
+      "id": "analyze",
+      "role": "requirements-engineer",
+      "inputs": [
+        "in:issue.md"
+      ],
+      "outputs": [
+        "docs/specs/42/analysis.md"
+      ]
+    },
+    {
+      "id": "ac-format",
+      "run": "ac-format",
+      "inputs": [
+        "docs/specs/42/analysis.md"
+      ],
+      "on_fail": {
+        "back_to": "analyze",
+        "max": 2
+      }
+    },
+    {
+      "id": "plan",
+      "check": "plan-gate",
+      "inputs": [
+        "docs/specs/42/analysis.md",
+        "in:issue.md"
+      ]
+    },
+    {
+      "id": "design",
+      "role": "tech-lead",
+      "inputs": [
+        "docs/specs/42/analysis.md"
+      ],
+      "outputs": [
+        "docs/specs/42/design.md"
+      ]
+    },
+    {
+      "id": "test-cases",
+      "role": "tester",
+      "inputs": [
+        "docs/specs/42/design.md"
+      ],
+      "outputs": [
+        "docs/specs/42/test-cases.md"
+      ]
+    },
+    {
+      "id": "setup",
+      "run": "setup"
+    },
+    {
+      "id": "developer",
+      "role": "developer",
+      "inputs": [
+        "docs/specs/42/design.md",
+        "docs/specs/42/test-cases.md"
+      ],
+      "outputs": []
+    },
+    {
+      "id": "test",
+      "run": "test",
+      "on_fail": {
+        "back_to": "developer",
+        "max": 3
+      }
+    },
+    {
+      "id": "review",
+      "role": "auditor",
+      "inputs": [
+        "in:review.diff",
+        "docs/specs/42/design.md"
+      ],
+      "outputs": [
+        "docs/specs/42/review-auditor.md"
+      ],
+      "on_fail": {
+        "back_to": "developer",
+        "max": 2
+      },
+      "checks": [
+        "diff-review"
+      ]
+    },
+    {
+      "id": "review-tests",
+      "role": "tester",
+      "inputs": [
+        "in:review.diff"
+      ],
+      "outputs": [
+        "docs/specs/42/review-tester.md"
+      ],
+      "on_fail": {
+        "back_to": "developer",
+        "max": 2
+      },
+      "checks": [
+        "diff-review"
+      ]
+    },
+    {
+      "id": "verify-gate",
+      "run": "verify-gate",
+      "on_fail": {
+        "back_to": "developer",
+        "max": 2
+      }
+    },
+    {
+      "id": "pr",
+      "op": "create-pr"
+    }
+  ]
+}

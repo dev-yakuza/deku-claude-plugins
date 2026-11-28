@@ -1,0 +1,8 @@
+{
+  "format": 1,
+  "description": "Emits init, then nothing for hang_s seconds (I13 no-output limit; the engine kills the group).",
+  "stream": "../f2/r4.jsonl",
+  "init_from_argv": true,
+  "hang_after": 1,
+  "hang_s": 30
+}

@@ -1,0 +1,151 @@
+{
+  "format": 1,
+  "issue": 42,
+  "stage": 3,
+  "situation": "blocked",
+  "call": {
+    "kind": "leader",
+    "step": "design",
+    "attempt": 1,
+    "format_retry": 0,
+    "errors": []
+  },
+  "mode": "unattended",
+  "allowed": {
+    "answers": [
+      "rerun",
+      "replan",
+      "escalate"
+    ],
+    "rerun_steps": [
+      "analyze",
+      "design"
+    ],
+    "human_answers": [
+      "rerun",
+      "replan",
+      "escalate"
+    ],
+    "human_rerun_steps": [
+      "analyze",
+      "design"
+    ],
+    "narrowed": [],
+    "models": [
+      "opus",
+      "sonnet",
+      "haiku"
+    ],
+    "efforts": [
+      "low",
+      "medium",
+      "high",
+      "xhigh"
+    ]
+  },
+  "docs": [
+    "docs/specs/42/analysis.md"
+  ],
+  "in_files": [
+    "issue.md",
+    "leader-decision.md"
+  ],
+  "steps": [
+    {
+      "id": "analyze",
+      "kind": "role",
+      "name": "requirements-engineer",
+      "status": "done",
+      "attempts": 1,
+      "on_fail_count": 0,
+      "on_fail_max": null
+    },
+    {
+      "id": "ac-format",
+      "kind": "run",
+      "name": "ac-format",
+      "status": "done",
+      "attempts": 1,
+      "on_fail_count": 0,
+      "on_fail_max": 2
+    },
+    {
+      "id": "plan",
+      "kind": "check",
+      "name": "plan-gate",
+      "status": "running",
+      "attempts": 1,
+      "on_fail_count": 0,
+      "on_fail_max": null
+    },
+    {
+      "id": "design",
+      "kind": "role",
+      "name": "tech-lead",
+      "status": "done",
+      "attempts": 1,
+      "on_fail_count": 0,
+      "on_fail_max": null
+    }
+  ],
+  "counters": {
+    "leader_calls": 0,
+    "leader_calls_max": 5,
+    "plan_rerun": 0,
+    "plan_rerun_max": 2,
+    "done_rerun": 0,
+    "done_rerun_max": 2,
+    "on_fail_rerun_used": false,
+    "soft_budget_rerun_used": false,
+    "catalog_adds": 0,
+    "catalog_adds_max": 3,
+    "followups": 0,
+    "followups_max": 5
+  },
+  "cost": {
+    "issue_usd": 1.84,
+    "soft_usd": 18.44,
+    "absolute_usd": 36.88
+  },
+  "plan_gate": null,
+  "done_gate": null,
+  "stopped": {
+    "step": "design",
+    "kind": "role",
+    "name": "tech-lead",
+    "attempts": 1,
+    "on_fail_count": 0,
+    "on_fail_max": null,
+    "blocked": {
+      "kind": "other",
+      "note": "cannot reproduce"
+    },
+    "format_errors": [],
+    "session": null,
+    "run": null
+  },
+  "budget": null,
+  "comments": null,
+  "defer": {
+    "requirement_rows": [
+      {
+        "row": "R1",
+        "requirement": "Review question types can be chosen in Settings",
+        "acs": [
+          1
+        ]
+      },
+      {
+        "row": "R2",
+        "requirement": "The choice is kept after a restart",
+        "acs": [
+          2
+        ]
+      }
+    ],
+    "deferred": []
+  },
+  "removal": null,
+  "add_limit": null,
+  "pr_review": null
+}

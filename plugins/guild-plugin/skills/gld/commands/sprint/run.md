@@ -1,768 +1,248 @@
-# SPRINT RUN (unattended development of a sprint's members to PRs)
+# SPRINT RUN (unattended development of a sprint's members to PRs — the engine's supervisor)
 
-**Drive every member through the spine unattended, in dependency order, each in its own git
-worktree, stacking PRs where a dependency has not landed yet — and keep going through rate
-limits until the queue is empty.** The human reviews and merges concurrently in their own
-checkout; this command never touches it.
+**This file only asks the human and starts the engine.** The supervisor is fixed engine code
+(`<<SKILL_DIR>>/engine/engine.py sprint run`, `commands/engine/sprint.md`): it develops every
+member with the same engine run as `/gld dev`, one after the other, in dependency order, stacking
+a PR where a dependency has not landed yet. No LLM takes part, no permission is bypassed, nothing
+merges (INV1). The human reviews and merges concurrently; the supervisor never touches their
+working tree, index or local branches.
 
 **Arguments.** A token starting with `--` is a **flag** and its position does not matter. The
 ad-hoc/resume decision is made from the **first non-flag argument**: numbers (comma-separated)
 → ad-hoc sprint, none → **resume the active sprint**.
 
 The known flags are **`--readiness`** · **`--window`** · **`--duration`** (= an alias of
-`--window`) and nothing else.
+`--window`) · **`--allow-red-base`** · **`--take-over`** and nothing else.
 
 - ⚠ **Any other `--` token is REFUSED**, with the valid list printed. Never ignored.
   `FAIL: unknown flag <token> — valid flags: --readiness, --window=<HH:MM-HH:MM|none>,
-  --duration=<same>`. Today an unknown flag is silently dropped and the run starts, and the
-  destructive case is the requirement's own spelling: `--duration 22:00-10:00` ignored leaves
-  no non-flag argument, which reads as *"resume the active sprint"* and starts a **24-hour
-  unattended run with no window at all**. `sprint.md:32` and `config.md:16` already have the
-  *"unknown → report it"* convention.
-- ⚠ **A flag's VALUE token is not counted as a non-flag argument.** Consume the value first,
-  then look for the first non-flag token in what is left. (In `--window 22:00-10:00`, if
-  `22:00-10:00` became the first non-flag token it is neither numeric nor absent — an
-  **undefined** state.)
+  --duration=<same>, --allow-red-base, --take-over`. An unknown flag that is silently dropped
+  (`--duration 22:00-10:00`) leaves no non-flag argument, which reads as *"resume the active
+  sprint"* and starts a **24-hour unattended run with no window at all**.
+- ⚠ **A flag's VALUE token is not counted as a non-flag argument.** Consume the value first.
 - ⚠ **`--window` and `--duration` accept BOTH a space and an `=`**: `--window 22:00-10:00` and
-  `--duration=22:00-10:00` are the same input. If the `=` form fell through to "unknown flag",
-  the refusal message would print the very flag it had just refused as valid.
+  `--duration=22:00-10:00` are the same input.
 - ⚠ **A leftover non-flag token is not ignored either.** `/gld sprint run 101 102` (spaces
-  instead of a comma) makes 101 ad-hoc today and loses 102 silently. Refuse and show the
-  `101,102` form.
+  instead of a comma) would lose 102 silently. Refuse and show the `101,102` form.
 - ⚠ **`--readiness` is the one exception to all of this** — it prints the Phase 0 table and
-  **stops**. It must never fall through to *"resume"* on the grounds that there is no first
-  non-flag argument.
+  **stops**. It must never fall through to *"resume"*.
+- **`--allow-red-base`** · **`--take-over`** are the human's own words: pass one on only when the
+  human typed it for THIS run. Never suggest, add or repeat one on your own.
 
 **`--window <HH:MM-HH:MM>`** (alias `--duration`) limits when this run may **start a new
-member**; see Phase 0 and Phase 3 step 2c.
+member**; a member that has started runs to its end.
 
-- 24-hour clock, **zero padding required** — `9:00` is refused. Validate against this literal:
-  **`HH:MM-HH:MM (24h, zero-padded)`**.
-- `~` is accepted as the separator and normalised to `-` (`22:00~10:00` → `22:00-10:00`).
-- The **end is exclusive**: `22:00-10:00` is already outside the window at `10:00:00`.
-- **Start == end is refused** — say *"omit the window instead"*. (That refusal is what makes
-  the window guaranteed to open within 24 hours.)
-- Fields out of range (`HH` 00-23, `MM` 00-59) are refused.
-- `--window none` runs this one time with **no** window, whatever `config.sprint.window` says.
-- Precedence: **flag > ledger (on a resume) > `config.sprint.window`**.
+- 24-hour clock, **zero padding required**. Validate against this literal:
+  **`HH:MM-HH:MM (24h, zero-padded)`**; `~` is accepted as the separator.
+- The **end is exclusive**; **start == end is refused** (*"omit the window instead"*).
+- `--window none` runs this one time with **no** window.
+- Precedence: **flag > the previous run (the engine keeps it) > `config.sprint.window`**.
 
-> **Bash**: `<<SKILL_DIR>>/commands/atoms/_bash_rules.md`. The generated supervisor script is
-> the sanctioned exception (`:85`) — variable expansion, redirection and heredocs *inside* it
-> are fine; the rule governs the Bash tool call (`bash <path>`), not what a script does once
-> running. State/labels/unattended: `_handoff.md` Sections A/H. Graph · base · membership:
-> `_sprint_dag.md`. Base injection into the spine: `_execute_spine.md` (`<base>` resolution). **Checkout**: never move the human's branch or history — `_checkout.md` (a pull/sync/switch request: show the commands and which commits change hash, then ask).
-> **Output language**: `config.language`; machine tokens stay ASCII.
-
-> ⚠️ **Security**: each member is one engine run (`gld_engine.py dev run --unattended`, 0.102). The
-> engine starts every role in its own rendered permission set and sandbox and does every GitHub write
-> itself; roles never push to the default branch and never touch GitHub. Every tool call is logged.
-> Nothing merges (INV1).
+> **Bash**: `<<SKILL_DIR>>/commands/atoms/_bash_rules.md`. State/labels: `_handoff.md`. Membership ·
+> edges: `_sprint_dag.md`. **Output language**: `config.language`; machine tokens stay ASCII.
 
 ---
 
 ## Phase 0 — Preflight
 
-`--readiness` prints this table and stops; otherwise a blocking row stops the command.
+`--readiness` prints this table and stops; otherwise a blocking row stops the command. Guild
+never starts a run unattended: `printenv GLD_UNATTENDED` → `1` → return
+`OK: unattended — starting a sprint run requires a human` (before anything else).
+
+**What is NOT checked here any more**: whether the base is red. The engine checks the named
+commands of the repository settings on the fetched default branch itself, before the first member
+and before any window wait, and **refuses to start on a red base** (`halted:base-red`); CI is not
+read. `--allow-red-base` starts anyway — the members' own verdicts do not change.
+
+**Base CI** (read by `sprint plan` Phase 2 only — it warns the planner; `run` itself never reads CI) — is the default branch already red? Each its own Bash call:
+1. `gh repo view <owner>/<repo> --json defaultBranchRef --jq .defaultBranchRef.name` → `<d>`.
+2. `gh api repos/<owner>/<repo>/commits/<d>/check-runs --paginate --jq '.check_runs[] | {id, name, conclusion, annotations: .output.annotations_count}'` (`qa.md`'s stream form — `--paginate` reads past the 30-run page).
+3. **No run at all** (CI runs on PRs only — one-man-company) → the last merged PR:
+   `gh pr list --repo <owner>/<repo> --state merged --base <d> --limit 20 --json number,headRefOid,mergedAt --jq 'if length == 0 then null else (max_by(.mergedAt) | {number, headRefOid}) end'`
+   (the list is in creation order, so `--limit 1` may not be the last merge — the largest `mergedAt` of 20); `null` → Base CI `없음`, done. Otherwise the call of 2 for `commits/<headRefOid>/check-runs`.
+4. For each run with `conclusion == "failure"` and `annotations > 0` (at most 3), `qa.md`'s annotation call — a `was not started` message is `ci-blocked`, kept apart from red.
+
+**Which runs count**: one per check **name** — when a name appears more than once (a re-run), keep the run with the **highest `id`** (the latest attempt; measured one-man-company PR #647: an earlier failed attempt beside its green re-run). **Which verdict**: `qa.md` Step 2's *Which one* rule over those runs — conclusion `failure` · `timed_out` · `cancelled` · `action_required` → red (a never-started one → `ci-blocked`); else any `null` → still running, read as `green` with `(진행 중)`; else green (`neutral` and `skipped` are not red). The result always **names the checks it judged**, because a default branch may carry only non-code checks:
+Result: `green(<checks…>)` · `red(<checks…>) (근거: <d> 최신 커밋 | 마지막 머지 PR #<p>)` · `ci-blocked(<checks…>)` · `없음` · `unavailable` (a call failed).
 
 | Check | How | Verdict |
 |---|---|---|
-| Guild initialized | `ls .claude/guild/config.json` | **block** |
-| **A test can be run** | `config.commands.test` points at a real runner **and** a test framework/layout exists | **block** |
-| **Harness is committed** | `git ls-files --error-unmatch .claude/guild/config.json CLAUDE.md` (and spot-check `.claude/agents/`, `docs/standards/`) | **block** |
-| **Container dir creatable** | repo parent writable; else `$TMPDIR`; neither → **block** | **block** |
+| Guild initialized | `ls .claude/guild/harness.json` | **block** |
+| **Engine settings committed** | `git ls-files --error-unmatch .claude/guild/config.json CLAUDE.md` (and spot-check `.claude/agents/`, `docs/standards/`) — the engine reads them from the **remote default branch**, so an uncommitted or unpushed one does not exist for it | **block** |
+| Engine can run unsandboxed | the pattern `python3 -I <<SKILL_DIR>>/engine/engine.py:*` is in `sandbox.excludedCommands`, or the human approves the one unsandboxed call of Phase 3 (`commands/engine/dev.md` step 1.3) | **block** |
 | `guild:sprint` label exists | `gh label list --limit 200 --json name --jq '[.[].name]'` | **block** |
-| Merge strategy | `gh repo view <owner>/<repo> --json mergeCommitAllowed,squashMergeAllowed,rebaseMergeAllowed,deleteBranchOnMerge` (read permission is enough — the REST repository endpoint returns these as `null` to a non-admin, which silently switched the stop below off; the repo is positional) | Read the tracker body's **스택 깊이 상한** value and its **상한 근거** token, and compare with the repo now. The call fails or `mergeCommitAllowed` is missing → go on by the token alone and say once *"머지 설정을 확인하지 못했습니다"*. `mergeCommitAllowed == false` **and** 근거 is anything but `squash-sync` / `merge-commit-forbidden` / `human-override` (`config`, missing, garbled) **and** the member table has a base that is not the default branch (a `base 의존` cell other than `—`) → the plan predates the setting: **stop** with `FAIL: this repo forbids merge commits but the sprint was planned with a stack — re-run /gld sprint plan`. `run` cannot change the cap itself: the bases are already fixed in the immutable member table. With every base `—` there is no stack for the setting to break — a tracker planned while the old read returned `null` runs as it is (an open sprint cannot be re-planned, so the stop would be a dead end). 근거 `squash-sync` → proceed and render with `--draft-stacked` (step 2): stacked PRs open as drafts and `/gld sprint sync` readies them once their base has merged (`_sprint_dag.md` Section G). `merge-commit-forbidden` → proceed (no member has a stack base). `human-override` (a pre-0.91 tracker) → proceed without drafts and say once that `/gld sprint sync` still applies after each merge |
-| CI runs tests on PRs | read `.github/workflows/*.yml` for a `pull_request` trigger invoking the test command | warn |
-| A review path exists | recent merged PRs carry at least one review | warn |
-| Install command resolvable | `config.commands` scan | warn |
-| **Not already running** | Phase 1 step 3 | **block** |
-| Plan record committed | `git status --porcelain -uall -- docs/specs/` — any line under `docs/specs/sprint-<tracker number>/` (`-uall`: without it a never-committed `docs/specs/` collapses to one `?? docs/specs/` line). `sprint-draft/` is an uncreated proposal and a pre-0.95 `sprint-<date>/` is not this — neither counts | warn, once — *"plan 기록이 커밋되지 않았습니다: <paths> — 커밋해 두지 않으면 잊기 쉽습니다"*. Not a block: no worktree reads them (`sprint plan` Phase 6 step 6 commits them, or says why it did not) |
-| **Base CI** (0.98.7) | *Base CI* below — the default branch's check-runs, or the last merged PR's head when the branch has none | warn — the line below |
+| GitHub credential | *Phase 0b*, the `gh auth status` check | **block** when it says so |
+| Merge strategy | `gh repo view <owner>/<repo> --json mergeCommitAllowed,squashMergeAllowed,rebaseMergeAllowed` (the repo is positional) | warn — tell the human what the engine will do: merge commits allowed → plain stacked PRs; not allowed and 상한 근거 `squash-sync` / `human-override` → stacked PRs open as **drafts**, `/gld sprint sync` readies them after each merge; `merge-commit-forbidden`, any other token, or an unreadable answer → no stack: a dependant waits as `dep-unmerged` until its dependency has merged |
+| The stable Guild is not running here | name it in the final ask: a stable-edition sprint or dev on this repository and this engine do not see each other's locks | **block** when it is |
+| Plan record committed | `git status --porcelain -uall -- docs/specs/` — any line under `docs/specs/sprint-<tracker number>/` | warn, once — *"plan 기록이 커밋되지 않았습니다: <paths> — 커밋해 두지 않으면 잊기 쉽습니다"* |
+| **Not already running** | Phase 1 step 3 — the lock is the engine's; another machine's run needs the human | **block** |
 
-**Base CI** — is the default branch already red? (Measured #630: the base was red on one test, and six members paused in qa on that same red, one after another.) **One call**: `python3 <<SKILL_DIR>>/commands/atoms/base_ci.py --repo <owner>/<repo>` — print its line verbatim as the Phase 0 row's result (`Base CI: green(Analyze & Test, Conventional 접두어 검증, 수동 검증 신선도·케이스 커버리지 검사 (PR 브랜치 스코프))` — never paraphrased; measured #649 `green(PR #647 기준)`, word_app no line). The script reads the default branch's check-runs, and only when it has none the last merged PR's head (word_app main has runs — reading the last merged PR there was a wasted call); it keeps one run per check name (the highest `id` — measured one-man-company PR #616: `Conventional 접두어 검증` three times; word_app main: `Dependabot` four times) **before** reading at most three failures' annotations, and judges by `qa.md` Step 2's *Which one* rule (its docstring holds the order and the rule). The result always **names the checks it judged**, because a default branch may carry only non-code checks (measured word_app main: `validate_pr` skipped, `update_release_draft` success — `green` there says nothing about the tests):
-Result: `green(<checks…>)` · `green(<checks…>) (진행 중)` · `red(<checks…>) (근거: <d> 최신 커밋 | 마지막 머지 PR #<p>)` · `ci-blocked(<checks…>)` · `없음` · `unavailable` (a call failed; exit 65) — red mixed with never-started checks adds a second line `ci-blocked: <checks…>`, printed as it is too. Red → the warning
-`기본 브랜치 CI red: <checks…> (근거: <d> 최신 커밋 | 마지막 머지 PR #<p>) — 멤버마다 같은 red 로 사람 대기가 될 수 있습니다. 고치는 멤버가 있으면 다른 멤버가 그 위에 쌓였는지 확인하세요(plan 의 (a) 의존).`
-shown with the other warnings before the one ask below — the human chooses to start or stop (`run` never starts unattended). `sprint plan` Phase 2 runs the same check (`BASE CI:`). The verdict of any stage does not change.
-
-**Why only the test row blocks on verification.** Guild judges completion by the raw output of
-a test runner, refusing self-report (`_handoff.md` Section E). With no way to *run* tests that
-gate is inert and an unattended run mass-produces unverified PRs — and in a stack the damage
-compounds, because the PRs are entangled. `audit_readiness.md` already classifies
-`no-test-command` as a **BLOCKER**; this reuses that judgment rather than inventing one.
-**A greenfield repo with zero test files passes** — the requirement is the *ability to run and
-read* tests, not existing tests; writing the first one is the work.
-
-**Why the harness row blocks.** A worktree materializes only **tracked** files. If
-`.claude/guild/`, `.claude/agents/`, `CLAUDE.md` or `docs/standards/` are untracked, every child
-fails with "Guild not initialized" — measured on a real repo (`batch.md`, 2026-07-14).
-
-⚠ The B-group conditions of the old locked `sprint` gate (per-agent scorecard trend, declining
-human-correction rate) are **not** checked. They measure trust in *self-modification*, and this
-command does not self-modify: `retro` is a separate command the human types, and evolve inside
-it keeps per-item approval. What remains is the same risk `batch` already ships with.
-
-### Phase 0b — window questions, and they are asked HERE
-
-⚠ **Before the final ask, not in Phase 3.** Phase 3 step 5 has already launched the background
-job, so a warning printed there arrives after the run has begun. Everything needed is available
-now: the flag came in with `$1`, and `config.sprint.window` is in the config this phase reads.
+### Phase 0b — credential and window questions, asked HERE (before the final ask)
 
 **Always — window or not — check which GitHub credential the supervisor will inherit: `gh auth
 status`, its own Bash call, exactly that command.** It masks the token (`gho_****`) and names the
 source of every account. Judge by the **output text, not the exit code** — one expired keyring
 account alone makes it exit 1:
-- a line `✓ … (GH_TOKEN)` → `GH_TOKEN` is in use. Nothing more here; with a window, item 3
-  below warns and asks.
-- a line `X … (GH_TOKEN)` (e.g. `X Failed to log in … (GH_TOKEN)`) → `GH_TOKEN` is invalid.
-  **Stop before the run, in every run**: *"GH_TOKEN 을 설정한 곳(셸 프로필·Claude settings 의 env)에서
-  갱신하거나 지운 뒤 Claude 세션을 다시 시작하세요"*. `gh auth login` does not fix it — `GH_TOKEN`
-  overrides the keyring — and the supervisor inherits this session's environment.
+- a line `✓ … (GH_TOKEN)` → `GH_TOKEN` is in use; with a window, item 3 below warns and asks.
+- a line `X … (GH_TOKEN)` → `GH_TOKEN` is invalid. **Stop before the run, in every run**:
+  *"GH_TOKEN 을 설정한 곳(셸 프로필·Claude settings 의 env)에서 갱신하거나 지운 뒤 Claude 세션을
+  다시 시작하세요"*. `gh auth login` does not fix it — `GH_TOKEN` overrides the keyring.
 - `(GITHUB_TOKEN)` overrides the keyring the same way; read it the same way.
-- no `(GH_TOKEN)`/`(GITHUB_TOKEN)` → the keyring account is used; nothing to warn about while its
-  active account (`Active account: true`) line is `✓`. If that line is `X` → stop: "gh 로그인이
-  만료됐습니다 — `gh auth login` 후 다시 실행하세요".
+- no `(GH_TOKEN)`/`(GITHUB_TOKEN)` → the keyring account is used; its active account line `X` →
+  stop: "gh 로그인이 만료됐습니다 — `gh auth login` 후 다시 실행하세요".
 
 ⚠ **Never `gh auth status --show-token`, `gh auth token`, or a command that prints a secret
-environment variable's value (`env`, `printenv GH_TOKEN`, `echo`)** — measured: a leader asked to
-"check whether GH_TOKEN is set" printed the token. `test -n "${GH_TOKEN:-}"` is forbidden too
-(`_bash_rules.md` — quoted variable substitution).
+environment variable's value (`env`, `printenv GH_TOKEN`, `echo`)**, and never
+`test -n "${GH_TOKEN:-}"` (`_bash_rules.md` — quoted variable substitution).
 
-Resolve the effective window first (flag > ledger > `config.sprint.window`; `none` → no window).
-Then, **when there is a window**:
+Resolve the effective window: the flag; else the previous run's (`sprint status --json`, Phase 1
+step 3: `.sprint.window`); else `config.sprint.window` (`.claude/guild/harness.json` — the engine
+never reads that file, so a config window is passed on as `--window`). `none` → no window. Then,
+**when there is a window**:
 
-1. **Window shorter than 120 minutes → WARN.** ⚠ **Count MINUTES, not the `HHMM` difference** —
-   `HHMM` arithmetic is off by up to 40 minutes near midnight. The two cases that tell a correct
-   implementation from a wrong one, and both must come out the same way:
-   - **`23:00-00:30`** — 90 minutes. `HHMM` says `0030 - 2300 = -2270`. **WARN.**
-   - **`00:30-02:00`** — 90 minutes. `HHMM` says `170`. **WARN.**
-
-   ⚠ **The supervisor script does not judge window length.** Two judges can disagree; this is
-   the only one.
+1. **Window shorter than 120 minutes → WARN.** ⚠ **Count MINUTES, not the `HHMM` difference**:
+   **`23:00-00:30`** and **`00:30-02:00`** are both 90 minutes → both WARN. ⚠ **The engine
+   does not judge window length** — this is the only judge.
 2. **DST warning, with the WARN.** A window that falls entirely inside the hour a
-   daylight-saving transition **skips** does not open that day. This is the one exception to
-   *"the window always opens within 24 hours"*.
-3. **`GH_TOKEN` + a window → warn and ask** (`✓ … (GH_TOKEN)` in the `gh auth status` check above). The supervisor inherits this session's
-   environment and `GH_TOKEN` overrides the keyring account; a GitHub App installation token
-   lasts an hour. A window **structurally guarantees** an idle gap of an hour or more between
-   launch and the first member — launch at 21:00 for a 22:00 window and the token is already
-   dead when work starts. The supervisor tolerates 18 consecutive marker failures while
-   waiting, which **delays** the death by about three hours and cannot absorb a permanent
-   expiry. Ask whether to continue or to re-authenticate first.
-4. **`caffeinate` — a DOUBLE gate.** Pass **`--caffeinate` to Phase 3 step 5's launcher** (which puts `caffeinate -i` inside the detached session — do not wrap the launcher itself) only when
-   **a window is set** (flag or `config.sprint.window`) **and** `command -v caffeinate`
-   succeeds. ⚠ Not the platform gate alone: a windowless 40-minute run must not suppress a
-   macOS user's idle sleep, which nobody asked for and only the battery reveals. On Linux an
-   unconditional wrapper makes the run fail to start at all.
-   - `-i` only. `-u` asserts *"user activity"* and **turns the display on**; `-s` asserts only
-     on AC power; and **a closed lid sleeps regardless of any flag**.
-   - Say it plainly: *"뚜껑을 닫으면 감독자는 잡니다. 밤새 돌리시려면 전원을 연결하고 뚜껑을
-     열어 두시거나 `pmset` 스케줄을 쓰십시오 — Guild가 대신 해 드릴 수 없습니다."*
+   daylight-saving transition **skips** does not open that day.
+3. **`GH_TOKEN` + a window → warn and ask** (`✓ … (GH_TOKEN)` in the `gh auth status` check above). A GitHub App installation token lasts an hour and a
+   window structurally guarantees an idle gap. The supervisor tolerates 18 consecutive marker
+   failures while waiting (about three hours); it cannot absorb a permanent expiry.
+4. **`caffeinate`.** The engine starts the supervisor under `caffeinate -i` itself when a window is
+   in effect and `caffeinate` is installed; it cannot hold a closed lid. Say it plainly:
+   *"뚜껑을 닫으면 감독자는 잡니다. 밤새 돌리시려면 전원을 연결하고 뚜껑을 열어 두시거나 `pmset`
+   스케줄을 쓰십시오 — Guild가 대신 해 드릴 수 없습니다."*
 
-Finally, show the warnings, the worktree paths to be created and the estimated dependency
-install time, then ask once: *"이대로 무인 실행할까요?"* ⚠ **When a window is set the ask must
+Finally, show the warnings and the plan (members, order, window), then ask once: *"이대로 무인
+실행할까요?"* ⚠ **When a window is set the ask must
 name four things** — the window, the estimated number of nights, that `plan --create` and
-`retro` will be refused for the whole run (days, not hours), and how to stop it (`kill <pid>`).
-INV1 says the human approves the application of unattended work; a person approving at 21:00
-otherwise has no way to know they are approving 03:00 three days later.
-Unattended (`GLD_UNATTENDED=1`) → do not
-ask and do not start: return `OK: unattended — starting a sprint run requires a human`.
+`retro` will be refused for the whole run, and how to stop it (`engine.py sprint stop`). A person
+approving at 21:00 otherwise cannot know they are approving 03:00 three days later.
 
 ## Phase 1 — Resolve the sprint
 
-1. **Resolve `{owner}/{repo}`** once (`_handoff.md` Section F).
+1. **Resolve `{owner}/{repo}`** once (`_handoff.md` Section F) and the repository root
+   (`git rev-parse --show-toplevel`).
 2. **Find the sprint.**
    - `$1` empty → the open `guild:sprint` Issue. None → *"활성 스프린트가 없습니다. `/gld sprint plan`으로 먼저 계획하세요."* Two or more → ask which.
-   - `$1` = numbers → **create a tracking Issue for them first**, running `plan.md` Phase 0 step 5 (merge strategy → 상한 근거; on a squash-only repo `squash-sync` unless the human declines), Phase 4 (cycles → linearize → order → depth) and Phase 6 on the given set, with goal "즉석 스프린트", capacity "사람 지정" and 리팩토링 슬롯 `skip (ad-hoc)` — and, for the `plan.md` Phase 6 template's machine fields, `구분` = `goal` for every member, `- capacity: n/a`, `- shortfall: n/a`, `- adhoc: true` (`retro` skips its capacity recommendation for an ad-hoc sprint; the numbers a human hand-picks are not a capacity signal) (a `type:refactor` Issue among the numbers is an ordinary member, not a slot — `plan.md` Phase 6). ⚠ The ad-hoc path is **not** allowed to skip the container: the duplicate-run guard, the checkpoint, resume and `daily` all live in the tracking Issue's markers — without it none of them exist.
-3. **Duplicate-run guard.** Read the `<!-- guild:sprint:run -->` comment.
-
-   | Observed | Verdict |
-   |---|---|
-   | no marker | not running → start |
-   | `host` matches, pid alive, cmdline matches | **running** → refuse: *"이미 실행 중입니다 (pid N, 시작 YYYY-MM-DD HH:MM). 상태는 `/gld sprint daily`."* ⚠ **With the date.** A windowed run lives for days, so a bare `HH:MM` shows a time from three days ago as if it were today's |
-   | `host` matches, pid gone | crash remnant → **restore the window file from the marker's `window` key FIRST**, then clear the run fields and resume. ⚠ **`window` is not a run field** — it is that run's configuration, and it is **not** cleared. Order matters and there is no second chance: `--window` never reaches `config.json`, so a run that dies at 03:00 and is resumed in the morning without the flag would have step 2c's `rm -f` fire and then **run unbounded through the day**. ⚠ If the marker has no `window` key but the window file exists, **ask the human** instead of deleting it — the script's rule (*"a constraint we could not read is not an absent constraint"*) applies to this path too. ⚠ Any marker this path writes follows the same rule as step 4: **PATCH the existing comment (lowest id if several), never post a new one** |
-   | `host` differs | cannot verify locally → **ask the human**, showing the heartbeat age and `state` |
-
-   ⚠ **"pid alive" needs a command, and there was none.** Left unstated an LLM guesses, and a
-   guess of *"cannot tell → not running"* starts a second supervisor against the same worktrees
-   and the same tracker marker:
-
+   - `$1` = numbers → **create a tracking Issue for them first**, running `plan.md` Phase 0 step 5 (merge strategy → 상한 근거; on a squash-only repo `squash-sync` unless the human declines), Phase 4 (cycles → linearize → order → depth) and Phase 6 on the given set, with goal "즉석 스프린트", capacity "사람 지정" and 리팩토링 슬롯 `skip (ad-hoc)` — and, for the `plan.md` Phase 6 template's machine fields, `구분` = `goal` for every member, `- capacity: n/a`, `- shortfall: n/a`, `- adhoc: true`. ⚠ The ad-hoc path is **not** allowed to skip the container: the engine knows only a tracking Issue.
+3. **Duplicate-run guard and the previous run** — one read-only call:
    ```bash
-   ps -p <pid> -o command=
+   python3 -I <<SKILL_DIR>>/engine/engine.py sprint status --repo OWNER/REPO --tracker T --json
    ```
-
-   Empty output → the pid is gone (crash remnant). Output containing **`.gld-sprint-`** →
-   running, refuse. Output that is some **other** process → the pid was recycled; treat it as
-   gone. ⚠ **Match `.gld-sprint-`, not `sprint-supervisor`.** The marker's `pid` is the
-   supervisor script's own `$$`, so `ps` prints `bash .claude/guild/.gld-sprint-<tracker>.sh`.
-   `sprint-supervisor` is the **template** filename (step 2) and never appears in that output —
-   matching it sent a LIVE supervisor down the "pid was recycled → treat it as gone" row, which
-   starts a second supervisor against the same worktrees and the same tracker marker.
-
-   `ps` itself unavailable → **ask the human**, same as the `host` differs row; never assume
-   not-running.
-
-   ⚠ The heartbeat is what makes this usable: a rate-limit wait was measured at ~115 minutes, so
-   a marker refreshed only at issue boundaries would make a live run look dead. The supervisor
-   refreshes at least every 10 minutes, **including inside the wait**.
-4. **Verify the plan is unchanged.** `sprint_dag.py --mode hash` over the current body vs the
-   `plan-hash:` line. Mismatch → attended: show what differs and ask; unattended: stop.
-   ⚠ A mismatch can mean `plan --create` died mid-Phase 6. If the tracker carries a
-   `<!-- guild:sprint:slot-net -->` comment whose slot Issue's body still lacks
-   `<!-- guild:safety-net -->`, say so and tell the human to re-run `/gld sprint plan` first and choose to **add** to the open
-   sprint — that is the path that applies the approved Safety net (`plan.md` Phase 0 step 4); running now would develop the
-   slot without the net the human approved. The same applies when the tracker carries a
-   `<!-- guild:sprint:plan-decisions -->` comment with a line (`- #<n> <key>: …`) whose member, at
-   stage `none`/`guild:analyze`, lacks that dimension key in its `<!-- guild:plan-decision -->`
-   block: say so and tell the human to re-run `/gld sprint plan` first and choose to **add** — that
-   re-run, approved through Phase 6, restores the decisions; running now would send the member to an unattended `analyze`
+   `"running": true` → refuse: *"이미 실행 중입니다 (pid N, 시작 YYYY-MM-DD HH:MM). 상태는
+   `engine.py sprint status`."* ⚠ **With the date** — a windowed run lives for days. Otherwise the
+   engine's own locks decide at the start (exit 3). **Another machine's run** (the tracker's
+   `<!-- guild:sprint:run -->` marker names another host and has not ended) is refused by the engine as
+   `halted:other-host`: show the human the marker's host and heartbeat; only when they say that run
+   is gone, start again with `--take-over`.
+3b. **A tracker that Guild 0.98.7 planned or ran** (readiness T3 P8 — word_app #1923 is one). When
+   step 3's `"sprint"` is `null` (this machine's engine has never run this tracker) **and** either the
+   tracker carries a `<!-- guild:sprint:run -->` comment (`daily.md` step 3's marker call) or a member has
+   an open pull request whose branch is not `gld/<N>`, the engine can **read** the tracker — the member
+   table and its plan hash are the same format — but it does **not take over** what 0.98.7 did. It
+   counts a member as finished only from this machine's `state.json` or from the member Issue being
+   `CLOSED` · `COMPLETED`; labels, 0.98.7 branches (`feature/#N-…`, `fix/#N-…`) and their PRs are never
+   read as done. Show this checklist before the final ask, in `config.language`, and ask whether every
+   item holds; an item that does not hold stops the command here (nothing was started):
+   ```
+   0.98.7 스프린트 이어가기 — 시작 전에 사람이 할 일
+   ① 0.98.7 멤버 PR 을 먼저 리뷰해 머지하거나 닫습니다. 열린 PR 이 이미 닫는 멤버는 엔진이 시작하지 않고
+      거부합니다(open-closing-pr — 두 번째 PR 을 만들지 않음). 그 멤버에 의존하는 멤버도 막힙니다.
+   ② 머지한 멤버의 Issue 가 '완료'로 닫혔는지 봅니다. 기본 브랜치가 아닌 곳(스택)에 머지한 PR 은 Issue 를
+      닫지 않습니다 — 열려 있으면 직접 '완료'로 닫으세요. 닫힌 멤버는 엔진이 closed 로 넘어갑니다.
+   ③ PR 을 닫고 다시 개발할 멤버는 guild:done 라벨을 떼세요. 남아 있으면 엔진이 완료 여부를 모른다며
+      거부합니다(done-unconfirmed).
+   ④ 0.98.7 감독이 이 기계에서 돌고 있지 않아야 합니다: pgrep -fl "sprint-<T>.sh" 결과가 비어 있어야
+      합니다. 엔진은 0.98.7 감독의 잠금을 보지 못합니다.
+   ⑤ 실행 시간 창은 --window 로 직접 주세요. 엔진은 0.98.7 마커의 window 를 읽지 않습니다
+      (harness.json 의 sprint.window 가 있으면 그 값을 넘깁니다).
+   ⑥ 0.98.7 마커 댓글의 원장 키(retries·board_* 등)는 엔진의 첫 마커 갱신에서 사라집니다. 남겨 둘
+      것이 있으면 시작 전에 그 댓글을 복사해 두세요. 실행 중 보드 카드는 움직이지 않습니다.
+   ⑦ 시작한 뒤 daily·retro 는 0.98.7 의 .sprint-logs/<T>/failures.jsonl 을 이 스프린트의 실패로
+      읽지 않습니다(엔진 실행 전 기록).
+   ```
+   Item ④ is the one call here, its own Bash call: `pgrep -fl "sprint-<T>.sh"` (it matches the 0.98.7
+   supervisor's script name; empty output and exit 1 = none). A line → stop: *"0.98.7 감독(pid <pid>)이 아직
+   돌고 있습니다 — 끝나거나 멈춘 뒤 다시 실행하세요"*. Never `kill` it yourself. The other items are the
+   human's word — do not check them by reading PRs or labels here: the engine refuses what is still open,
+   member by member, and names it (member outcome `refused` with `open-closing-pr` or `done-unconfirmed`).
+4. **Verify the plan** — no write:
+   ```bash
+   python3 -I <<SKILL_DIR>>/engine/engine.py sprint check --repo OWNER/REPO --tracker T
+   ```
+   It prints the order the run will follow. Exit 4 → stop and show the line: a malformed member
+   table, a cycle, a plan-hash mismatch or a `blocked:` member (an epic, an open pull request that closes it, a
+   `gld/<N>` left on the remote, `guild:done` on the open Issue — readiness T1 P7) means running `/gld sprint plan`
+   again — never edit the
+   table by hand. A mismatch can mean `plan --create` died mid-Phase 6: when the tracker carries a
+   `<!-- guild:sprint:slot-net -->` comment whose slot Issue's body still lacks `<!-- guild:safety-net -->`,
+   tell the human to re-run `/gld sprint plan` first and choose to **add** to the open sprint — that
+   path applies the approved Safety net. The same when a `<!-- guild:sprint:plan-decisions -->` line is
+   missing from its member's body: running now would send the member to an unattended `analyze`
    that stops on the very question the human already answered.
-   ⚠ Do **not** label the tracker `guild:needs-human`: that label is removed only by a successful
-   forward stage transition or a human-decided loop-back (`_handoff.md` Section A) — and the tracker has no
-   stages, so it would stick forever and mis-report to `monitoring`/`status`. Record
-   `state: halted:plan-hash-mismatch` in the run marker instead.
 
-   ⚠ **This marker is normally written by the supervisor (shell), so an LLM writing one must
-   match its shape exactly.** `sprint.md` and `_handoff.md` both declare it shell-owned, and
-   two readers parse it: `daily` step 2 and the duplicate-run guard above, both of which want
-   `host`/`pid`/`state`. Prose, or a partial object, makes both read a malformed marker while
-   this command returns *"recorded"*. Write it as a fenced JSON object between the markers:
-   `{"host": "<hostname>", "pid": 0, "state": "halted:plan-hash-mismatch", "started":
-   "<ISO8601>", "heartbeat": "<ISO8601>"}`.
+## Phase 3 — Start the supervisor
 
-   ⚠⚠ **PRESERVE THE MARKER'S OTHER KEYS — replace only `state` (plus `host`/`pid`/
-   `heartbeat`).** Read the existing block, change those fields, write the rest back
-   untouched. Writing the five-key object as a whole **deletes `window`, `completion`,
-   `retries` and `discovered`** — and `window` has no other source. The realistic sequence:
-   the human edits the tracker body during the day (which Phase 3 step 6 tells them is void
-   for the current run, i.e. a normal thing to do), the evening resume finds a hash mismatch,
-   this marker is written, and the **next** resume restores no window and runs unbounded
-   through the day — with no signal to the human anywhere. `window` and `completion` are the
-   two that cannot be re-derived; enumerate them explicitly when you write this.
-
-   ⚠⚠ **UPDATE THE EXISTING COMMENT IN PLACE — never post a new one.** Use
-   `gh api repos/<owner>/<repo>/issues/comments/<id> -X PATCH -F body=@<file>` (`-F`: only it reads `@<file>` — `-f` sends the text `@<file>` and the marker is gone). If the tracker
-   has **more than one** comment carrying `<!-- guild:sprint:run -->`, take the one with the
-   **LOWEST id**. That is not a preference: the supervisor does exactly this
-   (`target = min(found, key=id)`, so a run's history is not orphaned), and a new comment
-   splits the marker permanently — the supervisor keeps PATCHing the old one while `daily`,
-   `plan` and `board` read whichever they were told to, and a resume then finds no `window`
-   and runs unbounded through the day. Preserving the keys (above) does not help if the keys
-   are preserved in a comment nobody reads.
-
-   ⚠ **`pid: 0` on purpose** — nothing is running, and
-   `ps -p 0 -o command=` is empty, so the guard reads it as a remnant and not as a live run.
-5. **Rebuild the queue.** Read the member table (immutable) for members and `base 의존`; then
-   **re-read every member's current label** — the label is authoritative over anything the
-   marker says. Restore retry counts and the **discovered-children list** from the marker
-   (that list cannot be re-derived: a child body carries only `Parent Issue: #N`).
-   Recompute the order with `--mode order` (the tie-break is stable, so a resume reproduces it):
-   write `.claude/guild/.sprint-logs/<tracker>/dag/order.json` with the Write tool as
-   `{"members":[{"number":<n>,"base_deps":[…],"kind":"<goal|other|slot>"}, …]}` — `kind` from the
-   table's `구분` column, **omitted** when the table has no such column (a tracker from before the
-   column; the order is then plain issue number, as it always was) — and run
-   `python3 <<SKILL_DIR>>/commands/atoms/sprint_dag.py --input <that path> --mode order`. Without
-   `kind` the order would quietly differ from the one the human approved in `plan` Phase 5, where
-   goal members win ties. Exit 64 (an unknown `구분` value) → do not start the supervisor; tell
-   the human which row and value.
-   Queue only members that have not reached a terminal state.
-
-   ⚠⚠ **On a resume, TRUNCATE `.claude/guild/.sprint-logs/<tracker>/dag/failed.txt` first** —
-   its own Bash call, before anything else in this step:
-
+1. Start it **outside the conversation's sandbox** (as `commands/engine/dev.md` step 1.3), one call
+   — with `--window W` when a window is in effect (Phase 0b), and the two human flags only when typed:
    ```bash
-   python3 -c "open('.claude/guild/.sprint-logs/<tracker>/dag/failed.txt','w').close()"
+   python3 -I <<SKILL_DIR>>/engine/engine.py sprint run --repo OWNER/REPO --tracker T --checkout REPO_ROOT
    ```
-
-   `failed.txt` is the supervisor's **working state for one run, not a record**, and it is one
-   of the two dag files that **accumulate across runs** (the other is `paused.txt`, below) —
-   the directory survives, so every earlier attempt's lines are still in it. The supervisor reads it back at start and promotes each
-   line to `terminal: failed` whenever the Issue is not already terminal by label and its PR is
-   not `MERGED`. Both hold for exactly the member a resume exists to retry: a member that
-   stalled mid-spine keeps a **stage** label (`guild:execute`), and its PR is `OPEN`. So the
-   member is silently dropped from the queue and the run reports a clean finish having never
-   touched it.
-
-   Measured (#389): `failed.txt` held `153` from the previous attempt — the one member whose
-   retry was the entire point of resuming. Nothing in the flow would have said so; the hazard
-   was documented only inside the supervisor template's own comments
-   (*"failed.txt accumulates for as long as `$D` survives, so that contradiction outlives the
-   attempt that caused it"*), which this file's reader never opens.
-
-   ⚠ **Truncate, do not delete** — the supervisor only creates it when absent
-   (`[ -f "$D/failed.txt" ] || : > "$D/failed.txt"`), so either works, but truncation keeps the
-   path's permissions and is what the script itself does.
-   ⚠ **This loses no history.** The durable per-failure record is `failures.jsonl`
-   (`{"issue": 153, "class": "incomplete-mid-spine", …}`), which this step does not touch, and
-   the retry counts live in the run marker.
-
-   ⚠⚠ **Then truncate `paused.txt` the same way** (its own Bash call):
-
-   ```bash
-   python3 -c "open('.claude/guild/.sprint-logs/<tracker>/dag/paused.txt','w').close()"
-   ```
-
-   It holds the split parents the supervisor paused because their smallest outstanding child
-   waits on a human (Phase 3's `guild:children` row); the supervisor reads it back as
-   `terminal: needs-human` while the parent's label is still `guild:children`, so a stale line
-   would keep blocking that epic's dependants after the human resolved the child. It is not
-   written to `failures.jsonl` (no new class) — the run marker's `paused_issues` is its record.
-   ⚠ **No other dag file needs this** — `failed.txt` and `paused.txt` are the two that
-   accumulate. The rest (`labels.json`, `labels_extra.jsonl`, `prs.json`, `prs_tail_open.jsonl`,
-   `branches.txt`, `cand.txt`, `run.json`, …) are rewritten every loop, and `comp_failed.txt`/
-   `comp_incomplete.txt` are truncated by the script at completion time. `prs_tail.*`
-   (`.json`, `.tmp`, `.tries`, `.warned`, `.openwarned` — the once-per-run wide PR read,
-   `_sprint_dag.md`) lives for the run only and **the script deletes it at its start** — it does
-   not accumulate either.
-6. **Inventory worktrees.** `git worktree list --porcelain` — note which member worktrees exist,
-   which are registered-but-missing, and whether any branch is held by a **preserved worktree
-   from an earlier sprint** (containers are keyed by tracker, so that is possible and will
-   otherwise surface as a confusing refusal mid-run). Report those to the human now.
-   Also one line each for what an **earlier sprint** left — report only, nothing is removed here:
-   a `.gld-<repo>-sprint-<t>` container (`t` ≠ this tracker) from the same porcelain output, and
-   run files `.gld-sprint-<t>.*` from its own call `ls -A .claude/guild/` (`t` ≠ this tracker;
-   untracked by the same `git ls-files .claude/guild/<file>` call as `retro.md` Phase 7, one per
-   file — a tracked one is not named). One state call per distinct `t` across both:
-   `gh issue view <t> --repo <owner>/<repo> --json state --jq .state` — `CLOSED` →
-   `이전 스프린트 #t 워크트리 <k>개 — /gld sprint retro --cleanup <t>` (run files only → the same
-   `--cleanup <t>` line); `OPEN` → `진행 중인 다른 스프린트 #t — 손대지 않음`; the call fails →
-   `#t 상태 확인 불가 — 손대지 않음`.
-
-## Phase 2 — Permissions for child sessions: nothing to write, and say why
-
-`batch` offers to merge a tool allowlist into `.claude/settings.local.json` here. **This flow
-writes nothing.** Two reasons, and the second is the binding one:
-
-1. That file is **gitignored, so it does not exist in a worktree** — `git worktree add` does not
-   materialize it. Whatever it contains cannot reach a child.
-2. The children run with `--dangerously-skip-permissions`, so the allowlist would not be
-   consulted even if it were there.
-
-⚠ Writing it would therefore be a change to the human's checkout that **buys nothing** — and it
-would sit outside the write list this file's own Hard rules call *"in full"*
-(`.sprint-logs/<tracker>/**`, `.claude/guild/memory/`, `.gld-sprint-<tracker>.sh`,
-`.gld-sprint-<tracker>.board`, `.gld-sprint-<tracker>.window`, and three lines in
-`.git/info/exclude`). A phase that wrote a
-path outside that enumeration would make it false, which is the class of defect §12.5-7 was
-rewritten for. ⚠ **Step 2b's `.board` file IS that fifth path** — it was added to both copies of
-the list when it was introduced, because the list's whole value is being exhaustive, and a
-review found it missing from both.
-
-**Say this to the human** rather than silently skipping a phase `batch` has: the allowlist is not
-protecting anything in an unattended sprint, and what *is* load-bearing is that every child runs
-inside its own worktree.
-
-## Phase 3 — Render the supervisor and start it
-
-1. **Write `members.json`** (Write tool) into `<repo>/.claude/guild/.sprint-logs/<tracker>/dag/`:
-   **one entry per member of the sprint — every row of the member table, not just the queue.**
-   Each with `number`, `base_deps` (from the table) and `split`.
-
-   ⚠ **The top level is a BARE JSON ARRAY. It is NOT the `sprint_dag.py --input` object.**
-   Write exactly this shape:
-
-   ```json
-   [
-     {"number": 344, "base_deps": [], "split": false},
-     {"number": 371, "base_deps": [344], "split": false}
-   ]
-   ```
-
-   `{"members": [...]}` — the schema this same file shows you for every `sprint_dag.py --input`
-   call — is **wrong here** and the two are not interchangeable. The supervisor iterates this
-   file directly, so the wrapped form makes it walk the dict's *keys*: every member dies on
-   `TypeError: string indices must be integers` before a single child session starts. Measured
-   on a real repo: 6/6 members failed in 65 seconds, zero tokens spent, and the per-issue
-   failure class (`dag-input-failed`) named the step but not the cause. If you also need a
-   `sprint_dag.py` input (e.g. to re-check `--mode order`), build that as a **separate file** —
-   do not reshape this one.
-
-   ⚠ **This is the whole member set even on a resume, and that is not a detail.** Writing only
-   the queue drops any member that already reached `guild:done` — and `--mode base` then reports
-   its dependants' dep as *"outside the sprint"* and answers `DEFAULT`, so **the PR stack
-   silently collapses onto the default branch** (measured). A stacked PR does not close its
-   Issue and does not clear on merge, so `guild:done` + PR still OPEN is the *normal* state
-   while the human reviews concurrently — i.e. exactly the state a resume starts from. The
-   member set is defined by §5.1 as the sprint, not by what is left to run; `<ORDER>` is the
-   queue.
-   - `base_deps` comes from the member table's **`base 의존`** column — the linearized value, at
-     most one per member. Never from `Depends on:` (`_sprint_dag.md` Section B).
-   - `split` is `true` when the member's Issue carries a `<!-- guild:children:output -->`
-     comment. **This file is the only place that value is produced** — the script cannot see the
-     comment (`_sprint_dag.md` Section C), and without it a parent that completed by splitting
-     reads as "no PR, no branch → blocked" and stops everything downstream of it. Check it per
-     member while re-reading labels in Phase 1 step 5; one `gh issue view <n> --json comments`
-     call each, or fold it into that pass.
-2. **Render the supervisor** — one Bash call, no Read and no Write of the template:
-
-   **First normalize `config.commands`.** `init` stores each value as a simple string or an
-   **array** of simple steps, but an older install can still hold a raw compound value
-   (`_handoff.md` Section E step 1 tells the human to split those by hand). The renderer
-   **rejects `init.md:163`'s ban list** — `$(...)`, backticks,
-   `&&`, `||`, `|`, `;`, `<`, `>`, `&`, newlines — so an unnormalized value does not degrade: **step
-   2 exits non-zero and 2d stops the run.** ⚠ It is a **character class**, not a parser: it
-   refuses those characters anywhere in the value, including inside quotes — so
-   `jest -t "renders <Button/>"` is refused even though nothing is being chained. Drop or
-   rephrase such a flag, as `scan_repo.md` §2 already prescribes for `$(...)`.
-   ⚠ **Globs, `$VAR` and `~` are legal and pass.**
-   `init.md` permits them and the template's `eval` expands them against the worktree, which is
-   the intended behaviour. Rejecting them was tried and reverted: it made `eslint src/**/*.ts`
-   and `rm -rf build/*` — both init-conformant — unstartable, worse than what it fixed.
-   Split such a value yourself before building argv: one `--install-cmd` per step, in order, with
-   any `$(...)` flag dropped — `yarn install && yarn build` becomes
-   `--install-cmd 'yarn install' --install-cmd 'yarn build'`. This is the fix, and the Python
-   rejection is the second safety net behind it, not the remedy.
-
-   ```bash
-   python3 <<SKILL_DIR>>/commands/atoms/render_supervisor.py --tracker <tracker> --owner-repo <owner/repo> --default-branch <branch> --container <container> --human-repo <abs path of the human's checkout> --dag-path <<SKILL_DIR>>/commands/atoms/sprint_dag.py --order <n> --order <n> --install-cmd <cmd> [--draft-stacked] [--stage-groups]
-   ```
-
-   | Argument | Value |
-   |---|---|
-   | `--tracker` | tracking Issue number. **Digits only** — the script rejects anything else, because the output path is assembled from it |
-   | `--order` | **repeated once per member**, in execution order, **of the queue only** — the members still to run (step 1's file stays the full set). Zero occurrences is valid and renders `ORDER=()`. Each value is **digits only**, same as `--tracker` — an empty or non-numeric one is rejected, because `ORDER=('')` has length 1 and so slips past the template's empty-queue guard, then runs the queue for issue `""` |
-   | `--owner-repo` | resolved literal |
-   | `--default-branch` | `gh repo view --json defaultBranchRef --jq .defaultBranchRef.name` |
-   | `--container` | `<repo-parent>/.gld-<repo-basename>-sprint-<tracker>` (repo name included so two sibling repos with the same sprint number cannot collide — a worktree registers by basename) |
-   | `--human-repo` | absolute path of the human's checkout. The output path is **assembled** from this plus `--tracker`; there is no `--out <path>` form. Rejected if it is **not absolute** (the supervisor never `cd`s and is launched in the background, so a relative value would resolve the board/window conf and log dir against an inherited cwd) or **not an existing directory**. Both are typo guards, not containment — the same model call supplies the value |
-   | `--dag-path` | absolute path of `commands/atoms/sprint_dag.py` |
-   | `--stage-groups` | present when `config.sprint.stage_groups` is `true`: each member runs as up to three grouped sessions (analyze+design · execute · test+qa — `dev.md` Phase 2 *Grouped sessions*) instead of one session for the whole spine, so a later group does not carry an earlier one's context. The supervisor waits for the window before each later group, counts a stage change (or a new loop-back record) as progress, and stops a member at 12 grouped sessions |
-   | `--draft-stacked` | present **only** when the tracker's 상한 근거 is `squash-sync` (Phase 0). The supervisor then sets `GLD_SPRINT_DRAFT=1` for a member whose base is not the default branch, and the spine opens that PR as a draft (`_execute_spine.md` Step 5) |
-   | `--install-cmd` | **repeated once per command** from `config.commands`, passed **raw and unquoted** — the renderer applies `shlex.quote`. ⚠ **Do not pre-quote.** A pre-quoted `'yarn install'` becomes `''\''yarn install'\'''` and the template's `eval "$IC"` then looks for a command literally named `yarn install`. Zero occurrences renders `INSTALL_CMDS=()`. Each value must be a **simple command** — `init.md:163` normalizes `config.commands` so they MUST NOT contain `$(...)` or backticks, `&&`, `||`, `|`, `;`, `&`, newlines, or redirections, and that normalization is the whole reason the template's `eval "$IC"` is safe; the renderer re-checks **that list and only that list** |
-
-   ⚠ **`<PLUGIN_VERSION>` is not an argument** — the script reads it from `.claude-plugin/plugin.json` itself, resolved relative to its own location. It exits non-zero if that read fails rather than stamping a blank watermark onto a script that outlives this session.
-
-   ⚠ **There are no `<BOARD_*>` arguments.** The board's ten values are **not** rendered into the
-   script — see step 2b. Substituting them into bash source produced three separate injections
-   and the class is now removed rather than escaped.
-
-2b. **Write the board config file** — when `config.sprint.board` is set. When `board` is `null`,
-   **delete the file if it exists** rather than merely skipping this step: the supervisor treats
-   an absent file as "board off" and says nothing (which is what every existing repo looks like,
-   D2), but a file left over from an earlier run is read as "board on". A human who turns the
-   board off in config and re-runs the same sprint would otherwise keep projecting to it.
-
-   ```bash
-   rm -f .claude/guild/.gld-sprint-<tracker>.board
-   ```
-
-   (A clean run removes the file itself along with the script; this covers the interrupted-run
-   case, where both are deliberately kept.)
-
-   Path: `.claude/guild/.gld-sprint-<tracker>.board`, in the **human's checkout** (same
-   directory as the script). Write it with the **Write tool** — ten `key=value` lines, in any
-   order:
-
-   ```
-   number=<config.sprint.board.number>
-   owner=<config.sprint.board.owner>
-   field=<config.sprint.board.column_field>
-   field_needs_human=<config.sprint.board.fields.needs_human>
-   verified_as=<config.sprint.board.verified_as>
-   col_ready=<columns.ready>
-   col_in_progress=<columns.in_progress>
-   col_blocked=<columns.blocked>
-   col_in_review=<columns.in_review>
-   col_done=<columns.done>
-   ```
-
-   ⚠ **Values are literal. Do not quote them, do not escape them, do not shell-quote them.**
-   `In progress` goes in as `In progress`. A quote would become part of the display name and
-   every write would fail. The supervisor splits on the **first** `=` only, so a display name
-   may contain one.
-
-   ⚠ **`backlog`/`issues` are not here** — the supervisor never writes those columns
-   (03-sprint-board.md §5.2), `plan` does.
-
-   ⚠ **A missing line is not a harmless blank.** The supervisor validates: `number` must be all
-   digits, and `owner`, `field`, `field_needs_human` and all five column names must be
-   non-empty. Anything else is downgraded to *"board off"* plus one `WARN` line — loud, rather
-   than a six-hour run against a project that does not exist. `field_needs_human` is on that
-   list because `board_col` uses it on **every** write; an empty value used to produce
-   `item-edit --field "" --clear` twenty times out of twenty, all failing.
-
-   ⚠ **The supervisor resolves node ids once at run start** — `project view` (2 points),
-   `field-list --limit 100` (101) and `item-list --limit 200` (201) — and every projection after
-   that costs **1 point** instead of 104. Measured: `item-edit --url --field <name> --value
-   <name>` = 104 points, the `--id --project-id --field-id` form = 1, four runs each. The hourly
-   GraphQL budget is 5000, so the name form allowed ~48 writes an hour for a run that makes
-   several per member.
-
-   ⚠ **The three reads do not fail the same way.** `project view` or `field-list` failing — or
-   the column field being absent from the board — prints one WARN, records `board_off_reason`
-   and runs **without** the board rather than paying 104 a write. `item-list` failing is a
-   **degradation, not a shutdown**: the board stays on and each touched card costs one extra
-   `item-add` to learn its id, which is correct (that call is idempotent) and cheaper than
-   refusing to project at all.
-
-   ⚠ **Why a file and not render tokens.** The values are display names a human typed into the
-   GitHub Projects UI. As `VAR="<TOKEN>"` in bash source, `Done $(touch /tmp/x)` executed at
-   supervisor start and a name ending in a backslash killed the script at **load** time under
-   `set -u` — before the traps, before the empty-queue guard, before one `gh` call, so a column
-   name could stop the sprint from running at all. A quoted heredoc fixed those two and a
-   **newline** still escaped it. `bash -n` was silent for all three on bash 3.2.57. In a data
-   file none of it is code.
-
-2c. **Write the run window file** — when a window is in effect (flag > the marker's `window`
-   key on a resume > `config.sprint.window`). When there is **none**, **delete the file**
-   rather than skipping this step, exactly as step 2b does for the board:
-
-   ```bash
-   rm -f .claude/guild/.gld-sprint-<tracker>.window
-   ```
-
-   ⚠ **But not before the resume path above has restored it.** `--window` is never written to
-   `config.json`, so on a resume the marker's `window` key is the only record there is; this
-   `rm -f` firing on a resume launched without the flag is how a night run becomes an
-   unbounded day run.
-
-   Path: `.claude/guild/.gld-sprint-<tracker>.window`, in the **human's checkout** — the same
-   directory as the script and the `.board`. Write it with the **Write tool**, one line:
-
-   ```
-   window=22:00-10:00
-   ```
-
-   - The value is the **normalised** literal: `~` already turned into `-`, zero-padded.
-   - ⚠ **Do not write `window=none`.** No window means *delete the file*. (The supervisor does
-     accept `none` as "no window" rather than as an error, because the intent is unambiguous —
-     but a malformed time is refused and the run does not start.)
-   - The supervisor splits on the **first** `=` and strips whitespace from the value; it
-     validates the shape again and refuses the run on a mismatch, recording
-     `halted:window-invalid` in the marker. That is the second of the two locks — this file is
-     the instruction an LLM reads, and *"reject `9:00`"* is exactly the kind of thing an LLM
-     silently fixes for you.
-   - A clean run removes this file along with the script and the board config; an interrupted
-     run keeps all three deliberately.
-   - ⚠ **Nothing is added to `.git/info/exclude`.** That loop writes three entries and
-     `.board` is not among them either; adding one would write an ignore line for a file that
-     usually does not exist into the human's repo, permanently, once per tracker.
-
-2d. **Verify the render before starting anything.** The renderer writes the file, `chmod`s it to
-   `0755`, and prints **one line to stderr**: `render_supervisor: wrote <path> (<n> bytes)`.
-   **Confirm that line appeared.** If the Bash call failed, or that line is absent, stop with
-   `FAIL: supervisor render failed — <stderr>` and **do not run step 5**.
-
-   ⚠ **This guard is not optional.** Step 5 launches with `run_in_background: true`; a missing or
-   zero-byte script makes bash exit immediately with no ledger, no marker and no failure record,
-   and the run reports "started" while doing nothing. (Step 5's launcher now refuses both cases
-   itself with exit 64 — that is a **second** net, not a reason to drop this one: it fires after
-   the conf files of 2b/2c are already written, and this guard is what keeps the two steps from
-   running at all.) The renderer checks its own output size
-   because there is no allowlisted Bash primitive here that could (`test -s` and `wc -c` are not
-   in the permission allowlist, and `_bash_rules.md` forbids joining a check onto the render call
-   with `&&`).
-
-   ⚠ **Steps 2b/2c have already written into the checkout by the time this guard fires**, and
-   that ordering is deliberate: the conf files are inputs the supervisor reads at launch, so
-   they belong next to the render, not after the verdict. On a `FAIL` here, **leave them** —
-   `.gld-sprint-<tracker>.board` and `.window` are re-derived from `config.json` on every run
-   (2b deletes the board file when `board` is `null`, 2c the window file when no window is in
-   effect), so a re-run overwrites or removes them. Do not hand-delete them; do not treat their
-   presence as evidence that a supervisor is running — that is the `<!-- guild:sprint:run -->`
-   marker's job (Phase 1 step 3).
-
-   ⚠ **Numbering: there is no step 3 or 4 in this phase.** They were the old "Read the template"
-   and "Write it back" steps, absorbed into step 2 when the render moved into
-   `render_supervisor.py`. The numbers of steps 5 and 6 are kept as they were so the
-   cross-references to them elsewhere in this file (`:99`) and in the tests stay correct.
-
-5. **Start it DETACHED, in the background**: Bash tool with `run_in_background: true`, one call:
-
-   ```bash
-   python3 <<SKILL_DIR>>/commands/atoms/spawn_supervisor.py --human-repo <abs path of the human's checkout> --tracker <tracker>
-   ```
-
-   Add `--caffeinate` when Phase 0b's double gate said so (a window is set **and**
-   `command -v caffeinate` succeeded). ⚠ **Do not wrap this call in `caffeinate` yourself** —
-   the launcher puts it *inside* the detached session, so the assertion lives and dies with the
-   supervisor. Wrapping the launcher instead lets the machine sleep the instant the launcher is
-   killed, i.e. exactly when the detachment is doing its job.
-
-   ⚠ **`bash .claude/guild/.gld-sprint-<tracker>.sh` directly is WRONG and was the previous
-   instruction.** It makes the supervisor a child in *this session's* process group, so whatever
-   ends that background task — the session closing, the task being stopped, a harness reap —
-   takes the supervisor with it. Measured (#389, 6 members): SIGTERM 37 hours in, while member
-   6 of 6 was mid-execute; that member died at `guild:execute` with its branch unpushed and no
-   PR, and the run marker was never updated, so the tracker read `state: "running"` against a
-   dead pid. The coupling also contradicts this file: step 6 tells the human there is no
-   completion notification, and a windowed run is sized in **nights**. A run designed to outlive
-   the session must not be owned by it. `setsid(1)` does not exist on macOS, which is why this is
-   a Python launcher and not a shell wrapper.
-
-   **What the launcher gives back, so nothing is lost:** it streams the supervisor's log to its
-   own stdout while it lives, so a live session sees the same progress it always did and the
-   harness still gets an exit code to trigger Phase 4 on. If it is killed, only the streaming
-   stops — the supervisor keeps running and keeps writing
-   `.claude/guild/.sprint-logs/<tracker>/supervisor.log`, which is new and durable (that progress
-   used to exist only in the harness's task-output file).
-
-
-   ⚠⚠ **The launcher's exit code now comes from a FILE, and `71` means UNKNOWN.** The supervisor
-   is double-forked (its `ppid` is **1**, so a stop that walks this session's process *tree*
-   cannot reach it — `start_new_session=True` alone left it a direct child, and #389 then took
-   SIGTERM three runs in a row, ~2 minutes in). That detachment costs `wait()`, so the
-   supervisor writes `$?` into `.claude/guild/.sprint-logs/<tracker>/supervisor.rc` and the
-   launcher reads it back. Exit codes to branch on:
-
-   | exit | meaning | what Phase 4 must do |
-   |---|---|---|
-   | 0 | the supervisor finished cleanly | proceed |
-   | other non-zero | the supervisor's own failure code | treat as a failed run |
-   | **71** | supervisor is gone but left **no readable `.rc`** — killed before it could write | ⚠ **outcome UNKNOWN. Do NOT report a clean run.** Read `supervisor.log` and the board |
-   | 64 / 70 | nothing was started (usage error / spawn failed) | nothing to clean up |
-
-   ⚠ **Confirm the `spawn_supervisor: pid=<n> detached` line appeared**, the same way step 2d
-   confirms the render. Branch on that line, never on this launcher staying alive — outliving it
-   is the point. A `FAIL:` line instead (exit 64/70) means nothing was started.
-
-   ⚠ **Do not create the container or the supervisor worktree here.** The script does both
-   itself, after its empty-queue guard, because it must not build a worktree for a run with
-   nothing to do — and because it normalises the container path to a realpath at the same
-   moment (`git worktree list` reports realpaths, and on macOS both `/tmp` and `$TMPDIR` are
-   symlinks, so an unnormalised path makes every live worktree look unregistered). Phase 0's
-   container check is a *precondition* test, not the creation step.
-6. Report: sprint number, member count, container path, log dir, and *"진행 상황은 `/gld sprint daily`. rate limit 은 리셋이 4시간 이내면 기다려 재개하고, 더 멀면 그 멤버만 차단해 재실행이 이어받습니다."*
-
-   **When a window is in effect, this same sentence must also carry four things:**
-
+   The command detaches the supervisor and returns at once, printing its log path. Exit 3 = a
+   supervisor of this repository runs already; exit 4 = refused, the line says why; exit 2 = a usage
+   error. ⚠ **Never read the supervisor log or anything under `~/.gld/records/` into the conversation.**
+2. Report: sprint number, member count, and *"진행 상황은 `engine.py sprint status`. 할당량은 리셋이
+   4시간 이내면 기다려 재개하고, 더 멀면 그 멤버를 막아 두고 끝냅니다 — 리셋 뒤 `/gld sprint run` 을
+   다시 치면 그 멤버부터 이어집니다."* **When a window is in effect, this must also carry**:
    - **The window**, and *"창 밖에서는 새 멤버를 시작하지 않고 기다립니다"*.
    - **An estimated number of nights, as a RANGE**: `ceil(members × 60min ÷ window minutes)`
-     rendered as *"대략 1~3밤"*. A single number is a lie — a member takes 20 to 90 minutes and
-     a blocked or failed one is spent in seconds. When the window is shorter than 90 minutes,
-     `N = the member count`.
-   - ***"낮의 편집은 무효입니다"*** — the member set was fixed at launch, so editing the tracker
-     body during the day does not change this run. (And note that a body edit makes the next
-     resume see a plan-hash mismatch.)
-   - ***"완주 통지는 없습니다 — 아침에 `/gld sprint daily`로 확인하십시오."*** Phase 4 below only
-     runs while this session is alive, and the marker is a PATCH of an existing comment, so
-     GitHub sends no notification either. This is not a temporary gap; it is the design.
-   - **How to stop it**: `kill <pid>` — *"대기 중이면 최대 60초, 멤버 작업 중이면 그 멤버가 끝난
-     뒤에 멈춥니다. `kill -9` 는 쓰지 마십시오 — 카드가 `In progress` 에 남습니다."* Ctrl-C
-     cannot work: the supervisor is a background job of a non-interactive shell and inherits
-     SIGINT as SIG_IGN. ⚠ Saying only *"60초"* makes a human who sees nothing die reach for
-     `kill -9`, and that leaves the card on `In progress` permanently.
+     rendered as *"대략 1~3밤"*; a window shorter than 90 minutes → the member count.
+   - ***"낮의 편집은 무효입니다"*** — the member set was fixed at launch.
+   - ***"완주 통지는 없습니다 — 아침에 `engine.py sprint status` 로 확인하십시오."***
+   - **How to stop it**: `engine.py sprint stop` — *"대기 중이면 최대 60초, 멤버 작업 중이면 그 멤버가
+     끝난 뒤에 멈춥니다. `kill -9` 는 쓰지 마십시오."*
+3. Attended follow-up: the human may poll with `sprint status … --wait 540` (short output only) or end
+   the conversation — the supervisor outlives it.
 
-**What the supervisor does per issue** (implemented in the template; summarized here so this
-file is readable on its own):
-
-```
-1. assemble the dag input   (gh pr list · gh issue list --json labels · git branch → one JSON)
-2. blocked?                 sprint_dag.py --mode blocked   → skip and record
-3. refresh base             git fetch origin <d>:refs/remotes/origin/<d>
-4. decide base              sprint_dag.py --mode base      → DEFAULT | <branch> | BLOCKED:<why>
-5. acquire the worktree     four states (below) + memory symlink + dependency install
-6. run the engine           (cd <worktree> && GLD_UNATTENDED=1 GLD_SPRINT_BASE=<base> GLD_SPRINT_DRAFT=<0|1> python3 <engine>/gld_engine.py dev run --issue <n> --unattended)
-   — exit 4 busy waits in place (twice) then `busy-skipped`; exit 6 / 126·127 stop the sprint as
-     `halted:<reason>`; both before the rate-limit fence, neither writes failed.txt (design §2.4).
-     Every pass first checks the engine kill switch and the ACTIVE plugin version (`halted:engine-kill-switch` /
-     `halted:plugin-version-changed`).
-7. judge by label           5 outcomes (below)
-8. release the worktree     only at guild:done, never --force
-9. update the marker        heartbeat · retries · discovered children
-```
-
-**Base refresh uses the remote-tracking namespace only.** `git fetch origin <b>:<b>` is refused
-whenever `<b>` is checked out in **any** worktree — and the human's checkout holds it, by
-premise. Fetching into `refs/remotes/` never collides and leaves the human's local branch
-untouched. The supervisor worktree is `--detach` for the same reason: it cannot check out a
-branch the human already has.
-
-**Worktree acquisition, four states.** `-b` is never used (branch naming belongs to the spine —
-`_execute_spine.md` Step 0), and `--force` is never used (git's refusal *is* the safety
-mechanism).
-
-| Branch | Worktree | Action |
-|---|---|---|
-| none | none | `worktree add --detach <path> <base>` — the spine cuts the branch |
-| **exists** | none | `worktree add <path> <branch>` — **check it out**, no `-b`, no `--detach`. With `--detach` the branch is not "the current branch", and a legitimate resume branch usually has an *empty* log (the developer commits at the end) — exactly the combination `_execute_spine.md` Step 0 (a) drops, sending a resumable Issue down the fresh path where `git switch -c` then fails with "already exists" and the Issue pauses |
-| any | registered + present | enter it (judge by `worktree list` registration, **not** by path existence — a path that exists unregistered makes `worktree add` fail with "already exists" and every git call inside it fail) |
-| any | registered + missing | `worktree prune`, then treat as absent (also at issue start, not only at run end — a `$TMPDIR` container can be cleaned mid-run) |
-
-**The child runs inside the issue worktree.** That subshell `cd` is what makes the isolation
-real; without it the child runs in the supervisor worktree, which has no dependencies
-installed, and every test fails while the design silently reverts to one checkout.
-
-**Growth signals are symlinked out.** `capture_signal.py` resolves the repo root by walking up
-for a `.git` **entry** — a worktree's `.git` is a file, which it matches — so signals would land
-inside the worktree and `git worktree remove` deletes them **silently** (git does not treat a
-gitignored path as a reason to refuse). The supervisor links `<worktree>/.claude/guild/memory`
-to the human's, and registers that path in `info/exclude` — ⚠ necessary because `.gitignore`'s
-`memory/` is a *directory* pattern and does not match a symlink, so without it the worktree is
-dirty and removal is refused.
-
-**Five outcomes** (label-truthful — exit 0 is never proof of completion):
-
-| Label | Outcome |
-|---|---|
-| `guild:needs-human` | PAUSED. Worktree preserved. Next member. Checked **before** the others — the label is additive and coexists with `guild:children` |
-| `guild:done` | DONE. Release the worktree |
-| `guild:children` | **not terminal** — a split still mid-orchestration. **Continue it**: re-invoke `/gld dev <parent>`, which `dev.md` Phase 1 sends straight to Phase 2b, and Phase 2b drives only the children that are not yet `guild:done` — so each pass resumes where the last stopped. The bound is **progress**, not attempts: reset the counter whenever the number of outstanding children falls, and record `split-stalled` as INCOMPLETE after two passes with no progress. ⚠ Do **not** hand it to the human and do **not** queue the children as members — they are this member's own work and share its worktree, exactly as they would outside a sprint. **The one exception — PAUSED** (0.98.2 R2): when, after a pass, the parent's smallest outstanding child (no `guild:done`, whatever its state — `dev` Phase 2b's order) is `OPEN` and carries `guild:needs-human`, there is no re-invocation and no `split-stalled`: board `blocked needs-human`, completion's paused list `#e (child #c)`, and the parent goes into `dag/paused.txt` so its dependants block as `dep-needs-human`. 단 가장 작은 대기 자식이 needs-human 이면 PAUSED — 근거는 completion 의 `#e (child #c)`(라벨은 `guild:children` 그대로). A `CLOSED` smallest child → re-invoke as above (`dev` Phase 2b cleans up a human-merged child). Limit: the check runs after a pass, so a re-run with the child still unresolved spends one empty session first |
-| exit 0 mid-spine | bounded re-resume (2), then INCOMPLETE |
-| blocked | recorded as **blocked, not failed**. A dependency did not land, or the account is rate limited with a reset more than 4h away — the re-run picks those up |
-
-⚠ **The common split case is not `guild:children`.** When orchestration is *not* interrupted,
-`dev.md` drives all children to `guild:done` in the same session and Phase 2c flips the parent
-to `guild:done` — so the supervisor sees a **done parent with no branch and no PR**. That is
-what `split: true` is for (step 1): without it the base decision would call a *completed* Issue
-`BLOCKED:dep-no-branch` and block everything downstream of it.
+**What the supervisor does** (so this file is readable on its own; the engine is canonical):
+per member — wait for the window · read the Issue, its dependency and its state fresh · blocked?
+record it and go on · fetch the base into `refs/remotes/origin/` only · run
+`engine.py dev --foreground --mode unattended` for it and wait · judge by exit code and state.json ·
+update the tracker's one `<!-- guild:sprint:run -->` comment at least every 10 minutes. A member that
+stopped blocks only the members on it; a boundary failure (canary, self check, init) ends the run.
+A repository command waits for other repository commands on this machine.
 
 ## Phase 4 — On completion
 
-The harness re-invokes when the launcher exits. Then:
+When the status output says `finished` or `halted`:
 
-⚠ **This phase is best-effort and always was — what changed is the consequence.** Since
-Phase 3 step 5 detaches, the launcher exiting no longer means the *run* ended: killing this
-session now costs the **report**, not the run. So reaching this phase does not by itself
-prove the queue is empty — read the marker and judge, exactly as below. When the launcher
-was killed while the supervisor is still alive (`ps -p <pid> -o command=` still shows
-`.gld-sprint-`), say so and stop: the run continues, and `/gld sprint daily` is where its
-state lives. Do **not** report outcomes for a run still in progress.
+1. Report per-member outcomes with counts and cost: `done` · `closed` · `stopped` · `blocked` (and by
+   what) · `skipped-locked` · `refused` · `failed`. A `stopped` member is answered with
+   `/gld resume <n>` (`commands/engine/dev.md` section 3), then `/gld sprint run` again — it never
+   starts a `done` member twice, and it continues the blocked ones.
+2. List the kept member worktrees and their size (`sprint report --json` → `members[].worktree`) —
+   they are needed for `resume --pr-review`; removing one is the human's.
+3. State both termination axes (`sprint.md` — run finished vs sprint finished).
 
-1. Read the marker and the logs; report per-member outcomes (**label-truthful**: done / paused /
-   blocked / incomplete / failed) with counts, plus token/cost totals.
-   단 가장 작은 대기 자식이 needs-human 이면 PAUSED — 근거는 completion 의 `#e (child #c)`(라벨은 `guild:children` 그대로). Report such a member as paused on `#c`, not by the parent's label.
+`halted:<reason>` — name the action, never only the counts:
 
-   ⚠ **Then add one board line when `config.sprint.board` is set**, from the run marker's
-   ledger: *"보드: 실패 <board_fails>건 · 버그 <board_bugs>건"*, plus the account line when
-   `board_account_mismatch` is present and *"연속 실패로 투영을 중단했습니다"* when
-   `board_disabled_after` is. Absorbing a board failure is right (D9); absorbing the *fact*
-   that N of them happened is not — zero and "every write failed" must not look alike.
-2. List **preserved worktrees** and, for each, whether what blocked removal is uncommitted
-   **source** (real unfinished work — the human should look) or only **untracked docs**
-   (`_execute_spine.md` Step 3.5b leaves a tech-writer ADR untracked by design — a known gap, not a
-   failure). Do not judge it automatically and never auto-commit or delete.
-3. State both termination axes (`sprint.md` — run finished vs sprint finished) and point at
-   `/gld sprint daily`.
-
-⚠ **`state: halted:*` — a separate arm, and it did not exist.** Without it a run that died in
-the first second over a one-character typo produces a *"done 0 / failed 0"* report that says
-nothing. Match on the wildcard and name the action for each.
-⚠ **Read `halt_reason` first** (the marker / `.sprint-logs/<tracker>/dag/ledger.json`): a 0.102 supervisor writes a
-reason 0.101.3 does not document FOLDED into one it does (`state` — so a rolled-back 0.101.3 can still render it) and
-puts the precise reason in `halt_reason` with the person's action in `halt_note` (K6 user decision 2; an
-`engine-env-<reason>` state is not folded — 0.101.3's wildcard row reads it — and carries `halt_note` as well). When
-`halt_reason` is present, the row is `halted:<halt_reason>` and `halt_note` is the line to show:
-
-| `state` | What to say |
+| `halt` | What to say |
 |---|---|
-| `halted:window-invalid` | The window string was rejected; the run never started. **The reason line is in `FAIL:` on the supervisor log and the marker.** Fix the `--window` value (or `config.sprint.window`) and call `run` again |
-| `halted:marker-unwritable` | The marker could not be written N times in a row, so the run stopped rather than running blind (the duplicate-run guard needs it). Usually an expired token or a network outage. ⚠ **The reason may only exist in `.sprint-logs/<tracker>/dag/ledger.json`** — the marker write is what failed. Read it there |
-| `halted:container-lost` | The container disappeared mid-run (a `$TMPDIR` cleanup) and could not be re-created. Check the container path, then re-run |
-| `halted:sigTERM` / `halted:sigHUP` | Someone stopped it. The member that was running finished first; re-run to continue |
-| `halted:interrupted` | An abnormal exit that named no reason (SIGKILL cannot; power loss, battery, a forced reboot). ⚠ **A card may be stuck on `In progress`** — say so |
-| `halted:plan-hash-mismatch` | The tracker body changed. Re-plan or accept, per Phase 1 step 4 |
-| `halted:engine-kill-switch` | (0.102) `gld_engine.py dev valve halt` is in force. Find out why (`dev valve show`), `dev valve resume` when it is safe, then call `run` again |
-| `halted:plugin-version-changed` | (0.102) The active Guild plugin version changed under the running supervisor. Call `run` again — it regenerates the supervisor for the new version |
-| `halted:engine-gh-auth` | (0.102) The engine's `gh` auth failed (exit 3) — every member would fail the same way. `gh auth login`, then call `run` again |
-| `halted:engine-env-<reason>` | (0.102) The engine refused its environment (`endpoint` · `python` · `uninitialized` · `plugin-not-listed` · `ignored-missing` · `build-inputs-changed` · `missing` — the engine file is gone from the plugin cache · `unknown`). Fix it per `_handoff.md`'s `halted:<reason>` list, then call `run` again |
+| `base-red` | The default branch is red (the tracker comment names the commands). Fix it, or — the human's call — `--allow-red-base`. When the base could not be checked at all, only fixing that helps |
+| `boundary` | The sandbox / gate / canary of THIS machine failed — `commands/engine/dev.md` section 3 (`canary-failed`); the next member would stop at the same place |
+| `marker-unwritable` | The tracker could not be written several times in a row (usually an expired token or a network outage). The reason is in `engine.py sprint status` |
+| `plan-hash-mismatch` | The tracker body changed after planning — run `/gld sprint plan` again |
+| `other-host` | Phase 1 step 3 |
+| `signal` | Someone stopped it. The running member finished first; re-run to continue |
+| `engine-error` | An engine failure, or the engine's files changed during the run (an update). The supervisor log has the traceback; re-run after it is fixed |
 
-⚠ **Never report a `halted:*` run with the normal counts alone.** `done 0 / failed 0` over a
-run that refused to start is the class of report this arm exists to remove.
+⚠ **Never report a `halted:*` run with the normal counts alone.**
 
 ## Return
 
-`OK: run complete — done <N> / paused <M> / failed <K> / blocked <J> / incomplete <I>` ·
-`OK: already running (pid <p>, since <t>)` · `OK: paused — plan-hash mismatch` ·
+`OK: run started — sprint #<t>, <N> members` · `OK: run finished — done <N> / closed <C> / stopped <M> / blocked <J> / failed <K>` ·
+`OK: already running (pid <p>, since <t>)` · `OK: run halted — <reason>` ·
 `OK: unattended — starting a sprint run requires a human` ·
 `FAIL: preflight blocked — <row>` · `FAIL: <reason>`
 
@@ -770,30 +250,10 @@ run that refused to start is the class of report this arm exists to remove.
 
 ## Hard rules
 
-- **Nothing merges** (INV1). The human reviews and merges every PR. Unattended *defers* that
-  gate exactly as `batch` does — it does not remove it.
-- **Never `--force` on a worktree, never `-b`, never `cd` into the container.** git's refusal is
-  the safety mechanism; branch naming is the spine's; a supervisor standing in a worktree it
-  removes dies on the next git call.
-- **Never touch the human's *working tree*, index or stash.** What the run does write, in full:
-  the gitignored `.claude/guild/.sprint-logs/<tracker>/**`, `.claude/guild/memory/` (through the
-  symlink), `.claude/guild/.gld-sprint-<tracker>.sh` (this script),
-  `.claude/guild/.gld-sprint-<tracker>.board` (step 2b's board config — removed together with the
-  script on a clean run, deliberately kept otherwise),
-  `.claude/guild/.gld-sprint-<tracker>.window` (step 2c's run window — same lifetime as the
-  board config; ⚠ **not** added to `.git/info/exclude`), and three lines in `.git/info/exclude`. Plus, unavoidably, in the **shared ref store**: one new branch per Issue
-  (the spine cuts it — the work would not exist otherwise), `refs/remotes/origin/<base>`
-  advanced by an additive fetch, and `.git/worktrees/` bookkeeping. Fetch only into
-  `refs/remotes/`; never into a local branch name. ⚠ `git worktree prune` is repo-global and
-  takes no path, so it runs only when every prunable entry is inside our own container —
-  otherwise it would drop the registration of a worktree of the human's that is merely on an
-  unmounted volume.
-- **Every `sprint_dag.py` call absorbs its exit code** and branches on the value.
-- **Label-truthful outcomes.** exit 0 is not completion.
-- **A marker write failure never kills the run** — but three consecutive failures stop it, since
-  the duplicate-run guard depends on that marker being honest.
-- **The container is not removed while a worktree in it is preserved.** Removal is git's call.
-- The generated script is launched by **one backgrounded `python3 spawn_supervisor.py` call**
-  (`_bash_rules.md` exception 1), which spawns `bash <script>` into its **own session** so the
-  run outlives this one. Never `bash <script>` directly — that is exception 2's shape and it
-  ties a multi-night run to a single session's lifetime (Phase 3 step 5 has the measurement).
+- **Nothing merges** (INV1), nothing is force-pushed, no permission prompt is bypassed: every role
+  session of every member runs with the engine's own rendered settings.
+- **Never answer a stop on the human's behalf.** The only thing a run answers itself is a quota
+  stop whose reset time has passed (the human re-typing `run` is that answer).
+- **Never touch the human's working tree, index or local branches** — neither does the supervisor.
+- **The engine decides, not this file.** No label, log line or comment is read here to judge an
+  outcome; `sprint status` / `sprint report` are the only sources.

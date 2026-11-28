@@ -1,0 +1,21 @@
+{
+  "format": 1,
+  "description": "Stage 3: leader, needs_leader: replan without R2 (TS1).",
+  "stream": "../leader/real-2.1.323/plan-gate-plan.jsonl",
+  "init_from_argv": true,
+  "leader": {
+    "example": "leader-answer-s3",
+    "expect": "accepted"
+  },
+  "structured_output": {
+    "answer": "replan",
+    "reason": "needs-human-decision",
+    "step": null,
+    "note": "R2 is a separate Issue.",
+    "recommendation": null,
+    "defer": [
+      "R2"
+    ],
+    "session": null
+  }
+}

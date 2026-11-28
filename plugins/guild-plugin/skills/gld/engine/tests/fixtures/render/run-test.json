@@ -1,0 +1,219 @@
+{
+  "format": 1,
+  "description": "A run step (run: test) under srt with the developer boundary (§7.1). srt itself gets the short TMPDIR; the command gets run_tmp inside -c (F0) and cds into the worktree (srt starts in an empty folder — its built-in write denies cover its cwd subtree; session 5). allowRead re-opens the plugin install path (plugin check scripts live there, under the denied Claude config dir).",
+  "input": {
+    "kind": "run",
+    "role": "developer",
+    "role_class": "work",
+    "step": "test",
+    "attempt": 1,
+    "issue": 42,
+    "outputs": [],
+    "paths": {
+      "home": "/Users/u",
+      "claude_config_dir": "/Users/u/.claude-personal",
+      "main_checkout": "/Users/u/projects/app",
+      "worktree": "/Users/u/projects/.gld-app-42",
+      "git_common_dir": "/Users/u/projects/app/.git",
+      "own_worktree": "/Users/u/projects/app/.git/worktrees/.gld-app-42",
+      "engine_records": "/Users/u/.gld/records",
+      "cache": "/Users/u/.gld/cache/acme/app",
+      "plugin_root": "/Users/u/.claude-personal/plugins/cache/deku-guild-plugin/guild-plugin/1.0.0-exp.0",
+      "issue": 42,
+      "other_worktrees": [
+        "/Users/u/projects/.gld-app-41"
+      ],
+      "other_repo_roots": [
+        "/Users/u/projects/other"
+      ],
+      "in_dir": null,
+      "run_tmp": "/Users/u/.gld/tmp/acme/app/42/test-1",
+      "srt_tmpdir": "/tmp/gx-a1b2c3"
+    },
+    "config": {
+      "format": 1,
+      "commands": {
+        "test": {
+          "cmd": "pnpm test -- --ci",
+          "timeout_min": 30
+        },
+        "verify-gate": {
+          "plugin": "verify-gate"
+        }
+      },
+      "registry_hosts": [
+        "registry.npmjs.org"
+      ],
+      "cache_env": {
+        "npm_config_cache": "{cache}/npm"
+      },
+      "secret_paths": [
+        ".env*",
+        "*.pem",
+        "*.p12"
+      ]
+    },
+    "command": "pnpm test -- --ci",
+    "bash_timeout_ms": 1800000
+  },
+  "base_env": {
+    "PATH": "/opt/homebrew/bin:/usr/bin:/bin",
+    "HOME": "/Users/u",
+    "USER": "u",
+    "LANG": "en_US.UTF-8",
+    "SHELL": "/bin/zsh",
+    "TMPDIR": "/var/folders/xx/T/",
+    "CLAUDE_CONFIG_DIR": "/Users/u/.claude-personal",
+    "GH_TOKEN": "x",
+    "GITHUB_TOKEN": "x",
+    "NPM_TOKEN": "x",
+    "ANTHROPIC_API_KEY": "x",
+    "AWS_SECRET_ACCESS_KEY": "x",
+    "SSH_AUTH_SOCK": "/private/tmp/ssh.sock",
+    "GIT_ASKPASS": "/usr/bin/true",
+    "CLAUDECODE": "1",
+    "CLAUDE_CODE_ENTRYPOINT": "cli",
+    "CLAUDE_PID": "1"
+  },
+  "bins": {
+    "claude": "/usr/local/bin/claude",
+    "srt": "/Users/u/.gld/srt/node_modules/.bin/srt"
+  },
+  "files": {
+    "srt": "/Users/u/.gld/records/acme/app/42/runs/test/1/srt.json"
+  },
+  "expected": {
+    "srt": {
+      "network": {
+        "allowedDomains": [
+          "registry.npmjs.org"
+        ],
+        "deniedDomains": []
+      },
+      "filesystem": {
+        "denyRead": [
+          "/Users/u/.ssh",
+          "/Users/u/.aws",
+          "/Users/u/.azure",
+          "/Users/u/.config/gcloud",
+          "/Users/u/.config/gh",
+          "/Users/u/.npmrc",
+          "/Users/u/.netrc",
+          "/Users/u/.git-credentials",
+          "/Users/u/.docker/config.json",
+          "/Users/u/.kube",
+          "/Users/u/Library/Keychains",
+          "/Users/u/.claude-personal",
+          "/Users/u/.claude",
+          "/Users/u/.claude.json",
+          "/Users/u/projects/app/**/.env*",
+          "/Users/u/projects/app/**/*.pem",
+          "/Users/u/projects/app/**/*.p12",
+          "/Users/u/projects/.gld-app-42/**/.env*",
+          "/Users/u/projects/.gld-app-42/**/*.pem",
+          "/Users/u/projects/.gld-app-42/**/*.p12",
+          "/Users/u/projects/.gld-app-41/**/.env*",
+          "/Users/u/projects/.gld-app-41/**/*.pem",
+          "/Users/u/projects/.gld-app-41/**/*.p12",
+          "/Users/u/projects/other",
+          "/Users/u/.gld/records"
+        ],
+        "allowRead": [
+          "/Users/u/.claude-personal/plugins/cache/deku-guild-plugin/guild-plugin/1.0.0-exp.0"
+        ],
+        "allowWrite": [
+          "/Users/u/projects/.gld-app-42",
+          "/Users/u/.gld/tmp/acme/app/42/test-1",
+          "/Users/u/.gld/cache/acme/app",
+          "/Users/u/projects/app/.git/objects",
+          "/Users/u/projects/app/.git/refs/heads",
+          "/Users/u/projects/app/.git/logs",
+          "/Users/u/projects/app/.git/packed-refs",
+          "/Users/u/projects/app/.git/packed-refs.lock",
+          "/Users/u/projects/app/.git/worktrees/.gld-app-42"
+        ],
+        "denyWrite": [
+          "/Users/u/projects/.gld-app-42/.claude",
+          "/Users/u/projects/.gld-app-42/**/.claude",
+          "/Users/u/projects/.gld-app-42/**/CLAUDE.md",
+          "/Users/u/projects/.gld-app-42/**/CLAUDE.local.md",
+          "/Users/u/projects/.gld-app-42/**/AGENTS.md",
+          "/Users/u/projects/.gld-app-42/docs/specs/42/procedure.yaml",
+          "/Users/u/projects/app/.claude",
+          "/Users/u/projects/app/**/.claude",
+          "/Users/u/projects/app/**/CLAUDE.md",
+          "/Users/u/projects/app/**/CLAUDE.local.md",
+          "/Users/u/projects/app/**/AGENTS.md",
+          "/Users/u/projects/app/docs/specs/42/procedure.yaml",
+          "/Users/u/projects/app/.git/hooks",
+          "/Users/u/projects/app/.git/config",
+          "/Users/u/projects/app/.git/info",
+          "/Users/u/projects/app/.git/objects/info/alternates",
+          "/Users/u/projects/app/.git/objects/info/http-alternates",
+          "/Users/u/projects/app/.git/worktrees/.gld-app-42/commondir",
+          "/Users/u/projects/app/.git/worktrees/.gld-app-42/gitdir",
+          "/Users/u/projects/app/.git/worktrees/.gld-app-42/config.worktree",
+          "/Users/u/projects/.gld-app-42/.git",
+          "/Users/u/projects/.gld-app-42/**/.git",
+          "/Users/u/.gld/tmp/acme/app/42/**/.claude",
+          "/Users/u/.gld/tmp/acme/app/42/**/.git",
+          "/Users/u/.gld/cache/acme/app/**/.claude",
+          "/Users/u/.gld/cache/acme/app/**/.git",
+          "/Users/u/projects/app/.git/worktrees/.gld-app-42/**/.claude",
+          "/Users/u/projects/app/.git/worktrees/.gld-app-42/**/.git",
+          "/Users/u/projects/app/.git/objects/**/.claude",
+          "/Users/u/projects/app/.git/objects/**/.git",
+          "/Users/u/projects/app/.git/refs/heads/**/.claude",
+          "/Users/u/projects/app/.git/refs/heads/**/.git",
+          "/Users/u/projects/app/.git/logs/**/.claude",
+          "/Users/u/projects/app/.git/logs/**/.git",
+          "/tmp/claude*/**/.claude",
+          "/tmp/claude*/**/.git",
+          "/private/tmp/claude*/**/.claude",
+          "/private/tmp/claude*/**/.git",
+          "/Users/u/.gld/records",
+          "/Users/u/.ssh",
+          "/Users/u/.aws",
+          "/Users/u/.azure",
+          "/Users/u/.config/gcloud",
+          "/Users/u/.config/gh",
+          "/Users/u/.npmrc",
+          "/Users/u/.netrc",
+          "/Users/u/.git-credentials",
+          "/Users/u/.docker/config.json",
+          "/Users/u/.kube",
+          "/Users/u/Library/Keychains",
+          "/Users/u/.claude-personal",
+          "/Users/u/.claude",
+          "/Users/u/.claude.json",
+          "/Users/u/projects/app/**/.env*",
+          "/Users/u/projects/app/**/*.pem",
+          "/Users/u/projects/app/**/*.p12",
+          "/Users/u/projects/.gld-app-42/**/.env*",
+          "/Users/u/projects/.gld-app-42/**/*.pem",
+          "/Users/u/projects/.gld-app-42/**/*.p12",
+          "/Users/u/projects/.gld-app-41/**/.env*",
+          "/Users/u/projects/.gld-app-41/**/*.pem",
+          "/Users/u/projects/.gld-app-41/**/*.p12",
+          "/Users/u/projects/other"
+        ]
+      }
+    },
+    "argv": [
+      "/Users/u/.gld/srt/node_modules/.bin/srt",
+      "--settings",
+      "/Users/u/.gld/records/acme/app/42/runs/test/1/srt.json",
+      "-c",
+      "export TMPDIR=/Users/u/.gld/tmp/acme/app/42/test-1; cd /Users/u/projects/.gld-app-42 && pnpm test -- --ci"
+    ],
+    "env": {
+      "PATH": "/opt/homebrew/bin:/usr/bin:/bin",
+      "HOME": "/Users/u",
+      "USER": "u",
+      "LANG": "en_US.UTF-8",
+      "SHELL": "/bin/zsh",
+      "TMPDIR": "/tmp/gx-a1b2c3",
+      "npm_config_cache": "/Users/u/.gld/cache/acme/app/npm"
+    }
+  }
+}

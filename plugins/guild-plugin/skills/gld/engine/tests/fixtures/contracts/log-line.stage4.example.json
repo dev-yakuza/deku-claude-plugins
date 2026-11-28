@@ -1,0 +1,12 @@
+{
+  "format": 1,
+  "ts": "2026-11-23T01:02:03Z",
+  "issue": 42,
+  "who": "sprint",
+  "event": "answer",
+  "data": {
+    "answer": "rerun"
+  },
+  "code": "infra-stop",
+  "reason": "transient"
+}

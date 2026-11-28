@@ -1,0 +1,23 @@
+{
+  "format": 1,
+  "description": "P3-A O4: the judge's output is a symlink → output-format non-regular-output.",
+  "stream": "../f2/r4.jsonl",
+  "init_from_argv": true,
+  "structured_output": {
+    "status": "done",
+    "outputs": [
+      "docs/specs/42/design.md"
+    ],
+    "requests": [],
+    "blocked_by": null,
+    "discoveries": [],
+    "note": "fixture"
+  },
+  "actions": [
+    {
+      "op": "symlink",
+      "path": "docs/specs/42/design.md",
+      "target": "../../../README.md"
+    }
+  ]
+}

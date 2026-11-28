@@ -1,0 +1,66 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "gld/mutations",
+  "title": "docs/specs/<N>/mutations.json — mutations a work role declares for the engine to run (VB9)",
+  "description": "Declared by a developer step when an acceptance criterion says a test must FAIL once some code is removed or changed. Data only, never a command: the engine applies each text replacement to a fresh tree of HEAD, runs the repository's named `test` command under srt and records what it saw (schemas/mutation-record). Nothing here is a claim about the result.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "format",
+    "mutations"
+  ],
+  "properties": {
+    "format": {
+      "const": 1
+    },
+    "mutations": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 5,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "acs",
+          "path",
+          "find",
+          "replace",
+          "note"
+        ],
+        "properties": {
+          "acs": {
+            "type": "array",
+            "minItems": 1,
+            "uniqueItems": true,
+            "items": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "description": "AC numbers of analysis.md."
+          },
+          "path": {
+            "type": "string",
+            "pattern": "^(?!/)(?!.*(^|/)\\.\\.(/|$))(?!.*//)[^\\x00-\\x1f]+$",
+            "maxLength": 400,
+            "description": "A tracked production file of HEAD (never a test, a golden, a control file or docs/specs/)."
+          },
+          "find": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4000,
+            "description": "Literal text that occurs exactly once in the file."
+          },
+          "replace": {
+            "type": "string",
+            "maxLength": 4000,
+            "description": "What replaces it (empty = removed)."
+          },
+          "note": {
+            "type": "string",
+            "maxLength": 1000
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,82 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "gld/init-decisions",
+  "title": "A human's answers to the init questions (stage-4 scope §2.9, S4-init)",
+  "description": "<home>/init/<owner>/<repo>/decisions.json, written by `engine.py init answer` only (the LLM command relays the human's answer). initconfig turns it into the decisions object convert_config.load_decisions checks (fail-closed). The same (question, item) again replaces the answer.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "format",
+    "repo",
+    "answers"
+  ],
+  "properties": {
+    "format": {
+      "const": 1
+    },
+    "repo": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$"
+    },
+    "answers": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "question",
+          "item",
+          "answer",
+          "note",
+          "at"
+        ],
+        "properties": {
+          "question": {
+            "enum": [
+              "test-command",
+              "command-conflict",
+              "not-local",
+              "sandbox-exception",
+              "quarantine",
+              "risk-rules",
+              "registry-host",
+              "toolchain",
+              "risk-add",
+              "narrow-glob",
+              "followups-dry-run"
+            ]
+          },
+          "item": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "minLength": 1,
+            "maxLength": 500,
+            "description": "What the question is about (command name, test, rule line, host, candidate id); null where the question has one subject."
+          },
+          "answer": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4000
+          },
+          "note": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4000,
+            "description": "Who / why — the human's words."
+          },
+          "at": {
+            "$ref": "#/$defs/ts"
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "ts": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]+)?Z$"
+    }
+  }
+}

@@ -1,0 +1,21 @@
+{
+  "format": 1,
+  "description": "Stage 2 leader writes a file (it has no outputs) and answers plan — L15: judge-wrote-outside-outputs stop, the answer is not used.",
+  "stream": "../leader/real-2.1.323/plan-gate-plan.jsonl",
+  "init_from_argv": true,
+  "leader": {"example": "leader-answer-plan-gate", "expect": "judge-wrote-outside-outputs"},
+  "structured_output": {
+    "answer": "plan",
+    "reason": "fits-template",
+    "step": null,
+    "note": "fixture",
+    "recommendation": null,
+    "requirements": [{"row": "R1", "covered": true}, {"row": "R2", "covered": true}],
+    "missing_requirements": [],
+    "plan": {"template": "feature"},
+    "close": null
+  },
+  "actions": [
+    {"op": "write", "path": "docs/specs/42/leader-notes.md", "content": "# notes\n"}
+  ]
+}

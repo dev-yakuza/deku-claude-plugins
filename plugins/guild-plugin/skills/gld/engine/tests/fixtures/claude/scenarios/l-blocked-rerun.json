@@ -1,0 +1,14 @@
+{
+  "format": 1,
+  "description": "Stage 2 leader, needs_leader (blocked): rerun design with a note for the next attempt (L7).",
+  "stream": "../leader/real-2.1.323/blocked-escalate.jsonl",
+  "init_from_argv": true,
+  "leader": {"example": "leader-answer", "expect": "accepted"},
+  "structured_output": {
+    "answer": "rerun",
+    "reason": "upstream-gap",
+    "step": "design",
+    "note": "analysis.md assumption 1 answers the question design was blocked on; read it and continue.",
+    "recommendation": null
+  }
+}

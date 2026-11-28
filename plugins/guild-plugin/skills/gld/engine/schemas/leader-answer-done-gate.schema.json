@@ -1,0 +1,151 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "gld/leader-answer-done-gate",
+  "title": "Leader answer — done-gate (stage 2, scope §2.2, D6, D7)",
+  "description": "Common envelope + the done-gate fields. approve needs no unmet AC, no include discovery, and every manual AC referenced by manual-test-checklist.md. ENUM TEMPLATE: values like \"{answers}\" are placeholders that schema.fill_enums replaces for each call (codes.LEADER_SCHEMA_TOKENS); an id list that comes out empty drops its property (read as []). Keeps to type/properties/required/additionalProperties/items/enum (the CLI's structured-output subset). Rules a schema cannot say (rerun ⇔ step, escalate ⇔ recommendation, coverage of every id, the situation rules) are checked by gxengine/leader.py (codes.LeaderFormatReason).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "answer",
+    "reason",
+    "step",
+    "note",
+    "recommendation",
+    "ac_verdicts",
+    "discoveries"
+  ],
+  "properties": {
+    "answer": {
+      "enum": [
+        "{answers}"
+      ],
+      "description": "One of the answers the engine allows for this call (rendered per call). The engine acts on this field only."
+    },
+    "reason": {
+      "enum": [
+        "fits-template",
+        "analysis-gap",
+        "assumption-corrected",
+        "comment-no-effect",
+        "real-defect",
+        "upstream-gap",
+        "transient",
+        "env-problem",
+        "needs-human-decision",
+        "already-decided",
+        "acceptance-met",
+        "high-complexity",
+        "repeated-failure",
+        "other"
+      ],
+      "description": "Leader-decision reason code (§4.2, scope D20). Pick `other` only when no code fits."
+    },
+    "step": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "enum": [
+        "{rerun_steps}",
+        null
+      ],
+      "description": "The step to run again — set exactly when answer is rerun, otherwise null."
+    },
+    "note": {
+      "type": "string",
+      "description": "Free text for the next role (leader-decision.md), the human and evolve. The engine never branches on it."
+    },
+    "recommendation": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": false,
+      "required": [
+        "answer",
+        "step",
+        "note"
+      ],
+      "description": "Set exactly when answer is escalate: what you recommend the human answers (scope D15). Otherwise null.",
+      "properties": {
+        "answer": {
+          "enum": [
+            "{human_answers}"
+          ]
+        },
+        "step": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "enum": [
+            "{human_rerun_steps}",
+            null
+          ],
+          "description": "Set exactly when the recommended answer is rerun."
+        },
+        "note": {
+          "type": "string"
+        }
+      }
+    },
+    "ac_verdicts": {
+      "type": "array",
+      "description": "One entry per AC id, each exactly once.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "ac",
+          "status",
+          "evidence"
+        ],
+        "properties": {
+          "ac": {
+            "type": "integer",
+            "enum": [
+              "{ac_ids}"
+            ]
+          },
+          "status": {
+            "enum": [
+              "met",
+              "unmet",
+              "manual"
+            ]
+          },
+          "evidence": {
+            "type": "string",
+            "description": "Where the evidence is (test, file, run). Shown in the PR body."
+          }
+        }
+      }
+    },
+    "discoveries": {
+      "type": "array",
+      "description": "One entry per collected out-of-scope discovery D1..Dn, each exactly once.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "disposition"
+        ],
+        "properties": {
+          "id": {
+            "enum": [
+              "{discovery_ids}"
+            ]
+          },
+          "disposition": {
+            "enum": [
+              "followup",
+              "ignore",
+              "include"
+            ]
+          }
+        }
+      }
+    }
+  }
+}

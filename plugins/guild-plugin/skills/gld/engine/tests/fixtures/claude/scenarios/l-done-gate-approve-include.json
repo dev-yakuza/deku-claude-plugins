@@ -1,0 +1,19 @@
+{
+  "format": 1,
+  "description": "Stage 2 leader, done-gate: approve while D1 is to be included in this PR — schema-valid, refused by D6 (L18, approve-with-include).",
+  "stream": "../leader/real-2.1.323/done-gate-rerun.jsonl",
+  "init_from_argv": true,
+  "leader": {"example": "leader-answer-done-gate", "expect": "approve-with-include"},
+  "structured_output": {
+    "answer": "approve",
+    "reason": "acceptance-met",
+    "step": null,
+    "note": "Include the null check.",
+    "recommendation": null,
+    "ac_verdicts": [
+      {"ac": 1, "status": "met", "evidence": "test/settings_test.dart"},
+      {"ac": 2, "status": "manual", "evidence": "manual-test-checklist.md item 1"}
+    ],
+    "discoveries": [{"id": "D1", "disposition": "include"}]
+  }
+}

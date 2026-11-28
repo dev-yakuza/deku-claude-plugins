@@ -1,0 +1,51 @@
+{
+  "format": 1,
+  "description": "P3-A O2: developer changes analysis.md, then restores the owner's content (cumulative → pass).",
+  "stream": "../f2/r4.jsonl",
+  "init_from_argv": true,
+  "structured_output": {
+    "status": "done",
+    "outputs": [],
+    "requests": [],
+    "blocked_by": null,
+    "discoveries": [],
+    "note": "fixture"
+  },
+  "actions": [
+    {
+      "op": "write",
+      "path": "docs/specs/42/analysis.md",
+      "content": "# rewritten\n"
+    },
+    {
+      "op": "git",
+      "args": [
+        "add",
+        "-A"
+      ]
+    },
+    {
+      "op": "git",
+      "args": [
+        "commit",
+        "-q",
+        "-m",
+        "oops"
+      ]
+    },
+    {
+      "op": "write",
+      "path": "docs/specs/42/analysis.md",
+      "content": "# analysis\n"
+    },
+    {
+      "op": "git",
+      "args": [
+        "commit",
+        "-q",
+        "-am",
+        "restore"
+      ]
+    }
+  ]
+}

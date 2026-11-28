@@ -36,11 +36,11 @@ Commit gate (deterministic enforcement layer)
                  committed, so the gate then travels with a clone)
   Limits         `git commit --no-verify` skips it · on the unmanaged path `.git/hooks/`
                  is untracked, so a fresh clone needs `/gld update`
-  Off-switch     /gld config --gates=off  ·  health check: /gld audit harness
+  Off-switch     none in guild-plugin (always on)  ·  health check: /gld audit harness
 
 Setup
   /gld init [lang]        Analyze & onboard → harness + Guild (agents) + standards + readiness audit (gaps → guild:harness issues) (one-time)
-  /gld config [flags]     Show / adjust Guild settings — --language=<code> | --gates=<on|off> (commit gate) | --evolve-nudge=<on|off> (the review-stage "run evolve" reminder)
+  /gld config [flags]     Show / adjust Guild settings — --language=<code> | --evolve-nudge=<on|off> (the review-stage "run evolve" reminder)
   /gld update [--check|--migrate-personas]
                           Adopt newer central Guild improvements, preserving local evolution (also reinstalls the git hook after a fresh clone)
 
@@ -57,7 +57,8 @@ Develop (spine: analyze → design → execute → test → qa)
   /gld review <issue|pr>  Guided pair-programming walkthrough of the PR (pass the issue number — auto-resolves its PR — or a PR number directly) (+ adversarial pre-scan: fresh external auditor on Standards/Spec axes — the same auditor execute already ran, re-run here as the independent measure of whether dev is improving) — one change-unit at a time, explains why, pauses to discuss
   /gld resume <issue>     Auto-detect stage and continue
   /gld status <issue>     Show current progress
-  /gld batch [issues]     Run many Issues unattended to guild:done (PR open), waits out a rate limit whose reset is within 4h; leader stands in at gates, human reviews PRs after
+  /gld channel <channel>  Make this repository's active Guild channel this one (gld) or the stable one — one channel per repository; the other channel's commands are refused
+  /gld batch [issues]     Refused in this edition — use /gld sprint run (batch ran its sessions with the permission prompts switched off)
   /gld sprint plan        One goal, filled to capacity: goal picks, then other ready work; attended, one-answer decision questions turn waiting issues into ready ones. Orders by dependency (goal first on ties), opens the tracking Issue, commits + pushes the PO/tech-lead verdicts (dry-run; --create to create; --no-ask to skip the questions)
   /gld sprint run         Develop the members unattended to PRs — dependency-ordered, PR-stacked, one git worktree per issue. A rate limit whose reset is within 4h is waited out; a longer one blocks that member and the re-run picks it up. No args = resume the active sprint. --readiness shows the preflight
   /gld sprint daily       Status: what to merge and in what order, what's waiting on you, what broke (read-only; also where a bare `/gld sprint` goes)

@@ -1,0 +1,17 @@
+{
+  "format": 1,
+  "ts": "2026-11-23T01:02:03Z",
+  "issue": 42,
+  "who": "engine",
+  "event": "status",
+  "step": "test",
+  "attempt": 2,
+  "from": "running",
+  "to": "failed",
+  "code": "check-failed",
+  "detail": "run-nonzero",
+  "note": "exit 1",
+  "data": {
+    "exit_code": 1
+  }
+}

@@ -1,0 +1,175 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "gld/brief",
+  "title": "brief.json — what the engine gave one attempt (design §6.2, §7.2-3)",
+  "description": "runs/<step>/<attempt>/brief.json, written by the engine before the attempt starts. Role steps: the work instruction, input paths (never contents), outputs, facts given, the return context, the session parameters. Run steps: the resolved named command. Engine-local, not committed.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["format", "issue", "step", "attempt", "kind", "base_sha", "start_head", "created_at"],
+  "properties": {
+    "format": {"const": 1},
+    "issue": {"type": "integer", "minimum": 1},
+    "step": {"$ref": "#/$defs/name"},
+    "attempt": {"type": "integer", "minimum": 1},
+    "kind": {"enum": ["role", "run", "check", "op", "leader"], "description": "codes.AttemptKind. leader = a stage-2 needs_leader call in <records>/leader/<k>/ (step = the step the situation is attached to, attempt = k)."},
+    "base_sha": {"$ref": "#/$defs/sha"},
+    "start_head": {"$ref": "#/$defs/sha"},
+    "created_at": {"$ref": "#/$defs/ts"},
+
+    "role": {"type": ["string", "null"], "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*$"},
+    "role_class": {"enum": ["work", "judge", null]},
+    "result_kind": {"enum": ["work", "review", "leader", null], "description": "Which result schema was passed with --json-schema (leader = a rendered leader-answer schema, see `leader`)."},
+    "leader": {
+      "anyOf": [
+        {"type": "null"},
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["situation", "schema", "allowed_answers", "format_retry"],
+          "description": "Stage 2: a leader call (plan-gate / done-gate check attempt, or kind leader).",
+          "properties": {
+            "situation": {"enum": ["plan-gate", "blocked", "output-format-twice", "session-limit", "on-fail-exceeded", "soft-budget", "new-collaborator-comment", "done-gate", "step-add-limit", "step-removal-request", "pr-review"]},
+            "schema": {"enum": ["leader-answer", "leader-answer-done-gate", "leader-answer-done-gate-s3", "leader-answer-new-comment", "leader-answer-plan-gate", "leader-answer-plan-gate-s3", "leader-answer-pr-review", "leader-answer-s3", "leader-answer-step-removal"]},
+            "allowed_answers": {"type": "array", "minItems": 1, "items": {"enum": ["plan", "close-as-decided", "escalate", "rerun", "replan", "continue", "approve", "skip"]}},
+            "format_retry": {"type": "integer", "minimum": 0}
+          }
+        }
+      ]
+    },
+    "instruction": {"type": ["string", "null"], "description": "The full work instruction text (fixed frame per step kind + step specifics, §6.2)."},
+    "system_prompt_sources": {
+      "type": "array",
+      "description": "Base-SHA blobs appended with --append-system-prompt, in order: CLAUDE.md, .claude/CLAUDE.md, the role file body (§6.2 F2, §7.12 S3).",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["path", "blob"],
+        "properties": {"path": {"type": "string"}, "blob": {"$ref": "#/$defs/sha"}}
+      }
+    },
+    "inputs": {"type": "array", "items": {"type": "string"}, "description": "Resolved input paths: worktree-relative for repo files, absolute for in/ files."},
+    "in_dir": {"type": ["string", "null"], "pattern": "^/", "description": "Absolute path of this attempt's in/ folder — the one engine folder the role may read (§7.12 S7)."},
+    "in_files": {"type": "array", "items": {"enum": ["issue.md", "leader-decision.md", "failure-summary.md", "review.diff", "leader-input.json", "repro-evidence.md", "blocking-discoveries.md", "pr-review.md", "git-history.md"]}, "uniqueItems": true},
+    "outputs": {"type": "array", "items": {"type": "string"}, "description": "Declared outputs (globs allowed for judge roles, §7.6)."},
+    "checks": {"type": "array", "items": {"$ref": "#/$defs/name"}, "uniqueItems": true, "description": "Every check id the result must contain (template + rule-added)."},
+    "rule_checks": {"type": "array", "items": {"$ref": "#/$defs/name"}, "uniqueItems": true, "description": "The subset added by mandatory rules: n/a there is output-format (I5-2)."},
+    "facts": {"type": "object", "description": "Engine facts handed to the role (exit codes, failure-log summary path, flaky marks, …)."},
+    "returned": {
+      "anyOf": [
+        {"type": "null"},
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["from_step", "from_attempt", "code"],
+          "description": "Set when this attempt is a return (on_fail / output-format retry / rerun, §6.2 input table).",
+          "properties": {
+            "from_step": {"$ref": "#/$defs/name"},
+            "from_attempt": {"type": "integer", "minimum": 1},
+            "code": {"enum": ["output-format", "session-limit", "infra", "check-failed", "engine-error", null], "description": "null (stage 3) = a rerun answer that followed no failed attempt of from_step (done-gate, plan-gate, pr-review)."},
+            "detail": {"type": ["string", "null"]},
+            "errors": {"type": "array", "items": {"type": "string"}, "description": "output-format: the validation errors to fix."},
+            "sources": {
+              "type": "array",
+              "description": "Stage 3 (review-q0 D8): the attempts whose findings failure-summary.md carries (state.steps[].return_sources).",
+              "items": {"$ref": "#/$defs/return_source"}
+            }
+          }
+        }
+      ]
+    },
+    "reentry": {
+      "anyOf": [
+        {"type": "null"},
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["forward_only", "dirty_files"],
+          "description": "developer re-entry only (I7): did HEAD only move forward from the recorded HEAD, and the dirty files.",
+          "properties": {
+            "forward_only": {"type": "boolean"},
+            "dirty_files": {"type": "array", "items": {"type": "string"}}
+          }
+        }
+      ]
+    },
+    "session": {
+      "anyOf": [
+        {"type": "null"},
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["model", "effort", "tools", "cli_version"],
+          "properties": {
+            "model": {"type": "string"},
+            "effort": {"type": "string"},
+            "tools": {"type": "array", "items": {"type": "string"}},
+            "max_budget_usd": {"type": ["number", "null"]},
+            "wall_clock_s": {"type": ["integer", "null"]},
+            "no_output_s": {"type": ["integer", "null"]},
+            "resume": {"type": ["string", "null"], "description": "Session id passed to --resume (developer return only)."},
+            "cli_version": {"type": "string"},
+            "settings_sha256": {"type": "string", "description": "Hash of the rendered --settings file."},
+            "canary_key": {"type": "string", "description": "I9 key the canary passed for."},
+            "escalation": {
+              "anyOf": [
+                {"type": "null"},
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["base", "returns", "raised", "capped"],
+                  "description": "Stage 3 (E26, ladder.raised): the retry raise of this session. null / absent = stage 1–2 or a step that is never raised.",
+                  "properties": {
+                    "base": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": ["model", "effort", "layer"],
+                      "properties": {"model": {"type": "string"}, "effort": {"type": "string"}, "layer": {"enum": ["plugin-default", "plan", "leader"]}}
+                    },
+                    "returns": {"type": "integer", "minimum": 0},
+                    "raised": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": ["effort", "model"],
+                      "properties": {
+                        "effort": {"type": ["array", "null"], "minItems": 2, "maxItems": 2, "items": {"type": "string"}, "description": "[from, to] or null."},
+                        "model": {"type": ["array", "null"], "minItems": 2, "maxItems": 2, "items": {"type": "string"}, "description": "[from, to] or null."}
+                      }
+                    },
+                    "capped": {"type": "boolean", "description": "A rung was due and the allow-list had none left (R1-38: no stop)."}
+                  }
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "run": {
+      "anyOf": [
+        {"type": "null"},
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["name", "timeout_s"],
+          "properties": {
+            "name": {"$ref": "#/$defs/name"},
+            "cmd": {"type": ["string", "null"], "description": "The repository command string (null for a plugin command)."},
+            "plugin": {"enum": ["ac-format", "ac-coverage", "verify-gate", "repro-red", "safety-net-proof", "verification-frozen", "no-production-change", null]},
+            "timeout_s": {"type": "integer", "minimum": 1}
+          }
+        }
+      ]
+    }
+  },
+  "$defs": {
+    "return_source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["step", "attempt", "cause"],
+      "properties": {"step": {"$ref": "#/$defs/name"}, "attempt": {"type": "integer", "minimum": 1}, "cause": {"enum": ["on-fail", "leader-rerun", "human-rerun"]}}
+    },
+    "name": {"type": "string", "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*$", "maxLength": 64},
+    "sha": {"type": "string", "pattern": "^[0-9a-f]{40}([0-9a-f]{24})?$"},
+    "ts": {"type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]+)?Z$"}
+  }
+}

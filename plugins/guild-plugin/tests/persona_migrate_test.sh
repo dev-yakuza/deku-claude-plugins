@@ -1193,11 +1193,11 @@ RTPL="$HERE/../skills/gld/templates/agents"
 RROOT="$(git -C "$HERE" rev-parse --show-toplevel 2>/dev/null || true)"
 if [ -n "$RROOT" ] && git -C "$RROOT" rev-parse --verify -q "$PREV_REF" >/dev/null 2>&1; then
   RW="$(mktemp -d)"; ( cd "$RW" && git init -q . && mkdir -p .claude/agents )
-  RPREFIX="plugins/guild-plugin/skills/gld/templates/agents/"
+  RPREFIX="plugins/guild-plugin/skills/gld/templates/agents/"  # promote: literal; rename-exception: pre-rename release fixture
   for f in $(git -C "$RROOT" ls-tree --name-only "$PREV_REF" "$RPREFIX" 2>/dev/null); do
     n="$(basename "$f")"
     # init 이 쓰는 형태로: 마커는 init 이 넣으므로 템플릿에서 벗긴다
-    git -C "$RROOT" show "$PREV_REF:$f" | grep -v 'guild:persona:start\|guild:persona:end' > "$RW/.claude/agents/$n"
+    git -C "$RROOT" show "$PREV_REF:$f" | grep -v 'guild:persona:start\|guild:persona:end' > "$RW/.claude/agents/$n" # promote: literal; rename-exception: pre-rename release fixture (old marker names)
   done
   ( cd "$RW" && git add -A >/dev/null 2>&1 && git -c user.email=t@t -c user.name=t commit -qm init >/dev/null 2>&1 )
   RSHA="$(git -C "$RW" rev-parse HEAD 2>/dev/null)"

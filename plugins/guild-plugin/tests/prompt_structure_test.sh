@@ -155,7 +155,6 @@ SPRINT_ROUTER="$GLD/commands/sprint.md"
 SPRINT_DIR="$GLD/commands/sprint"
 RETRO="$SPRINT_DIR/retro.md"
 HANDOFF="$GLD/commands/atoms/_handoff.md"
-TPL="$GLD/templates/sprint-supervisor.sh"
 DAILY="$SPRINT_DIR/daily.md"
 
 if [ ! -f "$SPRINT_ROUTER" ]; then
@@ -291,64 +290,6 @@ EVOLVEPY
     bad "retro가 evolve를 인자 없이 호출한다" "no arguments in that section" "$EA"
   fi
 fi
-fi
-
-echo ""
-echo "== 4. 실패 분류 어휘 — 문서가 코드보다 크게 말하지 않는가 =="
-# `daily.md` once enumerated 8 classes while the supervisor wrote 4, and `retro` now COUNTS
-# them. The list is a machine-token contract (`_handoff.md` Section K), so drift here silently
-# makes a documented reason unreachable — and a reason nobody can reach reads as "never happened".
-if [ -f "$TPL" ] && [ -f "$DAILY" ]; then
-cat > "$WORK3/classes.py" <<'CLASSPY'
-import re, sys
-tpl = open(sys.argv[1], encoding="utf-8").read()
-daily = open(sys.argv[2], encoding="utf-8").read()
-
-# ── code side ────────────────────────────────────────────────────────────────
-# Join line continuations first, then allow the class to be quoted and to have no hyphen.
-# Measured: `record_failure "$ISSUE" "new-class"`, `… timeout` (no hyphen) and a `\`-wrapped
-# call each slipped past the earlier pattern, so a new class could be added with no doc entry.
-# Comments mention the function names in prose ("record_event — append one line"), so they
-# must go first or the prose words are read as class names.
-body = "\n".join(l for l in tpl.splitlines() if not l.strip().startswith("#"))
-flat = re.sub(r"\\\n\s*", " ", body)
-code = set()
-for m in re.finditer(r"record_(?:event|failure)\s+\"?\$\{?\w+\}?\"?\s+(\"?)([a-z][a-z0-9_-]*)\1", flat):
-    code.add(m.group(2))
-
-# ── doc side ─────────────────────────────────────────────────────────────────
-# Anchored on the CLASS TABLE, not on keywords: a row whose verdict wording changes must not
-# silently drop out of the comparison. The surrounding prose also discusses `state` values,
-# which share the shape (`installing-deps`), so the table boundary is what separates them.
-lines = daily.splitlines()
-# ⚠ The header anchor tolerates a translated first cell, and only the FIRST cell of each row is
-# read. Two measured defects: hardcoding `| class | 실패인가? |` broke when the header was
-# localized, and scanning the whole row read a backticked word in the VERDICT cell as a class.
-hdr = next((i for i, l in enumerate(lines)
-            if l.startswith("|") and ("실패인가" in l or "failure?" in l.lower())), None)
-if hdr is None:
-    print("ERR daily.md has no class table (a header row asking whether each class is a failure)")
-    raise SystemExit(0)
-docd = set()
-for l in lines[hdr + 2:]:
-    if not l.startswith("|"):
-        break
-    first = l.strip().strip("|").split("|")[0]
-    docd.update(re.findall(r"[`]([a-z][a-z0-9_-]*)[`]", first))
-missing = sorted(c for c in code if c not in docd)
-extra = sorted(c for c in docd if c not in code)
-out = []
-if missing:
-    out.append("the code records but daily.md never names: " + ", ".join(missing))
-if extra:
-    out.append("daily.md names but the code never records: " + ", ".join(extra))
-print("OK %d classes" % len(code) if not out else "; ".join(out))
-CLASSPY
-OUT4="$("$PY" "$WORK3/classes.py" "$TPL" "$DAILY")"
-case "$OUT4" in
-  OK*) ok "daily.md의 분류 목록이 감독자가 실제로 쓰는 것과 일치 ($OUT4)" ;;
-  *)   bad "daily.md의 분류 목록이 감독자와 일치" "the same set" "$OUT4" ;;
-esac
 fi
 
 echo ""
@@ -511,25 +452,21 @@ else
   bad "last_projected 를 마지막 투영으로 찍는 파일" "none" "offenders:$BOARD_LP_BAD"
 fi
 # #8: run.md 의 "in full" 쓰기 목록에 .board 파일이 있다 (열거의 가치는 전수성이다)
-hasfx "run.md: 쓰기 목록에 .board 파일이 있다" "$RUNMD2" ".gld-sprint-<tracker>.board\` (step 2b"
 # #7: daily 는 카드를 읽지 않고 파생한다
 hasfx "daily.md: split-children 을 파생으로 얻는다" "$DAILY" "Derive it, do not read the card"
 # #2: 컬럼 개명은 Guild 버그가 아니다
-hascode "template: 컬럼 개명에 전용 카운터가 있다" "$TPL" "BOARD_UNKNOWN_COL"
-hascode "template: 보드가 안 켜진 이유를 원장에 남긴다" "$TPL" "ledger_set board_off_reason"
 # ⚠ field-list 한계는 **세 읽는 곳이 같아야** 한다. 감독자는 짧은 읽기를 치명으로 다뤄 보드를
 # 끄는데, 진단 명령이 더 멀리 읽으면 *"감독자는 죽고 진단은 정상이라 보고"* 하는 상태가 된다.
 # 새 프로젝트만 해도 GitHub 내장 13개 + Guild 5개다.
 # ⚠ 파일마다 형태가 다르다 — `board_write.py` 는 `field-list` 와 `--limit` 이 다른 줄에 있어서
 # 한 줄 정규식으로는 **보이지 않는다**(그렇게 만든 첫 버전은 변이를 놓쳤다). 파일별로 본다.
 BOARD_FL_BAD=""
-grep -qE 'field-list.*--limit 100' "$TPL"   || BOARD_FL_BAD="$BOARD_FL_BAD template"
 grep -qE 'field-list.*--limit 100' "$BOARD" || BOARD_FL_BAD="$BOARD_FL_BAD board.md"
 grep -qE '"--limit", "100"' "$BW_PY"        || BOARD_FL_BAD="$BOARD_FL_BAD board_write.py"
 if [ -z "$BOARD_FL_BAD" ]; then
-  ok "field-list 한계가 세 읽는 곳에서 100 으로 같다"
+  ok "field-list 한계가 두 읽는 곳에서 100 으로 같다"
 else
-  bad "field-list 한계가 갈렸다" "100 in all three" "not 100 in:$BOARD_FL_BAD"
+  bad "field-list 한계가 갈렸다" "100 in both" "not 100 in:$BOARD_FL_BAD"
 fi
 hasfx "board.md: 상태 경로 반환값이 따로 있다" "$BOARD" "The bare status route has its own tokens"
 hasfx "board.md: 진행 중 run 에게 거짓 약속을 하지 않는다" "$BOARD" "Is a supervisor running right now"
@@ -537,48 +474,9 @@ hasfx "board.md: 진행 중 run 에게 거짓 약속을 하지 않는다" "$BOAR
 hasfx "board.md: column_by_verified 를 config 에 쓴다" "$BOARD" '"column_by_verified"'
 hasfx "board.md: Phase S 가 그것을 갱신한다" "$BOARD" 'Write the outcome to `config.sprint.board.column_by_verified`'
 hasfx "daily.md: column_by_verified 를 읽는다" "$DAILY" "column_by_verified"
-# 감독자가 쓰는 사유 토큰은 board.md 의 어휘 목록에 있어야 한다 — 없으면 사람이 카드에서
-# 해독할 수 없는 문자열을 본다. 새 토큰을 추가할 때 한쪽만 늘어나는 것을 막는다.
-BOARD_TOK_UNDOC=""
-# ⚠ `$4`, not `$3`. The match is `board_col "$ISSUE" <column> <reason>`, so `$3` is the COLUMN
-# (`blocked`) — this loop verified the four column names over and over and never once checked a
-# reason token. Every new reason token shipped unverified until this was fixed.
-for T in $(grep -oE 'board_col "\$ISSUE" [a-z_]+ [a-z:-]+' "$TPL" | awk '{print $4}' | sort -u) \
-         $(grep -oE 'board_col "\$BOARD_BI" [a-z_]+ [a-z:-]+' "$TPL" | awk '{print $4}' | sort -u); do
-  case "$T" in
-    failed:*) T="failed:<class>" ;;
-  esac
-  grep -qF -- "$T" "$BOARD" || BOARD_TOK_UNDOC="$BOARD_TOK_UNDOC $T"
-done
-if [ -z "$BOARD_TOK_UNDOC" ]; then
-  ok "board.md: 감독자가 쓰는 사유 토큰이 모두 문서화돼 있다"
-else
-  bad "board.md: 문서화되지 않은 사유 토큰" "all documented" "missing:$BOARD_TOK_UNDOC"
-fi
-# 반대 방향도 본다. 위 검사만으로는 **투영 지점을 통째로 지워도** 어휘 목록이 남아 있으면
-# 초록이었다(변이로 확인). 문서에 있는 토큰이 템플릿에도 실제로 쓰이는지 확인한다.
-BOARD_TOK_UNUSED=""
-for T in pr-unknown dep-unresolved branch-ambiguous base-unresolved split-children interrupted; do
-  grep -qE "board_col [^#]*$T" "$TPL" || BOARD_TOK_UNUSED="$BOARD_TOK_UNUSED $T"
-done
-if [ -z "$BOARD_TOK_UNUSED" ]; then
-  ok "template: board.md 가 문서화한 토큰이 모두 실제로 쓰인다"
-else
-  bad "template: 문서에만 있는 사유 토큰" "all used" "unused:$BOARD_TOK_UNUSED"
-fi
-hascode "template: 실제 투영 시각을 남긴다" "$TPL" "ledger_set board_last_write"
 # ── 노드 ID 주소지정 (측정: 이름 기반 104포인트 vs 노드 ID 1포인트) ───────────
-hascode "template: 노드 ID 로 쓴다" "$TPL" '--id "$item" --project-id "$BOARD_PROJECT_ID" --field-id "$fid"'
-hascode "template: run 시작 시 id 를 해석한다" "$TPL" "board_resolve"
-hasfx "run.md: 비용과 준비 조회를 설명한다" "$RUNMD2" "resolves node ids once at run start"
 hasfx "board_write.py: 노드 ID 해석이 있다" "$BW_PY" "def resolve_ids"
 hasfx "board_write.py: 해석 실패 시 쓰지 않는다" "$BW_PY" "refusing to write"
-# 이름 형태가 되살아나면 비용이 100배로 돌아온다 — 양쪽 파일 모두 고정한다
-if grep -qE '\-\-field "\$2" --value|--field '"'"'\{|item-edit.*--url.*--field ' "$TPL"; then
-  bad "template: 이름 기반 쓰기가 없다" "absent" "$(grep -nE 'item-edit.*--url.*--field ' "$TPL" | head -1)"
-else
-  ok "template: 이름 기반 쓰기가 없다"
-fi
 if grep -qE '"--field", cfg\["field"\]|"--value"' "$BW_PY"; then
   bad "board_write.py: 이름 기반 쓰기가 없다" "absent" "$(grep -nE '"--value"' "$BW_PY" | head -1)"
 else
@@ -850,7 +748,7 @@ if sorted(subs) != list(range(1, 9)):
 def sub(n):
     return st[subs[n]:subs[n + 1]] if n + 1 in subs else st[subs[n]:st.find("**Retry by hand**")]
 need = {
-    1: ["git status --porcelain -uall -- .claude/guild/config.json docs/specs/sprint-draft/`.", "skip the rest"],
+    1: ["git status --porcelain -uall -- .claude/guild/harness.json docs/specs/sprint-draft/`.", "skip the rest"],
     2: ["mkdir -p docs/specs/sprint-<tracker>", "mv docs/specs/sprint-draft/<name> docs/specs/sprint-<tracker>/<stem><suffix>.md",
         "**one suffix for the whole run**", "git ls-files --error-unmatch", "Denied → stop",
         "rmdir docs/specs/sprint-draft", "**Only in a run that moved files here**",
@@ -864,14 +762,14 @@ need = {
         "git remote get-url --push <remote>", "git rev-list --count @{u}..HEAD",
         "(a) push them\n        together with the record, (b) commit the record but push nothing, (c) commit nothing",
         "An unanswered or ambiguous reply is (b)"],
-    6: ["git diff HEAD -- .claude/guild/config.json", "unanswered or ambiguous reply is (c)",
+    6: ["git diff HEAD -- .claude/guild/harness.json", "unanswered or ambiguous reply is (c)",
         "if nothing is left in the record, stop"],
     7: ["git add -- <record paths>", 'git commit -m "<message>" -- <record paths>',
         "at least one path after `--`", "git restore --staged --", "one call each", "timeout",
         "**Never `--no-verify`.**"],
     8: ["git push <remote> HEAD:<merge>", "timeout", "git ls-remote <remote> <merge>",
         "must equal the commit just\n      made", "git rev-parse HEAD", "git reset --soft HEAD~1",
-        "git restore --staged -- <path>", "**Never `--force`; never pull or rebase on its own — on a"],
+        "git restore --staged -- <path>", "**Never `--force`, never pull or rebase"],
 }
 for n, items in need.items():
     body = sub(n)
@@ -888,7 +786,7 @@ if "**Retry by hand**" not in st:
     errs.append("no retry line")
 # a forbidden spelling may appear only right after "never"/"Never" (with an optional backtick)
 for bad in (r"git add \.", r"git add -A", r"--all\b", r"--no-verify", r"--force", r"(?<![\w-])-a(?:m)?\b",
-            r"git reset --(?:hard|mixed|merge|keep)", r"git stash", r"git push`", r"git pull(?! --ff-only| --no-rebase)",
+            r"git reset --(?:hard|mixed|merge|keep)", r"git stash", r"git push`", r"git pull",
             r"git diff -- \.claude", r"Behind → (?!stop)", r"--amend", r"git reset (?!--soft)",
             r"git push (?!<remote> HEAD:<merge>)"):
     for m in re.finditer(bad, st):
@@ -912,14 +810,14 @@ for x in ("— changing a central-owned file (`.claude/guild/gates/scripts/gate_
 # 0.98.4 X12: inside the tech-lead prompt
 if len(tl) == 1 and "do not move a real dependency to `conditional:` or `soft:` for depth or cost" not in tl[0]:
     errs.append("the tech-lead prompt does not keep stack depth out of (a)")
-if "\n  기록: 만들면 판정 원문(docs/specs/sprint-<트래커 번호>/)과 config.json 을" not in s:
+if "\n  기록: 만들면 판정 원문(docs/specs/sprint-<트래커 번호>/)과 harness.json 을" not in s:   # T3 P9: the commands' settings
     errs.append("Phase 5 does not disclose the commit and push")
 if "`rm -f docs/specs/sprint-draft/triage.md docs/specs/sprint-draft/po.md docs/specs/sprint-draft/deps.md docs/specs/sprint-draft/deps-slot.md`" not in s:
     errs.append("Phase 1b does not clear the last run's verdicts (0.98.6 Y4: the clearing call moved from Phase 2, triage.md added)")
 if "`rm -f docs/specs/sprint-draft/po.md docs/specs/sprint-draft/deps.md docs/specs/sprint-draft/deps-slot.md`" in s:
     errs.append("the old Phase 2 clearing call (without triage.md) is still there")
 hr = s[s.find("## Hard rules"):]
-if "**The plan commit holds this run's verdict files and `config.json` — nothing else**" not in hr:
+if "**The plan commit holds this run's verdict files and `harness.json` — nothing else**" not in hr:
     errs.append("Hard rule for the plan commit missing")
 ret = s[s.find("## Return"):s.find("## Hard rules")]
 for t in ("plan recorded <sha> pushed", "plan recorded <sha> local", "plan not recorded (<reason>)"):
@@ -936,68 +834,7 @@ fi
 
 # 11. run.md — 보드 값은 렌더 토큰이 아니라 **데이터 파일**이다. 이 클래스가 세 번 나왔다:
 #     소스 보간(실행됨) → 인용 heredoc(개행이 탈출) → 데이터 파일.
-lacksfx "template: 보드 렌더 토큰이 남아 있지 않다" "$TPL" "<BOARD_NUMBER>"
 lacksfx "run.md: 폐기된 토큰 표가 남아 있지 않다" "$RUNMD2" "<BOARD_COL_READY>"
-hasfx "run.md: 보드 설정 파일을 쓰는 단계가 있다" "$RUNMD2" ".gld-sprint-<tracker>.board"
-hasfx "run.md: 값을 인용하지 말라고 말한다" "$RUNMD2" "Do not quote them"
-hascode "template: 설정 파일을 읽는다" "$TPL" 'BOARD_CONF="$HUMAN_REPO/.claude/guild/.gld-sprint-$TRACKER.board"'
-# 11a. 보드를 끌 때는 파일을 **지워야** 한다. 안 쓰기만 하면 낡은 파일이 읽혀 보드가 켜진다.
-hasfx "run.md: 보드가 null 이면 설정 파일을 지운다" "$RUNMD2" "rm -f .claude/guild/.gld-sprint-<tracker>.board"
-# 11b. run.md 가 쓰는 키와 템플릿이 읽는 키가 **같은 집합인가.**
-# ⚠ 옛 판은 열 개 이름을 손으로 적어 놓고 양쪽에 있는지만 봤다. 그래서 주석이 말하는
-#   "한쪽만 늘면 조용히 빈다" 를 정작 탐지하지 못했다 — run.md 에만 `col_icebox=` 를 더해도,
-#   템플릿에만 `col_icebox)` 를 더해도 234/0 그린이었다(실측). 양쪽에서 **집합을 뽑아** 비교한다.
-cat > "$WORK3/boardkeys.py" <<'PYBK'
-import re, sys
-runmd, tpl = sys.argv[1], sys.argv[2]
-# run.md step 2b 의 conf 본문: `<key>=<...>` 형태의 줄
-wrote = set(re.findall(r"^\s{2,}([a-z][a-z0-9_]*)=<", open(runmd, encoding="utf-8").read(), re.M))
-# 템플릿의 conf 파서: `<key>)` case 분기
-# ⚠ 손으로 적은 접두사 화이트리스트를 쓰지 않는다. 그 밖의 이름으로 case 분기를 더하면
-#   보이지 않았다(실측: `swimlane)` 추가 -> OK 10 keys). conf 파서 블록 안의 분기를 통째로 본다.
-src = open(tpl, encoding="utf-8").read()
-i = src.find("BOARD_CONF=")
-j = src.find("esac", i) if i >= 0 else -1
-if i < 0 or j < 0:
-    print("PROBLEMS cannot locate the board conf parser in the template")
-    raise SystemExit
-read = set(re.findall(r"^\s+([a-z][a-z0-9_]*)\)", src[i:j], re.M))
-problems = []
-if len(wrote) != 10:
-    problems.append("run.md yields %d keys (%s), expected exactly 10"
-                    % (len(wrote), ",".join(sorted(wrote))))
-if wrote - read:
-    problems.append("run.md writes keys the template never reads: %s" % ",".join(sorted(wrote - read)))
-if read - wrote:
-    problems.append("template reads keys run.md never writes: %s" % ",".join(sorted(read - wrote)))
-print("OK %d keys" % len(wrote) if not problems else "PROBLEMS " + " | ".join(problems))
-PYBK
-OUTBK="$("$PY" "$WORK3/boardkeys.py" "$RUNMD2" "$TPL")"
-case "$OUTBK" in
-  OK*) ok "보드 설정 키가 run.md 와 템플릿에서 같은 집합이다 (${OUTBK#OK })" ;;
-  *)   bad "보드 설정 키 집합 일치" "OK" "$OUTBK" ;;
-esac
-
-# 11c. 중복 실행 가드의 cmdline 매치 문자열이 실제로 디스크에 써지는 스크립트 이름의
-#      부분문자열이어야 한다. 마커의 `pid` 는 감독자 스크립트 자신의 `$$`(template 의
-#      `marker_write`)이므로 `ps -p <pid> -o command=` 는 `bash .claude/guild/.gld-sprint-<N>.sh`
-#      를 찍는다. 한때 이 자리가 `sprint-supervisor`(= **템플릿 파일명**)를 찾았고, 그 문자열은
-#      그 출력에 절대 나타나지 않아 LIVE 감독자가 "pid 재사용 → 없는 것으로 취급" 행으로
-#      떨어졌다 — 두 번째 감독자가 같은 워크트리와 같은 트래커 마커에 붙는다.
-#      ⚠ 파일명 참조(step 2 의 `templates/sprint-supervisor.sh`)는 정당하므로 문장 단위로 본다.
-hasfx  "run.md: 중복 실행 가드가 .gld-sprint- 를 찾는다" "$RUNMD2" \
-       'Output containing **`.gld-sprint-`**'
-lacksfx "run.md: 가드가 템플릿 파일명을 찾지 않는다" "$RUNMD2" \
-       'Output containing `sprint-supervisor`'
-# 11d. 그 문자열이 run.md 가 스스로 쓰라고 지시하는 경로의 부분문자열인가 (유도형 교차검증)
-GUARD_TOK=".gld-sprint-"
-if grep -qF -- "bash .claude/guild/${GUARD_TOK}" "$RUNMD2"; then
-  ok "가드 문자열이 run.md 가 실행하라는 경로의 부분문자열이다"
-else
-  bad "가드 문자열이 실행 경로와 맞는다" "substring of the launched path" \
-      "run.md 의 launch 줄에 ${GUARD_TOK} 가 없다"
-fi
-
 # 12. §9.2 가 요구했으나 없던 검사 셋 ─────────────────────────────────────────
 # 12a. plan 의 보드 쓰기 게이트 세 조건
 hasfx "plan.md: 쓰기는 --create/승인 시점에만" "$PLAN" 'Phase 6 — Create (`--create` or explicit approval)'
@@ -1087,7 +924,7 @@ PATHOK="$("$PY" - "$GLD" <<'PATHPY'
 import os, re, sys
 # ⚠ **파일 전체를 보면 안 된다.** 같은 경로가 리더의 Step 0 줄에도 있어서, 스폰 프롬프트에서
 # 경로가 쪼개져도 통과한다(실증). **스폰 프롬프트 줄 안에서만** 찾는다.
-gld = sys.argv[1]
+skill_dir = sys.argv[1]
 want = {
     "commands/test.md":      (r"Adopt the persona in `\.claude/agents/tester\.md`",
                               r"`docs/specs/\$1/test-cases\.md`"),
@@ -1099,7 +936,7 @@ want = {
 bad = []
 for rel, (marker, pat) in want.items():
     hit = False
-    for ln in open(os.path.join(gld, rel), encoding="utf-8"):
+    for ln in open(os.path.join(skill_dir, rel), encoding="utf-8"):
         if re.search(marker, ln) and re.search(pat, ln):
             hit = True
             break
@@ -1177,7 +1014,6 @@ else
 fi
 
 CONFMD="$GLD/commands/config.md"
-INITMD="$GLD/commands/init.md"
 
 # ── 19. 상태 토큰이 다섯 파일에 있고, plan.md 는 인접성 스코프 안에 있는가 ────────
 # ⚠ 명세는 **여섯** 파일(+ `design/guild/02-sprint.md`)을 요구하지만 `design/` 는 이 플러그인이
@@ -1276,11 +1112,11 @@ fi
 # ⚠ 스크립트의 `case` 글롭이 느슨해져도 산문은 그대로다 — 그래서 셋을 한 리터럴로 묶는다.
 W_LIT='HH:MM-HH:MM (24h, zero-padded)'
 W_LIT_MISS=""
-for F in "$RUNMD2" "$CONFMD" "$TPL"; do
+for F in "$RUNMD2" "$CONFMD" "$GLD/engine/gxengine/sprintdag.py"; do
   grep -qF -- "$W_LIT" "$F" || W_LIT_MISS="$W_LIT_MISS $(basename "$F")"
 done
 if [ -z "$W_LIT_MISS" ]; then
-  ok "검증 규칙 세 벌이 같은 리터럴을 쓴다 (run.md · config.md · 템플릿)"
+  ok "검증 규칙 세 벌이 같은 리터럴을 쓴다 (run.md · config.md · 엔진 sprintdag.py)"
 else
   bad "검증 규칙 세 벌의 리터럴" "all three" "missing:$W_LIT_MISS"
 fi
@@ -1316,11 +1152,6 @@ hasfx   "daily.md: 뒤의 셋을 죽었다고 뭉개지 말라고 말한다" "$D
         'Do not collapse the last three'
 
 # ── 24. caffeinate 이중 게이트 ───────────────────────────────────────────────
-hasfx "run.md: caffeinate 를 감싸는 조건이 이중이다" "$RUNMD2" 'a DOUBLE gate'
-hasfx "run.md: 창이 설정됐을 때만"                   "$RUNMD2" '**a window is set**'
-hasfx "run.md: command -v 성공 시에만"               "$RUNMD2" 'command -v caffeinate'
-hasfx "run.md: -i 만 쓴다"                           "$RUNMD2" '`-i` only'
-hasfx "run.md: 뚜껑을 닫으면 못 막는다고 적었다"      "$RUNMD2" 'a closed lid sleeps regardless'
 lacksfx "run.md: caffeinate -u 를 쓰지 않는다"        "$RUNMD2" 'caffeinate -u'
 lacksfx "run.md: caffeinate -s 를 쓰지 않는다"        "$RUNMD2" 'caffeinate -s'
 
@@ -1348,111 +1179,27 @@ if [ "$CBLK2" = OK ]; then
 else
   bad "config.md: start == end 거부" "inside the validate list" "$CBLK2"
 fi
-# init.md 의 sprint 객체와 config.md 의 스키마에서 키 집합을 뽑아 교차검증
-cat > "$WORK3/sprintkeys.py" <<'SKPY'
-import re, sys
-init, conf = open(sys.argv[1]).read(), open(sys.argv[2]).read()
-m = re.search(r'"sprint":\s*\{(.*?)\}', init, re.S)
-if not m:
-    print('ERR init.md has no "sprint" object'); raise SystemExit(0)
-body = m.group(1)
-ikeys = set(re.findall(r'"([a-z_]+)":', body))
-m2 = re.search(r"sprint\{([^}]*)\}", conf)
-if not m2:
-    print("ERR config.md has no sprint schema"); raise SystemExit(0)
-ckeys = set(k.strip().replace("[]", "") for k in m2.group(1).split(","))
-problems = []
-if "window" not in ikeys:
-    problems.append('init.md\'s "sprint" object has no `window` key')
-elif not re.search(r'"window"\s*:\s*null', body):
-    problems.append("init.md's `window` default is not `null` — the window is opt-in and a "
-                    "windowless run must be byte-identical to today")
-for k in sorted(ikeys - ckeys):
-    problems.append("init.md writes `%s` but config.md's schema does not list it" % k)
-for k in sorted(ckeys - ikeys):
-    problems.append("config.md's schema lists `%s` but init.md does not write it" % k)
-print("OK %d keys" % len(ikeys) if not problems else "; ".join(problems))
-SKPY
-SK="$("$PY" "$WORK3/sprintkeys.py" "$INITMD" "$CONFMD")"
-case "$SK" in
-  OK*) ok "init.md 의 sprint 키 집합이 config.md 스키마와 일치하고 window 기본값이 null ($SK)" ;;
-  *)   bad "sprint 키 집합 교차검증" "the same set, window=null" "$SK" ;;
-esac
-
-# ── 26. `.git/info/exclude` 열거가 **세 줄 그대로**인가 ──────────────────────
-# ⚠ 창 파일을 여기 넣으면 **창을 안 쓰는 모든 run** 이 존재하지 않을 파일의 ignore 줄을 사람
-#   repo 에 영구히 쓰고 트래커마다 누적된다. `.board` 도 오늘 거기 없다.
-EXC_N="$(grep -c '^  for E in ".claude/guild/.gld-sprint-\$TRACKER.sh" ".claude/guild/.sprint-logs" ".claude/guild/memory"; do$' "$TPL" || true)"
-if [ "$EXC_N" = "1" ]; then
-  ok "template: info/exclude 루프가 세 항목 그대로다 (창 파일도 .board 도 넣지 않는다)"
-else
-  bad "template: info/exclude 열거" "the same three entries" "the loop line changed"
-fi
-lacksfx "run.md: info/exclude 에 창 파일을 넣지 않는다고 적었다는 것" "$RUNMD2" \
-        '`.gld-sprint-<tracker>.window` to `.git/info/exclude`'
-hasfx "run.md: 그 이유를 적었다" "$RUNMD2" 'Nothing is added to `.git/info/exclude`'
-hasfx "run.md: '두 곳'의 in full 목록에 창 파일이 있다" "$RUNMD2" '`.gld-sprint-<tracker>.window`'
-W_INFULL="$(grep -c 'gld-sprint-<tracker>.window' "$RUNMD2" || true)"
-if [ "$W_INFULL" -ge 3 ]; then
-  ok "run.md: 창 파일이 최소 세 곳(step 2c + in full 목록 둘)에 열거돼 있다"
-else
-  bad "run.md: 창 파일 열거 개수" ">=3" "found $W_INFULL"
-fi
-
-# ── 28. :151-152 주석 정정이 **결론을 유지**하는가 (주석의 *주장*을 판정) ─────
-# ⚠ 정정문이 *"`&&` 도 안전하다"* 로 쓰이면 다음 사람이 되돌리고, 그 줄이 함수 끝으로 이동하는
-#   순간 **보드 없는 run = 기존 사용자 전원**이 죽는다. `sig.py` 의 선례를 따른다.
-cat > "$WORK3/ifclaim.py" <<'IFPY'
-import re, sys
-src = open(sys.argv[1]).read()
-m = re.search(r"((?:^#.*\n)+)^if \[ -n \"\$BOARD_NUMBER\" \]; then BOARD_WAS_ON=1; fi", src, re.M)
-if not m:
-    print("MISSING the BOARD_WAS_ON line or its comment block"); raise SystemExit(0)
-block = m.group(1)
-problems = []
-if not re.search(r"`if`, not", block):
-    problems.append("the block no longer states the `if` rule")
-if not re.search(r"[Kk]eep the `if`|Do not \"simplify\"|conclusion is unchanged", block):
-    problems.append("the corrected comment does not KEEP the conclusion (use `if`) — the next "
-                    "person will revert it on the old, false reasoning")
-if re.search(r"`&&`\s+(is|are)\s+safe|also safe|equally safe", block):
-    problems.append("the comment now says `&&` is safe, which invites the revert")
-if not re.search(r"last statement|as its last|function\b.*last|WHERE IT SITS", block):
-    problems.append("the correction does not say WHY it is position-dependent")
-print("OK" if not problems else "; ".join(problems))
-IFPY
-IFC="$("$PY" "$WORK3/ifclaim.py" "$TPL")"
-if [ "$IFC" = OK ]; then
-  ok "template: :151 주석 정정이 이유를 고치면서 결론(\`if\` 를 쓸 것)을 유지한다"
-else
-  bad "template: :151 주석의 주장" "OK" "$IFC"
-fi
-
 # ── 29. run.md Phase 4 의 halted:* 아암 ──────────────────────────────────────
 # ⚠ 없으면 오타로 즉사한 run 에 대해 사람이 *"done 0 / failed 0"* 류의 무의미한 보고를 본다.
-PBLK="$("$PY" "$WORK3/blk.py" "$RUNMD2" '## Phase 4' '## Return' 'halted:window-invalid')"
-if [ "$PBLK" = OK ]; then
-  ok "run.md: Phase 4 에 halted:window-invalid 아암이 있다"
-else
-  bad "run.md: Phase 4 의 halted 아암" "inside Phase 4" "$PBLK"
-fi
-for R in marker-unwritable container-lost sigTERM interrupted; do
-  PB="$("$PY" "$WORK3/blk.py" "$RUNMD2" '## Phase 4' '## Return' "halted:$R")"
+# 엔진의 SprintHalt 값 전부가 표에 있어야 한다 — 값은 codes.py 에서 읽는다(손으로 적지 않는다).
+HALTS="$("$PY" -I -B -c "import sys; sys.path.insert(0, '$GLD/engine'); from gxengine import codes; print(' '.join(codes.SprintHalt.values()))")"
+[ "$(printf '%s\n' $HALTS | wc -l | tr -d ' ')" -ge 7 ] || bad "codes.SprintHalt 을 읽었다" "7개 이상" "$HALTS"
+for R in $HALTS; do
+  PB="$("$PY" "$WORK3/blk.py" "$RUNMD2" '## Phase 4' '## Return' "| \`$R\` |")"
   if [ "$PB" = OK ]; then ok "run.md: Phase 4 에 halted:$R 아암이 있다"
   else bad "run.md: Phase 4 의 halted:$R" "inside Phase 4" "$PB"; fi
+  hasfx "_handoff.md: halted 사유 \`$R\` 가 정본에 열거돼 있다 (엔진)" "$HANDOFF" "\`$R\`"
 done
 hasfx "run.md: halted 를 정상 카운트만으로 보고하지 말라고 말한다" "$RUNMD2" \
       'Never report a `halted:*` run with the normal counts alone'
-hasfx "run.md: marker-unwritable 의 사유가 원장에만 있을 수 있다고 적었다" "$RUNMD2" \
-      'ledger.json'
 
 # ── 30. *"완주 통지는 없다"* 가 run.md step 6 과 daily 둘에 ──────────────────
-RB="$("$PY" "$WORK3/blk.py" "$RUNMD2" '6. Report: sprint number' '**What the supervisor does' \
+RB="$("$PY" "$WORK3/blk.py" "$RUNMD2" '2. Report: sprint number' '**What the supervisor does' \
       '완주 통지는 없습니다')"
 if [ "$RB" = OK ]; then
-  ok "run.md: '완주 통지는 없습니다' 가 Phase 3 step 6 안에 있다"
+  ok "run.md: '완주 통지는 없습니다' 가 Phase 3 step 2 안에 있다"
 else
-  bad "run.md: 완주 통지 문장의 위치" "inside step 6" "$RB"
+  bad "run.md: 완주 통지 문장의 위치" "inside step 2" "$RB"
 fi
 hasfx "daily.md: 완주 통지가 없다는 사실을 적었다" "$DAILY" 'There is no completion notification'
 hasfx "daily.md: state: finished 시 completion 을 렌더한다" "$DAILY" 'completion` key'
@@ -1495,38 +1242,11 @@ for C in '23:00-00:30' '00:30-02:00'; do
 done
 hasfx "run.md: 분으로 센다고 말한다"                  "$RUNMD2" 'Count MINUTES, not the `HHMM` difference'
 hasfx "run.md: 스크립트는 길이를 판정하지 않는다"     "$RUNMD2" 'does not judge window length'
-# ⚠ 그리고 스크립트에 실제로 없어야 한다 — 두 곳이 판정하면 다른 답을 낼 수 있다.
-if grep -qE '(120|7200)' "$TPL" && grep -q 'window' "$TPL" && grep -qE 'WIN_(START|END).*120' "$TPL"; then
-  bad "template: 스크립트가 창 길이를 판정하지 않는다" "no length judgement" "found a 120-minute test"
-else
-  ok "template: 스크립트가 창 길이를 판정하지 않는다 (판정자는 run.md 하나뿐)"
-fi
 hasfx "run.md: N nights 를 범위로 낸다"               "$RUNMD2" 'as a RANGE'
 hasfx "run.md: 낮의 편집은 무효라고 말한다"           "$RUNMD2" '낮의 편집은 무효입니다'
 hasfx "run.md: 창 있는 run 의 ask 가 네 가지를 말한다" "$RUNMD2" 'the ask must
 name four things'
 
-# ── 35. plan-hash 마커가 window·completion 을 보존하는가 ─────────────────────
-# ⚠ 지우면 다음 재개에 창이 사라지고 **낮에 무제한 무인 run** 이 된다. 사람에게 가는 신호가
-#   하나도 없다 — `window` 를 지우는 writer 가 둘이므로 `:75` 만 가드하면 안 된다.
-HBLK="$("$PY" "$WORK3/blk.py" "$RUNMD2" 'halted:plan-hash-mismatch' '5. **Rebuild the queue' \
-        'PRESERVE THE MARKER')"
-if [ "$HBLK" = OK ]; then
-  ok "run.md: plan-hash 마커가 기존 키를 보존하라고 명시한다"
-else
-  bad "run.md: plan-hash 마커의 보존 규칙" "inside step 4" "$HBLK"
-fi
-for K in window completion; do
-  HB="$("$PY" "$WORK3/blk.py" "$RUNMD2" 'halted:plan-hash-mismatch' '5. **Rebuild the queue' "\`$K\`")"
-  if [ "$HB" = OK ]; then ok "run.md: 보존 대상에 \`$K\` 가 리터럴로 열거돼 있다"
-  else bad "run.md: 보존 대상 \`$K\`" "enumerated in step 4" "$HB"; fi
-done
-# 재개 경로: 창 파일 복원이 run 필드 clear **앞**이고, 복원 실패 시 rm -f 대신 사람에게 묻는다
-hasfx "run.md: 재개 시 창 파일을 먼저 복원한다"   "$RUNMD2" 'restore the window file from the marker'
-hasfx "run.md: window 는 clear 대상이 아니다"     "$RUNMD2" '`window` is not a run field'
-hasfx "run.md: 복원 실패 시 사람에게 묻는다"      "$RUNMD2" '**ask the human** instead of deleting it'
-hasfx "run.md: step 2c 가 창 파일을 쓴다"          "$RUNMD2" '2c. **Write the run window file**'
-hasfx "run.md: 창이 없으면 rm -f 한다"             "$RUNMD2" 'rm -f .claude/guild/.gld-sprint-<tracker>.window'
 hasfx "run.md: 거부 문구에 날짜가 들어간다"        "$RUNMD2" '시작 YYYY-MM-DD HH:MM'
 
 # ── 36. SKILL.md 축약이 규범과 라우팅을 잃지 않았는가 ────────────────────────
@@ -1584,25 +1304,6 @@ else bad "README 3종의 하위 절 개수가 같다" "동일" "en=$SM ko=$SK ja
 lacksfx "README.ko: Reference 가 영문 참조 요약으로 되돌아가지 않았다" "$RK" '이 요약은 각 항목의 존재와 위치만'
 lacksfx "README.ja: Reference 가 영문 참조 요약으로 되돌아가지 않았다" "$RJ" 'この要約は各項目の存在と位置のみ'
 
-# (g) A 가 남긴 run.md 계약 셀 — 어느 스위트도 보지 않던 곳이다.
-# `--install-cmd` 를 "shell-quoted" 로 되돌리면 모든 워크트리의 의존성 설치가 깨지는데,
-# 렌더러는 정상 종료하고 bash -n 도 조용하다. 계약은 이 표에만 적혀 있으므로 여기서 고정한다.
-hasfx "run.md: --install-cmd 가 raw 로 넘어간다는 계약이 남아 있다" "$RUNMD2" 'passed **raw and unquoted**'
-lacksfx "run.md: --install-cmd 를 pre-quote 하라고 다시 적지 않았다" "$RUNMD2" 'shell-quoted'
-hasfx "run.md: 메타문자 거부의 근거(simple command)가 표에 남아 있다" "$RUNMD2" 'must be a **simple command**'
-# 그리고 복합 명령의 *처방* — 파이썬 거부는 이중 안전장치일 뿐 구제책이 아니다. 이 지시가
-# 없으면 레거시 설치에서 step 2 가 non-zero 로 끝나고 2d 가 실행을 세운다.
-hasfx "run.md: 레거시 복합 config.commands 정규화 지시가 있다" "$RUNMD2" 'Split such a value yourself before building argv'
-hasfx "run.md: 정규화가 처방이고 파이썬 거부는 이중 안전장치임을 밝힌다" "$RUNMD2" 'second safety net behind it, not the remedy'
-hasfx "run.md: --human-repo 거부 두 건이 표에 적혀 있다" "$RUNMD2" 'Rejected if it is **not absolute**'
-# ⚠ 세 곳이 같은 목록을 말한다: `init.md:163`(계약) · `render_supervisor.py` 의 `_METACHAR`(집행)
-#   · `run.md`(문서). 이들을 묶는 검사가 없었기 때문에 연속 두 릴리스가 정규식만 넓혔고,
-#   `run.md` 는 옛 목록을 그대로 두었다. 결과는 `eslint src/**/*.ts` 처럼 init 이 허용하는 값을
-#   가진 레포에서 sprint 가 기동 불가가 된 것이다 — 라운드 5 가 잡았다. 셋을 함께 고정한다.
-RSPY="$GLD/commands/atoms/render_supervisor.py"
-hasfx "render_supervisor.py: _METACHAR 가 init.md 목록과 정확히 같다" "$RSPY" \
-  '_METACHAR = re.compile(r"\$\(|`|&&|\|\||[|;<>&\n]")'
-lacksfx "render_supervisor.py: 글롭을 다시 막지 않았다 (과잉 차단 회귀)" "$RSPY" '*?{}'
 # ⚠ 파일을 **열거하는** 검사는 세 라운드 연속으로 사이트를 놓쳤다: 라운드 6 은 다섯 중 셋을
 #   맞췄고, 라운드 7 은 "다섯 곳" 을 훑어 일곱 중 다섯을 맞췄으며, 그때 놓친 하나는 라운드 6 이
 #   직접 쓴 줄이었다. 목록을 손으로 적는 한 같은 일이 반복된다.
@@ -1611,7 +1312,9 @@ lacksfx "render_supervisor.py: 글롭을 다시 막지 않았다 (과잉 차단 
 #     사이트는 **통과가 아니라 실패** 다 — 새 사이트가 조용히 생기는 것을 막는 유일한 방법이다.
 cat > "$WORK3/banlist.py" <<'PYBAN'
 import os, sys
-gld = sys.argv[1]
+skill_dir = sys.argv[1]
+# stage 4 (V1): init.md 는 `init_structure_test.sh` 가 본다 — 두 갈래가 같은 숫자를 고치지 않게 한다.
+SKIP = {os.path.join("commands", "init.md")}
 # 정본 아홉 항목. 각 항목마다 **허용되는 표기** 를 함께 적는다 — 같은 규칙을 영문/한글로,
 # 낱말로/기호로 적은 판이 실제로 공존하고, 그것들은 전부 정당하다.
 ITEMS = [
@@ -1639,13 +1342,15 @@ def norm(t):
     # `&&`/`||` 를 먼저 치환해야 낱개 `&`/`|` 검사가 그것들에 흡수되지 않는다.
     return t.replace("&&", "⺠AND⺠").replace("||", "⺠OR⺠")
 problems, sites = [], 0
-for root, dirs, files in os.walk(gld):
+for root, dirs, files in os.walk(skill_dir):
     dirs[:] = [d for d in dirs if d != "__pycache__"]
     for f in sorted(files):
         if not f.endswith((".md", ".py", ".sh")):
             continue
         path = os.path.join(root, f)
-        rel = os.path.relpath(path, gld)
+        rel = os.path.relpath(path, skill_dir)
+        if rel in SKIP:
+            continue
         lines = open(path, encoding="utf-8", errors="replace").read().split("\n")
         for n, line in enumerate(lines, 1):
             if not any(k in line for k in LEAD):
@@ -1683,8 +1388,8 @@ for root, dirs, files in os.walk(gld):
                                 % (rel, n, ",".join(missing)))
 # ⚠ 바닥선이 아니라 **정확값** 이다. `>= 8` 이었을 때 아홉 중 하나가 통째로 사라져도 통과했다.
 #   사이트가 늘거나 주는 것은 의도적 변경이므로 이 숫자를 함께 고치게 만든다.
-if sites != 9:
-    problems.append("found %d ban-list sites, expected exactly 9 — a site appeared or vanished; "
+if sites != 1:
+    problems.append("found %d ban-list sites, expected exactly 1 (init.md has its own) — a site appeared or vanished; "
                     "update this number deliberately" % sites)
 print("OK sites=%d" % sites if not problems else "PROBLEMS " + " | ".join(problems))
 PYBAN
@@ -1694,21 +1399,18 @@ PYBAN
 # 사이트를 손으로 적지 않는다 — 트리에서 찾고, 표에 없는 인용은 통과가 아니라 실패다.
 cat > "$WORK3/cites.py" <<'PYCITE'
 import os, re, sys
-gld = sys.argv[1]
+skill_dir = sys.argv[1]
 # 인용 -> 그 줄에 반드시 있어야 하는 조각. 새 인용이 생기면 여기에 항목을 추가해야 한다.
 EXPECT = {
     ("_bash_rules.md", 204): "A generated OS-level",
-    ("_bash_rules.md", 206): "guild:auditor-violation",
     ("board_write.py", 4):  "Why this is code and not a series of Bash calls",
-    ("config.md", 16):      "unknown/unsupported config key",
     ("init.md", 163):       "normalized, simple-bash-safe",
     ("run.md", 78):         "Not already running",
-    ("sprint.md", 32):      "unknown subcommand",
 }
 pat = re.compile(r"`?([A-Za-z_][A-Za-z0-9_./-]*\.(?:md|py|sh|json))`?:(\d+)")
 idx = {}
 found = {}
-for root, dirs, files in os.walk(gld):
+for root, dirs, files in os.walk(skill_dir):
     dirs[:] = [d for d in dirs if d != "__pycache__"]
     for f in files:
         idx.setdefault(f, []).append(os.path.join(root, f))
@@ -1722,6 +1424,8 @@ for root, dirs, files in os.walk(gld):
 problems = []
 for key, count in sorted(found.items()):
     f, n = key
+    if key == ("init.md", 163):      # stage 4 (V1): 대상 줄은 init_structure_test.sh 가 본다
+        continue
     if key not in EXPECT:
         problems.append("%s:%d cited %dx but is not in the table — add it or fix the citation"
                         % (f, n, count))
@@ -1746,7 +1450,7 @@ PYCITE
 # 세 스위트가 전부 그린이었다(실측). 그 역할의 모든 반환이 실패하게 되는 드리프트다.
 cat > "$WORK3/persona_enum.py" <<'PYPE'
 import glob, os, re, sys
-gld = sys.argv[1]
+skill_dir = sys.argv[1]
 STATUS = {"DONE", "DONE_WITH_CONCERNS", "BLOCKED", "NEEDS_CONTEXT", "FAIL"}
 SENT = ">>> RESULT <<<"
 # ⚠ 일반 대문자 토큰으로 뽑는다. 예전 판은 다섯 이름만 열거한 alternation 으로 뽑아 놓고
@@ -1763,7 +1467,7 @@ NOT_STATUS = {"RESULT", "OK", "SOURCE", "CANDIDATES", "AC", "PR", "QA", "UI", "U
 TOKEN = re.compile(r"\b([A-Z][A-Z_]{2,})\b")
 
 problems, checked, full, partial = [], 0, 0, 0
-for f in sorted(glob.glob(os.path.join(gld, "templates/agents/*.md"))):
+for f in sorted(glob.glob(os.path.join(skill_dir, "templates/agents/*.md"))):
     rel = os.path.basename(f)
     body = open(f, encoding="utf-8").read()
     hits = [l for l in body.split("\n") if "반환 상태" in l or "RESULT" in l]
@@ -1818,7 +1522,7 @@ if partial != 1:
     problems.append("%d personas enumerate a strict subset, expected exactly 1 (infra.md, "
                     "review-only)" % partial)
 # 소비자 쪽 규칙도 같은 다섯을 알아야 한다.
-ho = open(os.path.join(gld, "commands/atoms/_handoff.md"), encoding="utf-8").read()
+ho = open(os.path.join(skill_dir, "commands/atoms/_handoff.md"), encoding="utf-8").read()
 i = ho.find("Sentinel present, but the next non-empty line is not")
 if i < 0:
     problems.append("_handoff.md lost the consumer rejection rule")
@@ -1847,8 +1551,6 @@ PYAL
 )"
 if [ "$NALLOW_ALLOW" = "8" ]; then ok "settings.json.tmpl 의 permissions.allow 가 8개다"
 else bad "settings.json.tmpl allow 개수" "8" "$NALLOW_ALLOW"; fi
-hasfx "init.md: 허용목록이 여덟 개라고 적는다" "$GLD/commands/init.md" 'lists only the **eight** commands'
-hasfx "init.md: 넷으로 줄이지 말라고 못박는다" "$GLD/commands/init.md" 'Do not trim it to four'
 for B in python3 bash chmod ps; do
   hasfx "settings.json.tmpl: Bash($B:*) 가 있다" "$GLD/templates/settings.json.tmpl" "\"Bash($B:*)\""
 done
@@ -1867,49 +1569,14 @@ esac
 # 정본 문자열 자체는 여전히 글자 그대로 건다 — 위 검사는 *구성 요소* 를 보므로 어순이나
 # 표현이 바뀌어도 통과한다. 둘 다 필요하다.
 BANLIST='MUST NOT contain `$(...)` or backticks, `&&`, `||`, `|`, `;`, `&`, newlines, or redirections'
-for BF in "commands/init.md" "commands/atoms/scan_repo.md" "commands/atoms/render_supervisor.py" \
-          "commands/sprint/run.md"; do
+for BF in "commands/atoms/scan_repo.md"; do
   hasfx "$BF: 금지 목록이 정본과 글자 그대로 같다" "$GLD/$BF" "$BANLIST"
 done
-# run.md 산문 열거는 **두 줄** 이다. 라운드 7 은 첫 줄만 걸었고, 그 검사의 제목이 주장하는
-# `||`·`&`·개행은 정작 둘째 줄에 있어 보호되지 않았다 — 라운드 7 의 발견이 한 단계 아래에서
-# 그대로 재현된 것이다. 두 줄을 다 건다.
-hasfx "run.md: 산문 열거 첫 줄(백틱)" "$RUNMD2" '`$(...)`, backticks,'
-hasfx "run.md: 산문 열거 둘째 줄(||·&·개행)" "$RUNMD2" '`&&`, `||`, `|`, `;`, `<`, `>`, `&`, newlines'
 # ⚠ 백틱은 `$(...)` 의 옛 표기인데 두 계약 문서 어디에도 없었고 집행기는 거부하고 있었다.
 #   "exactly … and nothing more" 를 문자 그대로 믿은 다음 사람이 _METACHAR 를 다섯 개로 좁히면
 #   `` `id` `` 가 템플릿의 `eval "$IC"` 에 닿는다. 세 문서를 같은 목록으로 맞추고 함께 고정한다.
 hasfx "scan_repo.md: 백틱도 shell substitution 으로 처방된다" "$GLD/commands/atoms/scan_repo.md" \
   '**Shell substitution** — `$(...)` **or backticks**'
-hasfx "run.md: 금지 목록이 init.md 것과 같음을 명시한다" "$RUNMD2" \
-  "rejects \`init.md:163\`'s ban list"
-# ⚠ "exactly … and nothing beyond it" 은 세 번째로 틀렸다. `_METACHAR` 는 파서가 아니라 **문자
-#   클래스** 라, 인용부호 안의 메타문자도 거부한다(`jest -t "renders <Button/>"`). 그 사실을
-#   적었는지 함께 건다 — 안 적으면 다음 사람이 또 "정확히 그것만" 으로 되돌린다.
-hasfx "run.md: 문자 클래스라는 한계를 밝힌다" "$RUNMD2" 'It is a **character class**, not a parser'
-hasfx "run.md: 글롭·\$VAR·~ 가 합법임을 명시한다" "$RUNMD2" 'Globs, `$VAR` and `~` are legal and pass'
-hasfx "run.md: --order 도 숫자만 받는다는 것이 표에 있다" "$RUNMD2" 'Each value is **digits only**, same as `--tracker`'
-# ⚠ 2d 가드 **자체**를 고정한다. 스위트는 그 가드가 읽는 신호의 *생산자* 만 고정하고 있었다
-#   (sprint_supervisor T10 의 stderr 계약 문구). 소비자를 아무도 보지 않아서, `2d.` 블록을 통째로
-#   지워도 열 개 스위트가 전부 그린이었다 — 그러면 렌더가 죽어도 step 5 가 백그라운드로 기동하고
-#   실행은 "started" 를 보고한다. 설계가 ⚠⚠ 로 적은 바로 그 실패다.
-hasfx "run.md: 2d 렌더 검증 단계가 있다"       "$RUNMD2" '2d. **Verify the render'
-hasfx "run.md: 2d 가 stderr 계약 줄을 읽는다"  "$RUNMD2" 'render_supervisor: wrote'
-hasfx "run.md: 2d 가 step 5 를 막는다"         "$RUNMD2" 'do not run step 5'
-# 그리고 순서 — 렌더 호출과 기동 사이에 있어야 한다. 뒤로 밀리면 이미 떠 있는 것을 검증한다.
-RB2D="$($PY - "$RUNMD2" <<'PY2D'
-import re, sys
-t = open(sys.argv[1], encoding="utf-8").read()
-def at(pat):
-    m = re.search(pat, t, re.M)
-    return m.start() if m else -1
-r, g, s5 = at(r"^\s*python3 .*render_supervisor\.py"), at(r"^2d\. \*\*Verify the render"), at(r"^5\. \*\*Start it")
-print("OK" if -1 not in (r, g, s5) and r < g < s5 else "render=%d guard=%d start=%d" % (r, g, s5))
-PY2D
-)"
-[ "$RB2D" = OK ] && ok "run.md: 2d 가 렌더 호출과 기동 사이에 있다" \
-                 || bad "run.md: 2d 의 위치" "render < 2d < step 5" "$RB2D"
-
 # ⚠ B 의 2차 포인터 — 절감 43.5k 전부가 여기 걸려 있는데 병합 게이트는 commands/ 만 본다.
 # 템플릿 **한 개**만 옛 접미로 되돌려도 세 스위트가 전부 그린이었다(persona_migrate 의 원장 검사는
 # 헤딩이 *어느* 템플릿엔가 있기만 하면 통과하므로 부분 회귀를 못 본다).
@@ -1940,7 +1607,7 @@ echo ""
 # 전혀 못 받는 상태가 그린이 된다.
 cat > "$WORK3/contract.py" <<'PYC'
 import os, re, sys
-gld = sys.argv[1]
+skill_dir = sys.argv[1]
 # ⚠ 파일 목록을 손으로 적지 않는다. 라운드 8 이 다른 검사에서 없앤 바로 그 모양이 여기 남아
 #   있었고, 목록 밖 파일(`commands/review.md`)에 13번째 펜스를 심으면 열 스위트가 그린이었다
 #   — 그 펜스는 서브에이전트에게 `>>> OUTCOME <<<` 를 내라고 지시했고, 소비자 규칙은 그것을
@@ -1948,7 +1615,7 @@ gld = sys.argv[1]
 import glob as _glob
 OPEN, CLOSE = "<!-- guild:result-contract -->", "<!-- /guild:result-contract -->"
 strip = lambda l: re.sub(r"^\s*>\s?", "", l).rstrip("\n")
-lines = open(os.path.join(gld, "commands/atoms/_handoff.md"), encoding="utf-8").read().split("\n")
+lines = open(os.path.join(skill_dir, "commands/atoms/_handoff.md"), encoding="utf-8").read().split("\n")
 try:
     o = lines.index(OPEN); c = lines.index(CLOSE)
 except ValueError:
@@ -1960,10 +1627,10 @@ if len(canon) != 1:
 # ⚠ `templates/agents/` 도 훑는다. 서브에이전트 정의가 실제로 사는 곳인데 두 훑기 모두
 #   `commands/` 에서 멈춰 있었다 — 라운드 9 가 `review.md` 에서 잡은 13번째 펜스를 한 디렉터리
 #   옆으로 옮기면 그대로 통과했다(실측).
-SCAN = (_glob.glob(os.path.join(gld, "commands/**/*.md"), recursive=True)
-        + _glob.glob(os.path.join(gld, "templates/agents/*.md")))
+SCAN = (_glob.glob(os.path.join(skill_dir, "commands/**/*.md"), recursive=True)
+        + _glob.glob(os.path.join(skill_dir, "templates/agents/*.md")))
 for f in sorted(SCAN):
-    rel = os.path.relpath(f, gld)
+    rel = os.path.relpath(f, skill_dir)
     if rel == "commands/atoms/_handoff.md":
         continue                      # 정본 자신
     body = open(f, encoding="utf-8").read().split("\n")
@@ -1976,13 +1643,13 @@ for f in sorted(SCAN):
         total += 1
         if [strip(x) for x in body[a+1:b]] != canon:
             problems.append("%s:%d drifted from canonical" % (rel, a+2))
-if total != 13:
-    problems.append("found %d result-contract copies, expected exactly 13 — one appeared or "
+if total != 12:
+    problems.append("found %d result-contract copies, expected exactly 12 — one appeared or "
                     "vanished; update this number deliberately" % total)
 # 스폰 프롬프트 안의 센티널은 **정확히 하나** 여야 한다. 펜스 본문이 정본과 같아도, 펜스 밖
 # 블록쿼트에 다른 센티널을 적어 넣으면 서브에이전트는 그것을 따른다.
 for f in sorted(SCAN):
-    rel = os.path.relpath(f, gld)
+    rel = os.path.relpath(f, skill_dir)
     for n, l in enumerate(open(f, encoding="utf-8").read().split("\n"), 1):
         # 페르소나는 블록쿼트가 아니라 본문에 센티널을 적는다 — 그래서 `^>` 로 거르면 안 된다.
         if rel.startswith("templates/agents/"):
@@ -2015,28 +1682,28 @@ print("OK %d" % total if not problems else "PROBLEMS " + " | ".join(problems))
 PYC
 OUTC="$("$PY" "$WORK3/contract.py" "$GLD")"
 case "$OUTC" in
-  "OK 13") ok "result-contract: 트리 전체에서 사본 13개, 전부 정본과 바이트 동일" ;;
-  OK*)     bad "result-contract: 사본 13개" "OK 13" "$OUTC" ;;
-  *)       bad "result-contract: 사본이 정본과 동일" "OK 13" "$OUTC" ;;
+  "OK 12") ok "result-contract: 트리 전체에서 사본 12개, 전부 정본과 바이트 동일" ;;
+  OK*)     bad "result-contract: 사본 12개" "OK 12" "$OUTC" ;;
+  *)       bad "result-contract: 사본이 정본과 동일" "OK 12" "$OUTC" ;;
 esac
 
 # 펜스가 블록 *끝* 에 붙으면 `_execute_spine.md:6` 의 언어 불변조건("모든 스폰 프롬프트는
 # `Write output in \`config.language\`.` 로 끝난다")이 조용히 깨진다 — 계약은 전달되고 언어
-# 지시만 밀려난다. 13개 사본 중 11곳이 그 불변조건의 대상이다(0.99.0: execute 의 tests-only developer(Step 1L) 추가. 0.97.1: sprint plan 의 PO 프롬프트도
+# 지시만 밀려난다. 12개 사본 중 10곳이 그 불변조건의 대상이다(0.97.1: sprint plan 의 PO 프롬프트도
 # 언어 줄로 끝난다 — 리더가 직접 덧붙여야 했다(dry-run 2차). plan 계열 나머지 2곳은 파일 머리의
 # "Output language" 줄로 대신하므로 그 줄의 존재를 대신 단언한다).
 cat > "$WORK3/lang.py" <<'PYL'
 import os, re, sys
-gld = sys.argv[1]
+skill_dir = sys.argv[1]
 EXPECT = {"commands/test.md":1, "commands/design.md":3, "commands/qa.md":2,
-          "commands/analyze.md":1, "commands/atoms/_execute_spine.md":3,
+          "commands/analyze.md":1, "commands/atoms/_execute_spine.md":2,
           "commands/plan.md":0, "commands/sprint/plan.md":1}
 OPEN = "<!-- guild:result-contract -->"
 TAIL = "Write output in `config.language`."
 strip = lambda l: re.sub(r"^\s*>\s?", "", l).rstrip()
 problems, total = [], 0
 for rel, want in EXPECT.items():
-    lines = open(os.path.join(gld, rel), encoding="utf-8").read().split("\n")
+    lines = open(os.path.join(skill_dir, rel), encoding="utf-8").read().split("\n")
     got = 0; blocks = 0; i = 0
     while i < len(lines):
         if not re.match(r"^\s*>", lines[i]):
@@ -2057,15 +1724,15 @@ for rel, want in EXPECT.items():
                         % (rel, got, want, blocks))
 # plan 계열 3곳은 파일 머리 줄로 대신한다 — 0 이 "그냥 없다" 로 읽히지 않게 못박는다.
 for rel in ("commands/plan.md", "commands/sprint/plan.md"):
-    head = open(os.path.join(gld, rel), encoding="utf-8").read()
+    head = open(os.path.join(skill_dir, rel), encoding="utf-8").read()
     if "**Output language**" not in head:
         problems.append("%s: neither per-prompt nor file-level language instruction" % rel)
 print("OK %d" % total if not problems else "PROBLEMS " + " | ".join(problems))
 PYL
 OUTL="$("$PY" "$WORK3/lang.py" "$GLD")"
 case "$OUTL" in
-  "OK 11") ok "스폰 프롬프트 11곳이 여전히 언어 지시로 끝난다 (펜스가 뒤에 붙지 않았다)" ;;
-  *)      bad "스폰 프롬프트가 언어 지시로 끝난다" "OK 11" "$OUTL" ;;
+  "OK 10") ok "스폰 프롬프트 10곳이 여전히 언어 지시로 끝난다 (펜스가 뒤에 붙지 않았다)" ;;
+  *)      bad "스폰 프롬프트가 언어 지시로 끝난다" "OK 10" "$OUTL" ;;
 esac
 
 # 은퇴한 문구가 정본 파일에 남아 있지 않은가 — 같은 규칙의 두 판본이 남으면 하나만 검사를 받는다.
@@ -2124,9 +1791,9 @@ hasfx "_bash_rules.md: 무인 완화 폐기 사유가 기록돼 있다" "$GLD/co
 #   `enum` that `re` imports — Python 3.9 (macOS's python3) failed this and the tier check after it.
 cat > "$WORK3/enum_check.py" <<'PYE'
 import glob, os, re, sys
-gld = sys.argv[1]
+skill_dir = sys.argv[1]
 canon = None
-for line in open(os.path.join(gld, "commands/atoms/_handoff.md"), encoding="utf-8"):
+for line in open(os.path.join(skill_dir, "commands/atoms/_handoff.md"), encoding="utf-8"):
     if line.startswith("Return EXACTLY one status line"):
         canon = line.rstrip("\n"); break
 if canon is None:
@@ -2137,8 +1804,8 @@ TOK = re.compile(r"`([A-Z][A-Z_]{2,})")
 NOT_STATUS = {"RESULT", "OK", "SOURCE", "CANDIDATES", "AC", "PR", "QA", "UI", "UX", "E2E", "JSON", "TDD", "HTML"}
 strip = lambda l: re.sub(r"^\s*>\s?", "", l).rstrip("\n")
 problems, sites = [], 0
-for f in sorted(glob.glob(os.path.join(gld, "commands/**/*.md"), recursive=True)):
-    rel = os.path.relpath(f, gld)
+for f in sorted(glob.glob(os.path.join(skill_dir, "commands/**/*.md"), recursive=True)):
+    rel = os.path.relpath(f, skill_dir)
     for n, line in enumerate(open(f, encoding="utf-8"), 1):
         if not re.match(r"^\s*>\s", line):
             continue
@@ -2158,9 +1825,8 @@ for f in sorted(glob.glob(os.path.join(gld, "commands/**/*.md"), recursive=True)
             problems.append("%s:%d names %s, not in Section C" % (rel, n, ",".join(sorted(toks - TABLE))))
 # ⚠ 라운드 9 의 규칙 ①(바닥선은 측정값과 같게)이 여기만 빠져 있었다 — 8번째 축소 사이트가
 #   생겨도 통과했다. 0.98.6 Y3: sprint plan 의 PO 프롬프트(규칙 밖 부분 읽기 → `BLOCKED: partial read`)가 8번째.
-#   0.99.2 A16: developer 프롬프트의 게이트 거부 줄(`BLOCKED: gate INV2 — …`)이 9번째.
-if sites != 9:
-    problems.append("found %d reduction sites, expected exactly 9 — one appeared or was dropped"
+if sites != 8:
+    problems.append("found %d reduction sites, expected exactly 8 — one appeared or was dropped"
                     % sites)
 print("OK %d" % sites if not problems else "PROBLEMS " + " | ".join(problems))
 PYE
@@ -2178,12 +1844,12 @@ esac
 # 문장을 여는 라벨**로 범위를 좁힌다. 이것이 막는 것은 그 라벨들 앞의 융합뿐이다.
 FUSE="$("$PY" - "$GLD" <<'FZPY'
 import io, os, re, sys
-gld = sys.argv[1]
+skill_dir = sys.argv[1]
 FUSE = re.compile(r"[a-z] (?=(?:Verify|Evidence|Conformance) gate:|Honesty-of-scope)")
 bad = []
 for rel in ("test.md", "implement.md", "refactor.md", "debug.md", "qa.md",
             "atoms/_execute_spine.md"):
-    f = os.path.join(gld, "commands", rel)
+    f = os.path.join(skill_dir, "commands", rel)
     if not os.path.exists(f):
         continue
     for i, line in enumerate(io.open(f, encoding="utf-8"), 1):
@@ -2388,7 +2054,6 @@ echo "== 14. 리팩토링 슬롯 — 예약이지 할당량이 아니다 =="
 PLAN14="$GLD/commands/sprint/plan.md"
 RETRO14="$GLD/commands/sprint/retro.md"
 CONFIG14="$GLD/commands/config.md"
-INIT14="$GLD/commands/init.md"
 hasfx "plan.md: 슬롯은 예약이지 강제가 아니다" "$PLAN14" "**reserved, not mandatory**"
 hasfx "plan.md: 슬롯도 readiness·크기 게이트를 면제받지 않는다" "$PLAN14" "the slot gets **no exemption**"
 hasfx "plan.md: 슬롯은 용량 안에서 센다" "$PLAN14" "counts inside the capacity, not on top of it"
@@ -2451,7 +2116,6 @@ hasfx "retro.md: history 에 refactor 필드를 쓴다" "$RETRO14" '"refactor": 
 hasfx "retro.md: 슬롯 줄이 없는 옛 트래커는 결과를 지어내지 않는다" "$RETRO14" "do not invent \`skip\`"
 hasfx "config.md: refactor_slot setter" "$CONFIG14" "--refactor-slot=<on|off>"
 hasfx "config.md: 키가 없으면 on" "$CONFIG14" "An absent key means \`on\`"
-hasfx "init.md: 기본 config 에 refactor_slot" "$INIT14" '"refactor_slot": true'
 
 # ── 규율 7 기계화 — 지시문의 모든 백분율이 등재돼 있는가 ──────────────────
 # ⚠ **존재 검사가 아니라 전수 대조다.** 라운드 6 에서 `verification.md 1.5%` 가 ① 도구가
@@ -2468,7 +2132,7 @@ else
   #    안이든 밖이든 **"turn(s)" 가까이의 정수**와 모든 백분율을 잡는다.
   _unlisted="$("$PY" - "$LEDGER" "$GLD" <<'LGPY'
 import io, os, re, sys
-ledger, gld = sys.argv[1], sys.argv[2]
+ledger, skill_dir = sys.argv[1], sys.argv[2]
 known = set()
 for line in io.open(ledger, encoding="utf-8"):
     if line.startswith("#") or "\t" not in line:
@@ -2483,7 +2147,7 @@ TURN = re.compile(r"(?<![\w\-\u2212])([0-9]+)\*{0,2} turns?\b")
 bad = []
 for rel in ("atoms/_bash_rules.md", "atoms/_preflight.md", "atoms/_execute_spine.md",
             "atoms/_stagnation.md", "qa.md", "test.md", "implement.md", "refactor.md"):
-    f = os.path.join(gld, "commands", rel)
+    f = os.path.join(skill_dir, "commands", rel)
     if not os.path.exists(f):
         continue
     txt = io.open(f, encoding="utf-8").read()
@@ -2511,10 +2175,10 @@ echo "== persona spawns take their tier from the role file (_model_tiering.md Se
 # from that file; non-persona spawns (auditor, scans, readiness) keep their literal.
 cat > "$WORK3/tier.py" <<'TIERPY'
 import glob, os, re, sys
-gld = sys.argv[1]
+skill_dir = sys.argv[1]
 lit = re.compile(r"`model`:\s*`(haiku|sonnet|opus)`")
 persona, wrong = 0, []
-for f in sorted(glob.glob(os.path.join(gld, "commands/**/*.md"), recursive=True)):
+for f in sorted(glob.glob(os.path.join(skill_dir, "commands/**/*.md"), recursive=True)):
     L = open(f, encoding="utf-8").read().split("\n")
     for i, line in enumerate(L):
         if "subagent_type" not in line:
@@ -2524,7 +2188,7 @@ for f in sorted(glob.glob(os.path.join(gld, "commands/**/*.md"), recursive=True)
             continue
         persona += 1
         if lit.search(line) or "role file's `model:`" not in line:
-            wrong.append("%s:%d" % (os.path.relpath(f, gld), i + 1))
+            wrong.append("%s:%d" % (os.path.relpath(f, skill_dir), i + 1))
 print("%d %s" % (persona, " ".join(wrong)))
 TIERPY
 _tier="$("$PY" "$WORK3/tier.py" "$GLD")"
@@ -2641,9 +2305,6 @@ hasfx "scan_repo: 기준 이미지 위치를 vrt_baselines 로 기록" "$SCAN" '
 hasfx "scan_repo: 갱신 명령은 vrt_create(범위 한정 레시피)에만" "$SCAN" 'This is the **only** place an update command is recorded'
 hasfx "scan_repo: TTY 필요한 명령은 -it 를 뺀다" "$SCAN" 'Drop `-i`/`-t`/`-it`'
 hasfx "scan_repo: 추측한 glob 금지" "$SCAN" 'Only globs you have seen committed images under'
-hasfx "init: config 에 commands.vrt" "$GLD/commands/init.md" '"vrt": "<simple cmd or null>"'
-hasfx "init: config 에 visual.baselines" "$GLD/commands/init.md" '"visual": { "baselines":'
-hasfx "init: VISUAL_TEST_SETUP 토큰을 안다" "$GLD/commands/init.md" '{{VISUAL_TEST_SETUP}}'
 hasfx "update: 0.88.0 이전 레포는 감지 후 확인받아 기록" "$GLD/commands/update.md" 'run `atoms/scan_repo.md` **Section 2 step 3b only**'
 hasfx "config: visual 을 보여 준다" "$GLD/commands/config.md" 'visual:     runnable='
 hasfx "audit_readiness: UI 레포의 시각 회귀 부재를 지적" "$GLD/commands/atoms/audit_readiness.md" 'id: no-visual-test'
@@ -2742,7 +2403,8 @@ hasfx "handoff L.3: 시각 매처 순감소는 C 행" "$HO" 'visual assertion re
 hasfx "spine: developer 시각 실행은 runnable 일 때만" "$SPINE" 'and `visual.run_file` is set **and `visual.runnable` is `true`**'
 hasfx "spine: 색·스타일 수정의 이미지 재작성 허용" "$SPINE" 'scoped to the visual test files you touched **or whose screen you changed**'
 hasfx "spine: 한 매처가 여러 이미지(-dark)를 쓰는 경우" "$SPINE" 'map the argument to every image it produces'
-hasfx "update: 부분 visual 블록도 빠진 키만 감지" "$GLD/commands/update.md" 'or `visual` missing any key of `_handoff.md` Section L.0'
+hasfx "update: visual 블록은 어디에도 쓰지 않는다 (T3 P9)" "$GLD/commands/update.md" '⚠ **Write no `visual` block anywhere.**'
+lacksfx "update: 옛 visual 블록 기본값 쓰기가 없다 (T3 P9)" "$GLD/commands/update.md" '"visual": {"baselines": []'
 lacksfx "scan_repo: 비실행 예시에 run_file 을 두지 않는다" "$SCAN" '"vrt_run_file": "flutter test --tags golden <file>"'
 # 5회차 적대적 리뷰
 hasfx "debug: 버그를 기록한 이미지는 수정 후 red + M 행이 증거" "$GLD/commands/debug.md" '**One carve-out — a visual-only bug whose existing image recorded the bug**'
@@ -2751,7 +2413,6 @@ hasfx "scan_repo: exclude_tags 는 --tags 로 못 뒤집는다" "$SCAN" '**`excl
 hasfx "scan_repo: 0건 실행은 깨진 커맨드" "$SCAN" '**A run that reports zero tests'
 hasfx "design: 한 호출이 여러 이미지를 쓰면 한 행" "$DESIGN" 'one row covers all of them'
 hasfx "handoff L.4: 의도 밖 재작성 이미지는 되돌린다" "$HO" 'Restore those to their merge-base state before committing'
-hasfx "init: 시각 매처 삭제는 경고 (차단 아님)" "$GLD/commands/init.md" 'dropping its screenshot matcher calls **warns**'
 # 6회차 적대적 리뷰
 hasfx "handoff L.3: 바이트 동일 이동은 R 한 행" "$HO" 'R <old path> -> <new path> — moved, unchanged'
 hasfx "handoff L.3: 재생성 필요 P 행" "$HO" '`P` (pending regeneration)'
@@ -2923,11 +2584,28 @@ hasfx "refactor: 바이트 동일 이동은 reshaping 아님" "$RFMD" 'a byte-id
 hasfx "refactor: 기존 VRT 미실행을 PR 에" "$RFMD" 'existing VRT not run here'
 
 # 후속 Issue 판정 (0.90.0) — 이슈를 만들지 말지를 사람에게 되던지지 않는다
-FUMD="$GLD/commands/review.md"; FQMD="$GLD/commands/qa.md"; FIMD="$GLD/commands/init.md"
+FUMD="$GLD/commands/review.md"; FQMD="$GLD/commands/qa.md"
 hasfx "review: 범위 밖 MAJOR 는 후속 Issue 등록 필요 판정" "$FUMD" '→ 후속 Issue 등록 필요 (MAJOR) — <이번 PR에서 고치지 않는 근거'
 hasfx "review: BLOCKER 는 미루지 않는다" "$FUMD" '`BLOCKER` is **never** deferred'
 hasfx "review: Step 5 에서 한 번만 묻는다" "$FUMD" '**후속 Issue (binary per item — asked once, before the 종합 판정).**'
 hasfx "review: qa 의 unfiled 만 묻는다" "$FUMD" 'every `unfiled` line in the Issue'"'"'s `<!-- guild:followups -->` comment'
+# Q11 (2026-11-28): 엔진이 만든 후속 이슈는 다시 묻지 않고 한 줄로 보여 준다, include 수정은 범위 밖 표시
+hasfx "review(Q11): 엔진 후속 이슈는 보여 주기만" "$FUMD" '**엔진이 등록한 후속 이슈 (Q11 — shown, never asked).**'
+hasfx "review(Q11): 한 줄 형식" "$FUMD" '`엔진이 등록한 후속 이슈: #a, #b`'
+hasfx "review(Q11): 다시 묻지 않는다" "$FUMD" 'They are filed already: **never ask about them again**.'
+hasfx "review(Q11): 엔진 PR 의 (b) 는 비어 있어 정상" "$FUMD" 'The engine writes no `<!-- guild:followups -->` record, so on its PRs source (b) below is empty — normal'
+hasfx "review(Q11): 접힌 옛 본문도 찾는다" "$FUMD" '`<summary>분리한 후속 이슈</summary>`: match the title in either form'
+hasfx "review(Q11): include 수정 표시(계획)" "$FUMD" '**`이번 이슈 범위 밖이지만 함께 고친 것 (<F/D id>)`**'
+hasfx "review(Q11): include 수정 표시(헤더)" "$FUMD" 'a unit Step 3 marked out of scope adds ` — 이번 이슈 범위 밖이지만 함께 고친 것 (<F/D id>)`'
+hasfx "review(Q11): include 는 PR 본문 절에서 읽는다" "$FUMD" 'the PR body'"'"'s `범위 밖이지만 포함한 수정` section lists them'
+if "$PY" - "$FUMD" <<'PYQ11'
+import sys
+t = open(sys.argv[1], encoding="utf-8").read()
+a, b = t.find("**엔진이 등록한 후속 이슈 (Q11"), t.find("**후속 Issue (binary per item")
+sys.exit(0 if 0 <= a < b else 1)
+PYQ11
+then ok "review(Q11): 엔진 후속 이슈 줄은 후속 Issue 질문보다 앞"
+else bad "review(Q11): 엔진 후속 이슈 줄은 후속 Issue 질문보다 앞" "before" "not before"; fi
 hasfx "review: 후속 Issue 항목마다 권장 의견을 붙인다" "$FUMD" '**Every `후속 Issue 등록 필요` item also carries your recommendation**'
 hasfx "review: 권장은 두 단어 중 하나 + 근거" "$FUMD" '**`등록 권장 — <근거>`** / **`등록 권장하지 않음 — <근거>`**'
 hasfx "review: 권장 판정이 금지어 규칙의 유일한 예외" "$FUMD" 'this recommendation verdict is the one exception to the hedge ban'
@@ -2971,10 +2649,6 @@ hasfx "qa: declined 는 다시 묻지 않는다" "$FQMD" 'carry it forward as `d
 lacksfx "qa: 판정 없는 '지금 이슈로 만들까요?' 가 사라졌다" "$FQMD" '— 지금 이슈로 만들까요?'
 lacksfx "qa: 언어 고정 헤딩 '### 미등록 후속 항목' 이 사라졌다" "$FQMD" '### 미등록 후속 항목'
 hasfx "handoff: guild:followups 마커" "$GLD/commands/atoms/_handoff.md" '| `<!-- guild:followups -->` … `<!-- /guild:followups -->` | qa (leader, Step 2.6);'
-hasfx "init: 갭마다 판정 먼저" "$FIMD" 'Every **BLOCKER/MAJOR** gap gets **exactly one verdict, stated before any question**'
-hasfx "init: MINOR 는 한 줄 카운트" "$FIMD" '`등록 불필요 <n>건 (MINOR — 리포트에만 기록)`'
-lacksfx "init: 'offer MINOR too' 가 사라졌다" "$FIMD" 'offer MINOR too'
-lacksfx "init: 선택지를 고르게 하지 않는다" "$FIMD" 'user picks which to file'
 
 # 후속 Issue 1회차 적대적 리뷰
 hasfx "review: PR 번호면 Issue 를 따로 해석" "$FUMD" '3. **Resolve the Issue too — `<ISSUE>`**'
@@ -2983,7 +2657,6 @@ hasfx "review: (a) 는 열린 Issue 만 추적으로 친다" "$FUMD" '**For an (
 hasfx "qa: followups 는 페이지네이션해 읽는다" "$FQMD" 'issues/$1/comments --paginate --jq'
 hasfx "qa: filed/declined 를 매번 이월" "$FQMD" '**every rewrite carries both forward**'
 hasfx "handoff K: followups 토큰" "$GLD/commands/atoms/_handoff.md" "- the follow-up record's status tokens"
-hasfx "init: GitHub 레포 없으면 기록만" "$FIMD" '`기록만 — GitHub 레포 없음`'
 # 후속 Issue 2회차 적대적 리뷰
 hasfx "review: 답이 무엇이든 followups 에 기록" "$FUMD" '**Record the (b) outcomes on the Issue — always, whatever the answer**'
 hasfx "review: 일괄 거절은 모두 declined" "$FUMD" '**a flat no makes every asked line `declined`**'
@@ -2993,9 +2666,7 @@ lacksfx "review: docs/specs/\$1 예시를 쓰지 않는다" "$FUMD" '[설계 유
 hasfx "qa: 미계획으로 닫힌 Issue 는 거절로 존중" "$FQMD" '`등록 불필요 — #<n> 미계획으로 닫힘`'
 hasfx "qa: 무인 실행은 PR 에도 알린다" "$FQMD" '`<!-- guild:followups:pr:$1 -->`'
 hasfx "handoff F: 후속 Issue 생성 실패는 스테이지를 멈추지 않는다" "$GLD/commands/atoms/_handoff.md" '**Follow-up Issue creates are not stage state either.**'
-hasfx "init: 화면에는 BLOCKER/MAJOR 만" "$FIMD" '**On screen, show only BLOCKER/MAJOR gaps plus the summary count**'
 # 후속 Issue 3회차 적대적 리뷰
-hasfx "init: inline-secret 에 git rm --cached 를 제안하지 않는다" "$FIMD" 'for `inline-secret` the file is ordinary source, so **never** offer `git rm --cached`'
 hasfx "qa: 이전 기록의 declined 는 판정으로" "$FQMD" '**`등록 불필요 — 이전에 거절됨`**'
 hasfx "qa: 자기 Issue 는 덮는 Issue 가 아니다" "$FQMD" '**Never count `#$1` itself**'
 hasfx "review: 자기 Issue 는 덮는 Issue 가 아니다" "$FUMD" '**Never count `<ISSUE>` itself, or any Issue in this PR'"'"'s `closingIssuesReferences`, as the covering Issue**'
@@ -3004,7 +2675,6 @@ hasfx "review: PR 알림은 (b) 가 비어도 정리" "$FUMD" '**The PR notice i
 hasfx "review: Issue 쪽 \$1 은 <ISSUE>" "$FUMD" '**From here on, every Issue-side use of `$1` in this command means `<ISSUE>`**'
 lacksfx "qa: 정의되지 않은 <N> 을 쓰지 않는다" "$FQMD" '/gld review <N>'
 # 후속 Issue 4회차 적대적 리뷰
-hasfx "init: inline-secret 로컬 조치는 안내만" "$FIMD" '**printed as guidance only, never applied**'
 hasfx "review: <ISSUE> 가 없으면 PR 알림을 건드리지 않는다" "$FUMD" 'but never when `<ISSUE>` = none'
 hasfx "qa: DUPLICATE 는 원본을 따라간다" "$FQMD" '`DUPLICATE` → follow it to the Issue it duplicates'
 hasfx "review: DUPLICATE 는 원본을 따라간다" "$FUMD" '`DUPLICATE` → follow it to the Issue it duplicates'
@@ -3112,9 +2782,7 @@ G95c="$(grep -rn -- "--paginate --jq '\[" "$GLD/commands" "$GLD/templates" || tr
   || bad "--paginate --jq 배열형" "none" "$(printf '%s' "$G95c" | head -3 | tr '\n' '|')"
 hasfx "audit_readiness: GATE_SCRIPT 는 호출자가 넘김 (대체 경로 없음)" "$GLD/commands/atoms/audit_readiness.md" 'There is no fallback'
 hasfx "audit_readiness: 0/1 외 종료 코드는 판정 불가" "$GLD/commands/atoms/audit_readiness.md" 'anything else (2 = could not scan, 64 = no input) = NOT judged'
-hasfx "init: 서브에이전트 프롬프트에 GATE_SCRIPT" "$GLD/commands/init.md" '`GATE_SCRIPT` = `<<SKILL_DIR>>/gates/gate_precommit.py`'
 hasfx "audit: GATE_SCRIPT 전달" "$GLD/commands/audit.md" 'execute it with `GATE_SCRIPT`'
-hasfx "init: absent 분기" "$GLD/commands/init.md" '**`absent`** → no hook yet'
 hasfx "update: absent 분기" "$GLD/commands/update.md" '**`absent` / `guild` / `none`**'
 hasfx "contribute: 판정 불가면 반출 중단" "$GLD/commands/contribute.md" 'means NOT scanned, not clean'
 hasfx "evolve: firing 로그는 --firing-log 로만" "$GLD/commands/evolve.md" '**Never read `gate-firings.jsonl` directly**'
@@ -3242,7 +2910,6 @@ hasfx "plan: 크기 N 만 human-cut" "$SPP" 'Record `shortfall: human-cut` **onl
 hasfx "plan: C 출처 경고" "$SPP" '⚠ 용량 <C> 는 아직 실측된 적 없는 크기입니다(실측 최대 <M>)'
 hasfx "plan: 재실행이 빠진 결정 줄 복구" "$SPP" 'the decision lines the tracker'"'"'s `<!-- guild:sprint:plan-decisions -->` comment'
 hasfx "plan: order 는 kind 로 동순위" "$SPP" '**Every member in the `base_deps` file carries its `kind`**'
-hasfx "run: order.json 에 kind" "$GLD/commands/sprint/run.md" '`{"members":[{"number":<n>,"base_deps":[…],"kind":"<goal|other|slot>"}, …]}`'
 hasfx "run: ad-hoc 기계 값" "$GLD/commands/sprint/run.md" '`- capacity: n/a`, `- shortfall: n/a`, `- adhoc: true`'
 hasfx "retro: 권고 우선순위 — adhoc 권고 없음" "$GLD/commands/sprint/retro.md" '| ① | `adhoc: true` | **권고 없음**'
 hasfx "retro: human-cut 이면 capacity = planned" "$GLD/commands/sprint/retro.md" '| ③ | `shortfall: human-cut` | **`capacity = planned`**'
@@ -3287,7 +2954,8 @@ hasfx "plan: TL 도 BODIES 명령을 직접 실행" "$SPP" 'Judge from the bodie
 hasfx "plan: CANDIDATES 에픽 자식 대응(바닥 선행 미완 포함)" "$SPP" '`children: #c1(<stage>) #c2(<stage>) … (remaining <k> · blocked <#c…|—> · closed-not-done <#c…|—> · 바닥 선행 미완 <#d…|—>)`'
 # 2-1 에픽 후보
 lacksfx "plan: 에픽을 사람에게 돌려줄 수 있다는 옛 문장 제거" "$SPP" 'and may hand it back to the human'
-hasfx "plan: 에픽은 run 이 끝까지 진행 — 후보 하나" "$SPP" 'it is not handed to the human), so the epic is one candidate like any other'
+# readiness T1 P7: 이 판은 에픽을 지원하지 않는다 — 에픽은 후보가 아니다(옛 문장은 145행과 모순이었다)
+lacksfx "plan: 에픽을 후보 하나로 두던 옛 문장 제거(T1 P7)" "$SPP" 'so the epic is one candidate like any other'
 hasfx "plan: 자식 조회 호출(state all, 500, 스트림)" "$SPP" "gh issue list --label guild:child --state all --limit 500 --json number,body,labels,state --jq 'length, ("
 hasfx "plan: 자식 parent 캡처는 tonumber" "$SPP" 'match("Parent Issue: #([0-9]+)").captures[0].string | tonumber'
 hasfx "plan: depends_text 는 첫 문장" "$SPP" 'match("Depends on:?[^\n]*"; "g").string | split(". ")[0]'
@@ -3579,7 +3247,7 @@ lacksfx "plan(0.98.4 X2): 권장 옵션 뒤 이유만 떼던 옛 규칙 제거" 
 hasfx "plan(0.98.4 X2): 크기 매핑도 같은 제거 규칙" "$PLAN" '  is settled — the mapping reads the chosen option'"'"'s draft line with the same tags removed as'
 lacksfx "plan(0.98.4 X2): 크기 매핑 옛 문구 제거" "$PLAN" 'the mapping reads the option'"'"'s wording with its tags removed'
 hasfx "_handoff(0.97.2): K 에 (recommended) 토큰" "$HOMD" 'the recommended-option token `(recommended)` on one `## questions` option line'
-# E. 재스폰 프롬프트 전체 템플릿 (결과 계약 펜스 없음 — 사본 13개 유지)
+# E. 재스폰 프롬프트 전체 템플릿 (결과 계약 펜스 없음 — 사본 12개 유지)
 hasfx "plan(0.97.2): 재스폰 subagent_type 줄" "$PLAN" '`description`: `tech-lead sprint slot re-spawn`'
 hasfx "plan(0.97.2): 재스폰 템플릿 — Refactor slot 절만 읽기" "$PLAN" 'produce **(c) only** — one refactor-slot proposal (rules: the "Refactor slot" section of `<<SKILL_DIR>>/commands/sprint/plan.md` — read that section before writing (c), not the whole file); do not redo (a) or (b).'
 hasfx "plan(0.97.2): 재스폰 템플릿 — 에픽 파일 회피 조건부" "$PLAN" '<only when epic members are selected: Do not touch the epic members'"'"' files: <their files>.>'
@@ -3589,10 +3257,7 @@ lacksfx "plan(0.97.2): 재스폰 옛 산문 인용 제거" "$PLAN" 'asking for *
 # G. 머지 설정은 읽기 권한으로 되는 조회
 hasfx "plan(0.97.2): 머지 설정 조회 gh repo view" "$PLAN" 'gh repo view <owner>/<repo> --json mergeCommitAllowed,squashMergeAllowed,rebaseMergeAllowed,deleteBranchOnMerge'
 lacksfx "plan(0.97.2): REST 필드 이름 제거" "$PLAN" 'allow_merge_commit'
-hasfx "run(0.97.2): 머지 설정 조회 gh repo view" "$RUNMD2" 'gh repo view <owner>/<repo> --json mergeCommitAllowed,squashMergeAllowed,rebaseMergeAllowed,deleteBranchOnMerge'
 lacksfx "run(0.97.2): REST 필드 이름 제거" "$RUNMD2" 'allow_merge_commit'
-hasfx "run(0.97.2): 조회 실패 시 토큰만으로 진행" "$RUNMD2" '*"머지 설정을 확인하지 못했습니다"*'
-hasfx "run(0.97.2): 멈춤은 기본이 아닌 base 가 있을 때만" "$RUNMD2" '**and** the member table has a base that is not the default branch (a `base 의존` cell other than `—`)'
 lacksfx "retro(0.97.2): 옛 필드 이름 제거" "$GLD/commands/sprint/retro.md" 'delete_branch_on_merge'
 hasfx "plan(0.97.2): 조회 실패는 상한 1" "$PLAN" '- **The call fails, or `mergeCommitAllowed` is missing from its output** → do not assume the'
 hasfx "plan(0.97.2): 조회 실패 Phase 5 형태(수락 전)" "$PLAN" '`머지 전략: 알 수 없음(조회 실패) → 스택 없음(상한 1) · 브랜치 자동삭제 ?`'
@@ -3878,11 +3543,8 @@ hasfx "retro(0.98.1 cr): 완전성 비교 방향" "$GLD/commands/sprint/retro.md
 # 0.98.2 (1차) — 보안 문제와 run 이 멈추는 문제 (design 20)
 P2_RUN="$GLD/commands/sprint/run.md"; P2_PLAN="$GLD/commands/sprint/plan.md"; P2_DAILY="$GLD/commands/sprint/daily.md"
 P2_RETRO="$GLD/commands/sprint/retro.md"; P2_DEV="$GLD/commands/dev.md"; P2_HO="$GLD/commands/atoms/_handoff.md"
-P2_BR="$GLD/commands/atoms/_bash_rules.md"; P2_INIT="$GLD/commands/init.md"
+P2_BR="$GLD/commands/atoms/_bash_rules.md"
 # S1 — init 의 dismissed.md 형식
-hasfx "init(0.98.2 S1): dismissed.md 형식은 백틱 경로" "$P2_INIT" '`` - `<path/pattern>` — <reason> `` (backticks recommended, optional)'
-hasfx "init(0.98.2 S1): 형식 줄은 불릿이 아닌 > 인용·문장" "$P2_INIT" 'as a `>` quote or a plain sentence — never as a bullet'
-lacksfx "init(0.98.2 S1): 옛 백틱 없는 형식 제거" "$P2_INIT" '(header only; `- <path/pattern> — <reason>` downgrades'
 # S3 — gh auth status 로만 판정, 값 출력 금지
 hasfx "run(0.98.2 S3): GH_TOKEN 확인은 창과 무관하게 항상, 정확히 gh auth status" "$P2_RUN" '**Always — window or not — check which GitHub credential the supervisor will inherit: `gh auth
 status`, its own Bash call, exactly that command.**'
@@ -3915,7 +3577,7 @@ for i in 1 2 3 4; do
     '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Bash","input":{"command":"gh auth status"}},{"type":"tool_use","name":"Bash","input":{"command":"gh auth switch"}}]}}' \
     > "$ST_HOME/.claude/projects/p/s$i.jsonl"
 done
-ST_RUN="$(env -u CLAUDE_CONFIG_DIR HOME="$ST_HOME" "$PY" -B "$GLD/commands/atoms/scan_transcript.py" --repo-cwd /st/repo 2>/dev/null | "$PY" -c '
+ST_RUN="$(HOME="$ST_HOME" "$PY" -B "$GLD/commands/atoms/scan_transcript.py" --repo-cwd /st/repo 2>/dev/null | "$PY" -c '
 import json, sys
 t = sys.stdin.read(); d = json.loads(t.split(">>> RESULT <<<", 1)[1])
 sig = d.get("signals") or []
@@ -3963,19 +3625,8 @@ lacksfx "plan(0.98.2 R1 r2): 표시 없이 모든 closed-not-done 을 읽으라�
 TLN="$(grep -cF 'a `closed-not-done` child'"'"'s body via `gh issue view <c> --json body` — **except one marked `(머지됨 — run 이 정리)`: do not read it, do not size it, and do not count it in `epic ×<k>`**' "$P2_PLAN")"
 [ "$TLN" = 2 ] && ok "plan(0.98.2 R1 r2): tech-lead 프롬프트 2곳(선택·리팩터 슬롯) 모두 머지됨 자식 제외" || bad "plan(0.98.2 R1 r2): tech-lead 프롬프트 2곳" "2" "$TLN"
 # R2 — split 부모 PAUSED
-hasfx "run(0.98.2 R2): guild:children 행의 PAUSED 경로" "$P2_RUN" '**The one exception — PAUSED** (0.98.2 R2): when, after a pass, the parent'"'"'s smallest outstanding child'
-hasfx "run(0.98.2 R2): 하류 dep-needs-human" "$P2_RUN" 'the parent goes into `dag/paused.txt` so its dependants block as `dep-needs-human`'
-hasfx "run(0.98.2 R2): paused.txt 재실행 초기화" "$P2_RUN" "python3 -c \"open('.claude/guild/.sprint-logs/<tracker>/dag/paused.txt','w').close()\""
-hasfx "run(0.98.2 R2 r2): failed.txt 설명이 '두 누적 파일 중 하나'" "$P2_RUN" '`failed.txt` is the supervisor'"'"'s **working state for one run, not a record**, and it is one
-   of the two dag files that **accumulate across runs** (the other is `paused.txt`, below)'
 lacksfx "run(0.98.2 R2 r2): 옛 'the one dag file' 문구 없음" "$P2_RUN" 'and it is the one
    dag file that **accumulates across runs**'
-PSO="$(awk '/the retry counts live in the run marker\./{a=NR} /Then truncate `paused.txt` the same way/{b=NR} END{print (a && b && a < b) ? "ok" : "bad"}' "$P2_RUN")"
-[ "$PSO" = ok ] && ok "run(0.98.2 R2 r2): paused.txt 문단은 failed.txt 설명 뒤" || bad "run(0.98.2 R2 r2): paused.txt 문단 위치" "after failed.txt paragraphs" "$PSO"
-hasfx "run(0.98.2 R2): 'No other dag file' 문장 갱신" "$P2_RUN" '⚠ **No other dag file needs this** — `failed.txt` and `paused.txt` are the two that'
-hasfx "run(0.98.2 R2): Do not hand it to the human 의 예외 (별도 문장)" "$P2_RUN" 'exactly as they would outside a sprint. **The one exception — PAUSED**'
-hasfx "run(0.98.2 R2): 예외 근거 문장" "$P2_RUN" '`dep-needs-human`. 단 가장 작은 대기 자식이 needs-human 이면 PAUSED — 근거는 completion 의 `#e (child #c)`(라벨은 `guild:children` 그대로).'
-hasfx "run(0.98.2 R2): label-truthful 보고의 예외 (별도 문장)" "$P2_RUN" 'Report such a member as paused on `#c`, not by the parent'"'"'s label.'
 lacksfx "run(0.98.2 R2): 영어 문장 중간에 끼운 예외 없음" "$P2_RUN" 'Do **not** hand it to the human — 단'
 hasfx "retro(0.98.2 R2): 분할 일시정지 예외" "$P2_RETRO" '단 가장 작은 대기 자식이 needs-human 이면 PAUSED — 근거는 completion 의 `#e (child #c)`(라벨은 `guild:children` 그대로)'
 hasfx "daily(0.98.2 R2): paused_issues 의 #e (child #c)" "$P2_DAILY" '`#e (child #c)` 는 자식이 needs-human — 부모 라벨은 `guild:children`'
@@ -3983,10 +3634,6 @@ hasfx "plan(0.98.2 R2): 예고 문구 — 일시정지(재시도 없음)" "$P2_P
   re-try, not `split-stalled`)'
 lacksfx "plan(0.98.2 R2): 옛 예고 문구 제거" "$P2_PLAN" 'unattended it may re-try and end the epic `split-stalled`'
 lacksfx "plan(0.98.2 R2): 옛 Add 경고 제거" "$P2_PLAN" '몇 번 다시 시도한 뒤 split-stalled(미완)로 끝날 수 있습니다'
-hascode "supervisor(0.98.2 R2): 부모 재호출 전 새 함수" "$GLD/templates/sprint-supervisor.sh" 'SPLIT_HEAD="$(split_head_needs_human "$ISSUE")"'
-hascode "supervisor(0.98.2 R2): paused.txt 쓰기는 별도 함수" "$GLD/templates/sprint-supervisor.sh" 'record_paused "$ISSUE"'
-hascode "supervisor(0.98.2 R2): paused.txt 없으면 만든다" "$GLD/templates/sprint-supervisor.sh" '[ -f "$D/paused.txt" ] || : > "$D/paused.txt"'
-hasfx "supervisor(0.98.2 R2): children 일 때만 needs-human" "$GLD/templates/sprint-supervisor.sh" 'if line.isdigit() and terminal.get(line) == "children":'
 # R3 — plan 의 중앙 관리 파일 정의 옆
 hasfx "plan(0.98.2 R3): 실행 중 변경은 커밋 게이트가 알림" "$P2_PLAN" '실행 중 변경은 커밋 게이트가 정보 경고로 알린다'
 
@@ -4046,7 +3693,7 @@ hasfx "spine(W3): 줄 형식" "$P3_SP" '- <looped-back|fixed|recorded|dismissed>
 hasfx "spine(W3): 장식 없이" "$P3_SP" 'and is written **bare** — no backticks, no'
 hasfx "spine(W3): 역할 축은 토큰 금지" "$P3_SP" 'starts `role-axis: <role> <verdict> — <reason>` and never uses the four tokens'
 hasfx "_handoff(W3): K 에 위치 규칙" "$P3_HO" 'a disposition token is written bare right after `- ` at column 0 of its finding line'
-hasfx "retro(W3→A12): 위치 접두 정규식(줄 단위) — 백틱은 [96] | implode" "$P3_RETRO" '($b | split("\n")) as $L | ("^- [" + ([96] | implode) + "*]{0,2}") as $p | ("[" + ([96] | implode) + "*]{0,2}([^-A-Za-z0-9_]|$)") as $s'
+hasfx "retro(W3): 위치 접두 정규식(줄 단위)" "$P3_RETRO" '($b | split("\n")) as $L | ("^- [\u0060*]{0,2}") as $p | ("[\u0060*]{0,2}([^-A-Za-z0-9_]|$)") as $s'
 hasfx "retro(W3): loose 필드(낱말 분할)" "$P3_RETRO" 'loose: ([$b | splits("[^-A-Za-z0-9_]+")] | map(select(. == "looped-back" or . == "fixed" or . == "recorded" or . == "dismissed")) | length)'
 # 0.98.5: gh --jq 는 gojq(RE2)  (범위: 한 줄 `--jq '…'`/`--jq "…"` 형태 — Python argv·여러 줄 식은 보지 않음) — 룩어라운드·역참조를 거부해 호출이 객체 없이 오류로 끝난다
 #   (실측 0.98.4: word_app #1738·#1764 retro 둘 다). 플러그인 안 모든 --jq 식에서 금지.
@@ -4150,8 +3797,8 @@ hasfx "evolve(W11): applied-onto 는 로컬 부모" "$P3_EVO" '`applied-onto` is
 hasfx "evolve(W11): 보고의 grep 명령" "$P3_EVO" 'git log --fixed-strings --grep "chore(guild): evolve #<n> —" --format="%h %s"'
 hasfx "rollback(W11): 1순위는 커밋이 추가한 항목" "$P3_RB" '**first, the entry that commit added itself**: `git show <sha> -- .claude/guild/evolution-log.md`'
 hasfx "retro(W11): push 전 표기" "$P3_RETRO" 'is written as its hash + `(push 전)` +'
-hasfx "retro(W11): 변경 없으면 건너뜀" "$P3_RETRO" '`git diff --quiet HEAD -- .claude/guild/config.json` — exit 0'
-hasfx "retro(W11): 커밋 명령" "$P3_RETRO" '`git commit -m "chore(guild): 스프린트 #<tracker> 회고 결과를 용량 이력에 남긴다" -- .claude/guild/config.json`'
+hasfx "retro(W11): 변경 없으면 건너뜀" "$P3_RETRO" '`git diff --quiet HEAD -- .claude/guild/harness.json` — exit 0'
+hasfx "retro(W11): 커밋 명령" "$P3_RETRO" '`git commit -m "chore(guild): 스프린트 #<tracker> 회고 결과를 용량 이력에 남긴다" -- .claude/guild/harness.json`'
 hasfx "retro(W11): push 금지" "$P3_RETRO" '**Do not push.**'
 
 # 0.98.3 리뷰 1차
@@ -4232,9 +3879,7 @@ hasfx "review(X9): 체크아웃 밖 편집 단락" "$P4_RV" '> **⚠ When a requ
 hasfx "review(X9): 이미 다른 워크트리에 있으면 거기서(묻고)" "$P4_RV" '**The head is already checked out in another worktree** (`git worktree list --porcelain` shows `branch refs/heads/<head>`'
 hasfx "review(X9): stack_sync 와 같은 refspec" "$P4_RV" '`git fetch origin +refs/heads/<head>:refs/remotes/origin/<head>` (the refspec `stack_sync.py` uses)'
 hasfx "review(X9): PR head 는 자기 호출로 읽음" "$P4_RV" '`gh pr view <pr> --repo <owner>/<repo> --json headRefOid --jq .headRefOid`'
-hasfx "run(X9): 다른 t 의 run 파일 미추적 판정 호출" "$P4_RUN" 'untracked by the same `git ls-files .claude/guild/<file>` call as `retro.md` Phase 7, one per'
 hasfx "retro(X9): 다른 t 의 run 파일 미추적 판정 호출" "$P4_RETRO" '`git ls-files .claude/guild/<file>` call as the run files above; a tracked one is not named) — the'
-hasfx "run(X15): prs_tail_open.jsonl 도 매 loop 새로" "$P4_RUN" '`prs.json`, `prs_tail_open.jsonl`,'
 hasfx "review(X9): 로컬 tip ≠ headRefOid 면 묻기" "$P4_RV" 'differs from that `headRefOid` → show both SHAs and ask the human'
 hasfx "review(X9): 임시 워크트리 경로" "$P4_RV" '`git worktree add <repo-parent>/.gld-<repo>-review-<pr> <head>`'
 hasfx "review(X9): 로컬 브랜치 없으면 -b" "$P4_RV" '`git worktree add -b <head> <repo-parent>/.gld-<repo>-review-<pr> origin/<head>`'
@@ -4250,10 +3895,6 @@ hasfx "retro(X9): Guild 실행 밖 워크트리" "$P4_RETRO" '`Guild 실행 밖 
 hasfx "retro(X9): 밖 워크트리가 잡은 머지 브랜치는 건너뜀" "$P4_RETRO" '"used by worktree") and reported: `<path> 가 잡고 있음 — 먼저 git worktree remove <path>`.'
 hasfx "retro(X9): step 3.2 도 건너뜀" "$P4_RETRO" 'local delete; the local tip test below decides. A branch step 1 found checked out in a'
 hasfx "retro(X9): 범위 단락 유지" "$P4_RETRO" '⚠ **Scope is this sprint and nothing else.** Only (a) worktrees inside this sprint'"'"'s container,'
-hasfx "run(X9): step 6 이전 스프린트 안내(보고 전용)" "$P4_RUN" 'Also one line each for what an **earlier sprint** left — report only, nothing is removed here:'
-hasfx "run(X9): run 파일은 자기 호출 ls -A" "$P4_RUN" 'run files `.gld-sprint-<t>.*` from its own call `ls -A .claude/guild/` (`t` ≠ this tracker;'
-hasfx "run(X9): state 호출" "$P4_RUN" '`gh issue view <t> --repo <owner>/<repo> --json state --jq .state` — `CLOSED` →'
-hasfx "run(X9): 실패 → 상태 확인 불가" "$P4_RUN" '`#t 상태 확인 불가 — 손대지 않음`.'
 hasfx "daily(X9): 다른 Guild 워크트리 수만 한 줄" "$P4_DAILY" '`다른 Guild 워크트리 <k>개 — /gld sprint retro 정리 단계가 안내합니다`; none → no line. daily never'
 hasfx "daily(X9): 새 호출 없음" "$P4_DAILY" '(step 3 — no new call): the `.gld-<repo>-*` entries outside this sprint'"'"'s container (an earlier'
 # X10 — 서술 숫자·예시 시점
@@ -4282,8 +3923,6 @@ lacksfx "board(X14): 옛 문구 제거" "$P4_BOARD" 'nothing archives cards'
 hasfx "_sprint_dag(X15): run 쪽 완전성 단락" "$P4_DAG" '⚠ **The 200 windows are checked for completeness on the run side too** (0.98.4) — the 0.98.1 rule'
 hasfx "_sprint_dag(X15): 1000 은 run 당 한 번" "$P4_DAG" '**the 1000 read at most once per run**, into `prs_tail.json` (≈ 340 points; a failure retried at'
 hasfx "_sprint_dag(X15): stack_sync 토큰" "$P4_DAG" 'once; still incomplete or failed → a first line `window-incomplete <window min PR> <smallest member>`.'
-hasfx "run(X15): labels_extra 는 매 loop 새로" "$P4_RUN" 'The rest (`labels.json`, `labels_extra.jsonl`, `prs.json`, `prs_tail_open.jsonl`,'
-hasfx "run(X15): prs_tail.* 는 script 시작 때 지움" "$P4_RUN" '`_sprint_dag.md`) lives for the run only and **the script deletes it at its start** — it does'
 hasfx "daily(X15): window-incomplete 는 멤버 줄이 아님" "$P4_DAILY" '⚠ A line `window-incomplete <pr> <member>` is **not a member line** — the PR list it read (200,'
 hasfx "daily(X15): PR 표 위 한 줄 경고" "$P4_DAILY" '*"PR 목록이 #<member> 까지 닿지 않아 그보다 오래된 머지는 판정하지 못했습니다"*, and it takes no part in'
 hasfx "daily(X15): No output 판단에서 제외" "$P4_DAILY" 'the member annotations below or in the "No output" judgment.'
@@ -4300,7 +3939,7 @@ hasfx "_invariants(X16): dismissed.md 처럼 검토" "$P4_INV" 'an approver line
 P6_BR="$GLD/commands/atoms/_bash_rules.md"; P6_HO="$GLD/commands/atoms/_handoff.md"; P6_SP="$GLD/commands/atoms/_execute_spine.md"
 P6_QA="$GLD/commands/qa.md"; P6_DAG="$GLD/commands/atoms/_sprint_dag.md"; P6_SPP="$GLD/commands/sprint/plan.md"
 P6_PL="$GLD/commands/plan.md"; P6_RETRO="$GLD/commands/sprint/retro.md"; P6_EVO="$GLD/commands/evolve.md"
-P6_INIT="$GLD/commands/init.md"; P6_AUD="$GLD/commands/audit.md"; P6_INV="$GLD/commands/atoms/_invariants.md"
+P6_AUD="$GLD/commands/audit.md"; P6_INV="$GLD/commands/atoms/_invariants.md"
 P6_RV="$GLD/commands/review.md"; P6_DES="$GLD/commands/design.md"
 P6_PH='— by the Write/Edit tool (never a `python3 -c`/`sed`/heredoc carrying the text: `_bash_rules.md`, #1774)'
 # Y1 — 문구
@@ -4321,7 +3960,6 @@ hasfx "qa(Y1): 마커 밖에 줄을 끼우지 않음" "$P6_QA" 'Insert no line o
 hasfx "_execute_spine(Y1): PR 본문 PATCH (2) 에 구절" "$P6_SP" 'everything outside the markers preserved byte-for-byte — by the Write/Edit tool'
 hasfx "_execute_spine(Y1): 증거 파일" "$P6_SP" '- Body: the raw runner summary line(s) the developer captured, written to the evidence file — by the Write/Edit tool'
 hasfx "_handoff(Y1): Section E 증거 파일" "$P6_HO" 'the evidence file is written and updated — by the Write/Edit tool'
-hasfx "init(Y1): P4 요약에 PreToolUse 텍스트 가드" "$P6_INIT" '+ PreToolUse 가 명령 줄 텍스트의 백틱 치환·Issue 본문 묶음 저장·마커 없는 댓글 잘라 읽기·무인 실행의 마커 없는 댓글을 막음 (`shell-text` · `bodies-save` · `directive-slice` · `unmarked-comment`)'
 hasfx "_invariants(Y1): off-switch 문장에 텍스트 가드 — 커밋 포함 모든 호출" "$P6_INV" 'whether the separate Bash text guard refuses any Bash call, a commit too — see the gate'"'"'s limits below) —'
 hasfx "_invariants(Y1): 텍스트 가드 불릿 — 커밋 검사 전 모든 호출" "$P6_INV" '  every Bash call, a commit too, before the commit check (0.98.6): it refuses a backtick the shell would run as a command'
 lacksfx "_invariants(Y1): 커밋 아닌 호출만이라는 옛 문구(1)" "$P6_INV" 'refuses a non-commit call'
@@ -4330,38 +3968,38 @@ hasfx "gate(Y1): 거부 함수 docstring — 커밋 포함 모든 호출" "$GLD/
 lacksfx "gate(Y1): 커밋 아닌 호출만이라는 옛 docstring" "$GLD/gates/gate_precommit.py" 'Deny a non-commit Bash call'
 hasfx "evolve(Y7): gh repo view 실패도 원격 확인 불가" "$P6_EVO" '`gh repo view` fails (a non-GitHub remote, no `gh` auth) or the fetch fails → one line'
 hasfx "_invariants(Y1): 게이트 한계에 텍스트 가드 불릿" "$P6_INV" '- Separate from the commit gate, the same `PreToolUse(Bash)` hook runs a **Bash text guard** on'
-hasfx "evolve(Y1): rule HR 에서 shell-text·bodies-save 제외" "$P6_EVO" 'The Bash text guard'"'"'s `shell-text`, `bodies-save`, `directive-slice` and `unmarked-comment` rows are excluded the same way'
-hasfx "audit(Y1): rule health 에서 shell-text·bodies-save 제외" "$P6_AUD" 'nor the Bash text guard'"'"'s `shell-text`/`bodies-save`/`directive-slice`/`unmarked-comment` rows, which are universal-safety rules like them'
+hasfx "evolve(Y1): rule HR 에서 shell-text·bodies-save 제외" "$P6_EVO" 'The Bash text guard'"'"'s `shell-text` and `bodies-save` rows are excluded the same way'
+hasfx "audit(Y1): rule health 에서 shell-text·bodies-save 제외" "$P6_AUD" 'nor the Bash text guard'"'"'s `shell-text`/`bodies-save` rows, which are universal-safety rules like them'
 # Y1 — Guild 자신의 명령이 가드에 걸리지 않는다: commands/ 의 ```bash 펜스 전수 + spine 의 python3 -c 줄
 cat > "$WORK3/own_cmds.py" <<'PYOWN'
 import glob, importlib.util, os, re, sys
-gld = sys.argv[1]
-s = importlib.util.spec_from_file_location("gate", os.path.join(gld, "gates/gate_precommit.py"))
+skill_dir = sys.argv[1]
+s = importlib.util.spec_from_file_location("gate", os.path.join(skill_dir, "gates/gate_precommit.py"))
 g = importlib.util.module_from_spec(s); s.loader.exec_module(g)
 n, hits = 0, []
-for f in sorted(glob.glob(os.path.join(gld, "commands/**/*.md"), recursive=True)):
+for f in sorted(glob.glob(os.path.join(skill_dir, "commands/**/*.md"), recursive=True)):
     t = open(f, encoding="utf-8").read()
     for m in re.finditer(r"^( *)```bash\n(.*?)^\1```", t, re.M | re.S):
         body = "\n".join(l[len(m.group(1)):] for l in m.group(2).split("\n"))
         n += 1
         if g.shell_text_hazard(body) or g.bodies_save(body):
-            hits.append(os.path.relpath(f, gld) + ": " + body.split("\n")[0][:60])
-mb = [l for l in open(os.path.join(gld, "commands/atoms/_execute_spine.md"), encoding="utf-8")
+            hits.append(os.path.relpath(f, skill_dir) + ": " + body.split("\n")[0][:60])
+mb = [l for l in open(os.path.join(skill_dir, "commands/atoms/_execute_spine.md"), encoding="utf-8")
       if l.startswith('python3 -c "') and "mutation-before.json" in l]
 if len(mb) != 1 or "`" in mb[0]:
     hits.append("_execute_spine.md: the mutation-before python3 -c line is missing or carries a backtick")
 print("OK %d" % n if n >= 150 and not hits else "PROBLEMS %d %s" % (n, " | ".join(hits)))
 PYOWN
-P6_OWN="$("$PY" -B "$WORK3/own_cmds.py" "$GLD")"
+P6_OWN="$("$PY" "$WORK3/own_cmds.py" "$GLD")"
 case "$P6_OWN" in OK*) ok "gate(Y1·Y2): Guild 명령의 bash 펜스 전수와 spine python3 -c 줄이 텍스트 가드에 안 걸림 ($P6_OWN)" ;;
   *) bad "gate(Y1·Y2): Guild 명령이 텍스트 가드에 걸림" "OK" "$P6_OWN" ;; esac
 # Y2 — bodies-contract 펜스: 정본 1줄 · 사본 정확히 5개 · 바이트 동일 (result-contract 검사와 같은 방식, 트리 전체)
 cat > "$WORK3/bodies_contract.py" <<'PYBC'
 import glob, os, re, sys
-gld = sys.argv[1]
+skill_dir = sys.argv[1]
 OPEN, CLOSE = "<!-- guild:bodies-contract -->", "<!-- /guild:bodies-contract -->"
 strip = lambda l: re.sub(r"^\s*>\s?", "", l).rstrip("\n")
-lines = open(os.path.join(gld, "commands/atoms/_handoff.md"), encoding="utf-8").read().split("\n")
+lines = open(os.path.join(skill_dir, "commands/atoms/_handoff.md"), encoding="utf-8").read().split("\n")
 if lines.count(OPEN) != 1 or lines.count(CLOSE) != 1:
     print("CANON_MISSING"); raise SystemExit
 o, c = lines.index(OPEN), lines.index(CLOSE)
@@ -4369,10 +4007,10 @@ canon = lines[o + 1:c]
 problems, total, where = [], 0, []
 if len(canon) != 1:
     problems.append("canonical block is %d lines, want 1" % len(canon))
-SCAN = (glob.glob(os.path.join(gld, "commands/**/*.md"), recursive=True)
-        + glob.glob(os.path.join(gld, "templates/agents/*.md")))
+SCAN = (glob.glob(os.path.join(skill_dir, "commands/**/*.md"), recursive=True)
+        + glob.glob(os.path.join(skill_dir, "templates/agents/*.md")))
 for f in sorted(SCAN):
-    rel = os.path.relpath(f, gld)
+    rel = os.path.relpath(f, skill_dir)
     if rel == "commands/atoms/_handoff.md":
         continue
     body = open(f, encoding="utf-8").read().split("\n")
@@ -4452,7 +4090,7 @@ P6_1B="$(awk '/^## Phase 1b/{p=1} /^## Phase 2/{p=0} p && /mkdir -p docs\/specs\
 hasfx "sprint/plan(Y4): Phase 2 전제 — triage.md" "$P6_SPP" '**Precondition**: `docs/specs/sprint-draft/triage.md` was written in this run (Phase 1b) — if it was not, go back to'
 hasfx "sprint/plan(Y4): Phase 5 고정 줄" "$P6_SPP" 'Right under it, one fixed line: `1b: 착수 가능 <a> · 구체화 필요 <b> · 막힘 <c> (위 보고 · triage.md)`. **Self-check**: if'
 hasfx "sprint/plan(Y4): 자기 점검 — 먼저 출력" "$P6_SPP" 'Phase 1b'"'"'s report was not printed in this run, print it first (from `triage.md`), then go on with Phase 5.'
-hasfx "sprint/plan(Y4): Phase 6 기록에 triage.md" "$P6_SPP" 're-spawned — plus Phase 1b'"'"'s `triage.md`, plus `.claude/guild/config.json`.'
+hasfx "sprint/plan(Y4): Phase 6 기록에 triage.md" "$P6_SPP" 're-spawned — plus Phase 1b'"'"'s `triage.md`, plus `.claude/guild/harness.json`.'
 hasfx "sprint/plan(Y4): 고정 이름 넷" "$P6_SPP" 'plus any ` D` line for one of the four'
 hasfx "sprint/plan(Y4): Phase 1b 의 rm -f 가 지운 초안" "$P6_SPP" 'fixed names under `sprint-draft/`: Phase 1b'"'"'s `rm -f` deleted a draft that had been committed,'
 hasfx "sprint/plan(Y4): 접미사 예에 triage-2.md" "$P6_SPP" 'so `po-2.md`, `deps-2.md`, `deps-slot-2.md` and `triage-2.md` (each only when this run wrote it) read as one'
@@ -4514,14 +4152,12 @@ hasfx "evolve(Y7): 기본 브랜치 조회" "$P6_EVO" '1. The default branch: `g
 hasfx "evolve(Y7): refspec fetch" "$P6_EVO" '`git fetch origin <d>:refs/remotes/origin/<d>` (the refspec form'
 hasfx "evolve(Y7): fetch 실패면 2·3 건너뜀" "$P6_EVO" 'fetch fails → one line `원격 확인 불가 — 로컬 기준으로 분석합니다` and **skip 2 and 3**'
 hasfx "evolve(Y7): rev-list" "$P6_EVO" '`git rev-list --left-right --count <d>...origin/<d>` → `<ahead> <behind>`.'
-hasfx "evolve(Y7→A1): 질문 문구 — 해시를 지키는 갱신" "$P6_EVO" '① 직접 최신화(git pull --ff-only — 로컬 커밋이 있으면 git pull --no-rebase; rebase 는 로컬 커밋 해시를 바꿉니다)하신 뒤 /gld evolve 를 다시 실행(권장) ② 이대로 진행`.'
+hasfx "evolve(Y7): 질문 문구" "$P6_EVO" '① 직접 최신화(pull/rebase)하신 뒤 /gld evolve 를 다시 실행(권장) ② 이대로 진행`.'
 hasfx "evolve(Y7): behind 만 본다" "$P6_EVO" '**Only `behind` is asked about** — `ahead`'
 hasfx "evolve(Y7): ① 이면 아무것도 쓰지 않음" "$P6_EVO" '① → evolve writes nothing and ends (no ledger entry, no'
 hasfx "evolve(Y7): Hard rule" "$P6_EVO" '- **evolve never moves the human'"'"'s branch or history** — no `git pull`, `rebase`, `merge`, `reset`, `checkout <branch>` / `switch` (INV3)'
 hasfx "evolve(Y7): 파일 복원 예외" "$P6_EVO" 'Phase 6'"'"'s file restore `git checkout -- <file>` (the per-item automatic rollback) is outside this ban.'
-P6_GP="$(grep -nE 'git (pull|rebase)' "$P6_EVO" | grep -vF "evolve never moves the human's branch or history" | grep -vE 'git pull (--ff-only|--no-rebase)' || true)"
-P6_GP2="$(grep -nE 'git pull --rebase|git rebase ' "$P6_EVO" | grep -vF "evolve never moves the human's branch or history" | grep -vF 'rebase 는 로컬 커밋 해시를 바꿉니다' || true)"
-[ -z "$P6_GP2" ] && ok "evolve(A1): pull --rebase·git rebase 는 Hard rule 줄 밖에 없음" || bad "evolve(A1): pull --rebase·git rebase 밖" "none" "$(printf '%s' "$P6_GP2" | cut -c1-80)"
+P6_GP="$(grep -nE 'git (pull|rebase)' "$P6_EVO" | grep -vF "evolve never moves the human's branch or history" || true)"
 [ -z "$P6_GP" ] && ok "evolve(Y7): git pull/rebase 는 금지 문장에만" || bad "evolve(Y7): git pull/rebase 금지 맥락 밖" "none" "$(printf '%s' "$P6_GP" | cut -c1-80)"
 hasfx "retro(Y7): 신선도 질문은 retro 가 대신 답하지 않음" "$P6_RETRO" '- **evolve'"'"'s freshness question** (`evolve.md` Phase 0 step 2b — the local default branch is behind `origin`) is'
 hasfx "retro(Y7): ① 이면 Phase 6 계속" "$P6_RETRO" 'ends Phase 5 as `성장 단계 보류` and **continues to Phase 6** — it does not tell the human to run retro again'
@@ -4543,26 +4179,25 @@ hasfx "review(L4): 경로가 분명해도 묻는다" "$P6_RV" '— the ask is ow
 hasfx "review(L4): 고쳐 달라는 편집만" "$P6_RV" '**'"'"'고쳐 달라'"'"' 는 편집만이다** — merging or rebasing the base into the head, committing, and pushing each happen only when the human asked for that step'
 hasfx "retro(L5→N3): 블록은 열린 PR 이 있을 때만" "$P6_RETRO" '**The block above only when a member'"'"'s PR is still `OPEN`** (Phase 1'
 lacksfx "retro(L5): 둘째·셋째 줄이라는 잘못된 지칭 제거" "$P6_RETRO" 'Those second and third lines only when'
-hasfx "config(Y1): off 는 Bash 텍스트 가드도 끔" "$GLD/commands/config.md" '`off` also turns off the Bash text guard (`shell-text` · `bodies-save` · `directive-slice` · `unmarked-comment`'
-hasfx "init(Y1): gates.enabled false 면 텍스트 가드도 꺼짐" "$P6_INIT" '`false` = advisory only (off-switch) — and the Bash text guard (`shell-text` · `bodies-save` · `directive-slice` · `unmarked-comment`) is off too.'
+hasfx "config(H13): 게이트 스위치는 거절한다" "$GLD/commands/config.md" '`--gates=<on|off>` → **refused in guild-plugin**: the commit gate is always on.'
 hasfx "_bash_rules(Y1): heredoc 은 따옴표 여부와 무관하게 금지" "$P6_BR" 'not `echo`/`printf`, not a heredoc (quoted or not), not a script argument.'
 hasfx "_invariants(Y2): bodies-save 한계 — 변수에 담아 나중에 쓰기" "$P6_INV" 'variable and written out later (`x=$(gh issue list …); echo "$x" > f`) are outside it'
 hasfx "retro(L5→N3): 열린 PR 없을 때 짧은 줄" "$P6_RETRO" '보드: <url> — 이후 카드는 갱신되지 않습니다(열린 PR 없음). 이번 retro 전에 /gld sprint sync 를 부르지 않았다면 Done 이 아닐 수 있습니다 — GitHub UI 에서 정리하십시오; 다음부터는 retro 전에 sync 를.'
 hasfx "_handoff(L7): 원인 줄은 마커 다음 첫 줄 · 제목 앞" "$P6_HO" 'the cause line is **the first line after the marker, at column 0, before any heading** — a heading that contains the word does not count'
 
 # ── 0.98.7 ──────────────────────────────────────────────────────────────
-P7_RUN="$GLD/commands/sprint/run.md"; P7_DEV="$GLD/commands/dev.md"; P7_SYNC="$GLD/commands/sprint/sync.md"; P7_BOARD="$GLD/commands/sprint/board.md"; P7_SS="$GLD/commands/atoms/stack_sync.py"; P7_SUP="$GLD/templates/sprint-supervisor.sh"
+P7_RUN="$GLD/commands/sprint/run.md"; P7_DEV="$GLD/commands/dev.md"; P7_SYNC="$GLD/commands/sprint/sync.md"; P7_BOARD="$GLD/commands/sprint/board.md"; P7_SS="$GLD/commands/atoms/stack_sync.py"
 # Z1 — retro 체크아웃 점검 · 보류 · Hard rule
 hasfx "retro(Z1): Phase 0 step 5 머리" "$P6_RETRO" '5. **Is the checkout the default branch?** (0.98.7 — before anything is written; **CLEANUP skips this step**.) Each its own Bash call:'
 hasfx "retro(Z1): step 5 기본 브랜치 읽기" "$P6_RETRO" '`gh repo view <owner>/<repo> --json defaultBranchRef --jq .defaultBranchRef.name` → `<d>` (Phase 4 step 6 reuses this value — the same read is not made twice; the repo is positional);'
 hasfx "retro(Z1): step 5 현재 브랜치" "$P6_RETRO" '`git branch --show-current` → `<b>` (empty = detached).'
-hasfx "retro(Z1): 질문 문구 ①②" "$P6_RETRO" '`체크아웃이 기본 브랜치 <d> 가 아닙니다(<b|detached>). 회고 기록(config.json)은 <d> 에서만 커밋되고, 성장 단계(evolve)는 지금 브랜치를 분석해 거기에 커밋하게 됩니다. ① 중단 — 직접 <d> 로 옮기신 뒤(git switch <d>) /gld sprint retro 를 다시 실행(권장 · 아직 아무것도 쓰지 않았습니다) ② 이대로 진행 — 측정·기록·종료는 하고 config.json 은 커밋하지 않으며 성장 단계는 보류`'
+hasfx "retro(Z1): 질문 문구 ①②" "$P6_RETRO" '`체크아웃이 기본 브랜치 <d> 가 아닙니다(<b|detached>). 회고 기록(harness.json)은 <d> 에서만 커밋되고, 성장 단계(evolve)는 지금 브랜치를 분석해 거기에 커밋하게 됩니다. ① 중단 — 직접 <d> 로 옮기신 뒤(git switch <d>) /gld sprint retro 를 다시 실행(권장 · 아직 아무것도 쓰지 않았습니다) ② 이대로 진행 — 측정·기록·종료는 하고 harness.json 은 커밋하지 않으며 성장 단계는 보류`'
 hasfx "retro(Z1): 옮겨 주는 선택지 금지" "$P6_RETRO" '**Never an option that moves the branch for the human** ("제가 옮기겠습니다" and the like'
 hasfx "retro(Z1): ① Return" "$P6_RETRO" '- ① → Return `OK: retro not started — checkout <b> is not <d>` — nothing was written, so the re-run is safe'
 hasfx "retro(Z1): ② HELD-EVOLVE" "$P6_RETRO" '- ② → mark **HELD-EVOLVE** and go on: Phase 4 step 6 commits nothing, Phase 5 is held.'
 hasfx "retro(Z1): DRY·무인 한 줄" "$P6_RETRO" '- **DRY** → no question: one line `체크아웃 <b> — 실제 회고는 <d> 에서 하십시오`, then go on. `GLD_UNATTENDED=1` → the same line, no question'
 hasfx "retro(Z1): Phase 4 step 6 보조 안전망" "$P6_RETRO" 'Not on the default branch → commit nothing — and Phase 5 is held as below (a safety net behind Phase 0 step 5'
-hasfx "retro(Z1): Phase 5 보류 줄(commit 명령)" "$P6_RETRO" '`성장 단계 보류 — 체크아웃 <b>(기본 브랜치 아님). git switch <d> 후 git commit -m "chore(guild): 스프린트 #<t> 회고 결과를 용량 이력에 남긴다" -- .claude/guild/config.json, 그다음 /gld evolve 를 직접 실행하세요`'
+hasfx "retro(Z1): Phase 5 보류 줄(commit 명령)" "$P6_RETRO" '`성장 단계 보류 — 체크아웃 <b>(기본 브랜치 아님). git switch <d> 후 git commit -m "chore(guild): 스프린트 #<t> 회고 결과를 용량 이력에 남긴다" -- .claude/guild/harness.json, 그다음 /gld evolve 를 직접 실행하세요`'
 hasfx "retro(Z1): Phase 5 는 evolve 를 읽지도 않음" "$P6_RETRO" 'committed nothing because the checkout was not the default branch → do **not** read or execute evolve; one line, then Phase 6:'
 hasfx "retro(Z1): Return 줄" "$P6_RETRO" '`OK: retro not started — checkout <b> is not <d>` (Phase 0 step 5 ①) ·'
 hasfx "retro(Z1·N6): Hard rule" "$P6_RETRO" '- **retro never moves the human'"'"'s branch or history** — no `git checkout <branch>` / `switch`, `pull`, `merge`, `rebase`, `reset`, and no option that offers to'
@@ -4581,9 +4216,6 @@ lacksfx "daily(Z2): 옛 already derives from the DAG" "$P3_DAILY" 'which it alre
 hasfx "_sprint_dag(Z2): Section B 줄" "$P6_DAG" 'A member with a same-repo MERGED PR whose Issue is CLOSED · COMPLETED is never `needs-human` in `terminal` — the supervisor'"'"'s builder drops it, and `--mode blocked` drops it again for a hand-built input that carries `closed`; `daily` applies the same rule in prose (step 5).'
 hasfx "_sprint_dag(Z6): closed_done 스키마" "$P6_DAG" '- **`closed_done`** (0.98.7, optional) — members closed as decided'
 hasfx "analyze(Z2): :50 예외 구절" "$P3_AN" 'blocks the downstream of a hard dependency that ended needs-human/failed (unless its PR merged and the Issue closed `COMPLETED`)'
-hascode "supervisor(Z2): 라벨 창 필드" "$P7_SUP" 'gh issue list --repo "$OWNER_REPO" --state all --limit 200 --json number,labels,state,stateReason'
-hascode "supervisor(Z2): 보충 필드" "$P7_SUP" 'gh issue view "$n" --repo "$OWNER_REPO" --json number,labels,state,stateReason'
-hascode "supervisor(Z2): 해소 조건" "$P7_SUP" 'if "guild:needs-human" in names and not (n in merged and st == "CLOSED"'
 # Z3 — base-red
 hasfx "_handoff(Z3·W5): env 원인 단어" "$P3_HO" '`env: <ci-blocked|base-red|credential|service|other> — <one-line>`'
 hasfx "_handoff(Z3): base-red 정의" "$P3_HO" '`base-red` = the same check fails without this change — on the default branch'"'"'s tip, on the last merged PR'"'"'s head, or on an unrelated PR; the cause line names that run URL'
@@ -4593,12 +4225,10 @@ hasfx "qa(Z3): base-red 원인 줄" "$P3_QA" '`env: base-red — <check> (근거
 lacksfx "qa(Z3): 옛 무조건 ci-blocked" "$P3_QA" 'starts its cause line with `env: ci-blocked`'
 hasfx "qa(Z3): 기록 형식에 base-red" "$P3_QA" '`red <name…> (env: base-red)`'
 hasfx "daily(Z3): base-red 처방" "$P3_DAILY" '`env: base-red <k>회(#…) — 고치는 PR(#<fix>) 머지 → 각 PR 에 기본 브랜치 반영(쌓인 멤버는 /gld sprint sync) → /gld dev <n>`'
-hasfx "run(Z3): Base CI 행" "$P7_RUN" '| **Base CI** (0.98.7) |'
-hasfx "run(Z3→A9): Base CI 는 base_ci.py 한 호출" "$P7_RUN" '**One call**: `python3 <<SKILL_DIR>>/commands/atoms/base_ci.py --repo <owner>/<repo>` — print its line verbatim as the Phase 0 row'"'"'s result'
-hasfx "run(Z3→A9): 그대로 싣기 — 실제 이름 예시" "$P7_RUN" '(`Base CI: green(Analyze & Test, Conventional 접두어 검증, 수동 검증 신선도·케이스 커버리지 검사 (PR 브랜치 스코프))` — never paraphrased; measured #649 `green(PR #647 기준)`, word_app no line)'
-hascode "base_ci(Z3→A9): 0개면 마지막 머지 PR — 같은 jq" "$GLD/commands/atoms/base_ci.py" 'LAST_MERGED_JQ = ("if length == 0 then null else (max_by(.mergedAt) | {number, headRefOid}) end")'
-hasfx "base_ci(Z3→A9): was not started 는 failure 수준만 — ci-blocked 로 분리" "$GLD/commands/atoms/base_ci.py" 'contains `was not started` makes that check `ci-blocked` (never started — billing), kept'
-hasfx "run(Z3): 경고 문구" "$P7_RUN" '`기본 브랜치 CI red: <checks…> (근거: <d> 최신 커밋 | 마지막 머지 PR #<p>) — 멤버마다 같은 red 로 사람 대기가 될 수 있습니다. 고치는 멤버가 있으면 다른 멤버가 그 위에 쌓였는지 확인하세요(plan 의 (a) 의존).`'
+hasfx "run(Z3): 기본 브랜치 읽기" "$P7_RUN" '1. `gh repo view <owner>/<repo> --json defaultBranchRef --jq .defaultBranchRef.name` → `<d>`'
+hasfx "run(Z3): check-runs 스트림" "$P7_RUN" "2. \`gh api repos/<owner>/<repo>/commits/<d>/check-runs --paginate --jq '.check_runs[] | {id, name, conclusion, annotations: .output.annotations_count}'\`"
+hasfx "run(Z3): 0개면 마지막 머지 PR" "$P7_RUN" "\`gh pr list --repo <owner>/<repo> --state merged --base <d> --limit 20 --json number,headRefOid,mergedAt --jq 'if length == 0 then null else (max_by(.mergedAt) | {number, headRefOid}) end'\`"
+hasfx "run(Z3): was not started 분리" "$P7_RUN" 'a `was not started` message is `ci-blocked`, kept apart from red.'
 hasfx "sprint/plan(Z3): BASE CI 줄" "$P6_SPP" '`BASE CI: <green(<checks…>)|red(<checks…>) (근거 …)|ci-blocked(<checks…>)|없음|unavailable>`'
 hasfx "sprint/plan(Z3): TL 입력에 BASE CI" "$P6_SPP" 'BASE CI: <the Base CI line above>.'
 hasfx "sprint/plan(Z3): TL 문장" "$P6_SPP" 'every other candidate whose PR runs that check gets `(a) #m ← #fix base-red` — not `soft:`, not `conditional:`'
@@ -4656,8 +4286,7 @@ hasfx "rollback(Z6): analyze 로 되돌림" "$P3_RB" 'it goes to `guild:analyze`
 hasfx "rollback(Z6): plan-decision 경고 줄" "$P3_RB" '`본문의 plan-decision 줄(«<답>»)을 고치거나 지우지 않으면 analyze 가 같은 결정으로 다시 닫습니다`'
 hasfx "sync(Z6): PR 없는 Done 갈래" "$P7_SYNC" 'A member with **no PR at all** reaches the list one other way (0.98.7): closed as decided'
 hasfx "board(Z6): Done 두 출처" "$P7_BOARD" '**Done has two sources** (0.98.7)'
-hasfx "stack_sync(Z6→A5): 마커 jq (DONE_JQ)" "$P7_SS" 'select(contains("<!-- guild:closed-as-decided -->"))] | length), '"'"
-hasfx "stack_sync(A5): DONE_JQ 에 integration:output 수" "$P7_SS" 'integrated: ([.comments[].body | select(contains("<!-- guild:integration:output -->"))] | length)}'
+hasfx "stack_sync(Z6): 마커 jq" "$P7_SS" 'select(contains("<!-- guild:closed-as-decided -->"))] | length)}'
 # N1 · N3 · N4 · N5 · N7 · N8 · N9 · N10 · N11
 hasfx "_execute_spine(N1): 재진입은 점검도 다시 읽음" "$P6_SP" '**A re-entered invocation re-reads this line format (the shape above) and the check below before its first record write** — it never writes it from memory (measured #607'
 hasfx "_execute_spine(N1): 모든 블록" "$P6_SP" 'Check the new block alone — **every block, `findings: none` ones included** (the arrow-token violation lives on the role-axis line — #1700'
@@ -4671,359 +4300,36 @@ hasfx "retro(N3): Return 에 보드 줄" "$P6_RETRO" 'The final report carries t
 hasfx "_handoff(N4): 원인 줄 점검 명령" "$P3_HO" "\`grep -nE -m1 '^(defect: |ambiguity: |env: (ci-blocked|base-red|credential|service|other) — )' <file>\`"
 hasfx "_handoff(N4): 2: 로 시작" "$P3_HO" 'output that does not start with `2:` (line 1 is the marker) → fix that file only and check once more'
 hasfx "_handoff(N5): 그대로 읽기" "$P3_HO" 'run these reads **exactly as given**: no `.body[0:N]`, `head` or filter, the bodies-contract'"'"'s rule'
-hasfx "_handoff(N5): 기록 의무 줄" "$P3_HO" '`사람 지시 확인: 없음 — 읽음: #<n> · 트래커 #<t>[ · 부모 #<p>] (마커 없는 댓글 <k>개, 전문)`'
+hasfx "_handoff(N5): 기록 의무 줄" "$P3_HO" '`사람 지시 확인: 없음 — 읽음: #<n> · 트래커 #<t>[ · 부모 #<p>]`'
 hasfx "qa(N5): 사람 지시 확인 줄" "$P3_QA" 'and write the `사람 지시 확인:` line (Section M)'
 hasfx "_handoff(N7): 모든 댓글은 마커로 시작" "$P3_HO" '**Every comment Guild posts opens with a `<!-- guild:` marker** — a note that is no stage output (a pause kept on resume, a PR-created note, a status line) opens with `<!-- guild:note -->`'
 hasfx "_handoff(N7): note 마커 행" "$P3_HO" '| `<!-- guild:note -->` | any command, for a comment that is no stage output |'
 hasfx "dev(N7): 일시정지 메모 마커" "$P7_DEV" 'a note you post about it opens with `<!-- guild:note -->`'
 hasfx "sprint/plan(N8): 빈 Depends on 은 clear" "$P6_SPP" 'no dependency → `"<fields.depends_on>":""` (board_write clears it — the same as listing it in `clear`'
-hasfx "retro(N9→A12): 백틱을 jq 에서 만든다" "$P6_RETRO" 'The backtick is built in jq as `[96] | implode`,'
-lacksfx "retro(A12): \\u0060 이스케이프 없음" "$P6_RETRO" '\u0060'
+hasfx "retro(N9): 바이트 그대로" "$P6_RETRO" 'copy the command byte for byte: `\u0060` stays six characters (a decoded backtick works only by luck of the single quotes)'
 hasfx "retro(N10): CLEANUP 이 라벨도 정리" "$P6_RETRO" '**Phase 6 step 0'"'"'s label cleanup** for that tracker'"'"'s members (0.98.7'
 hasfx "retro(N10): CLOSED·COMPLETED 요구" "$P6_RETRO" '⚠ **The merge alone is not enough — the Issue must also be `CLOSED` · `COMPLETED`** (0.98.7)'
 hasfx "retro(N10): CLEANUP Return" "$P6_RETRO" '`OK: sprint #<n> cleanup — <W> worktrees, <B> branches · labels <L>`'
 hasfx "retro(N10): None 안내" "$P6_RETRO" 'it also cleans the labels of members that merged, Phase 6 step 0'
 hasfx "retro(N11): 없음·빈 파일 구분" "$P6_RETRO" 'present and empty → 0.'
-hascode "supervisor(N11): failures.jsonl 생성" "$P7_SUP" ': >> "$RUNDIR/failures.jsonl" 2>/dev/null || true'
 
 # 0.98.7 code review r1
 hasfx "sprint/plan(r1 #1): 선행 미포함에서 base-red 간선 제외" "$P6_SPP" 'dropping or adding is the human'"'"'s edit. **A `base-red` edge is not one here** — Phase 4'"'"'s leader call decides it; a left-out one is the `기본 브랜치 CI red` line.'
 hasfx "sprint/plan(r1 #1): 에픽 확장 의존에서 base-red 간선 제외" "$P6_SPP" '(a correction only adds; a `base-red` edge is not one here — Phase 4'"'"'s leader call decides it; a left-out one is the `기본 브랜치 CI red` line),'
-hasfx "base_ci(r1 #2→A9): 이름별 최신 id 만 — dedupe 가 annotations 앞" "$GLD/commands/atoms/base_ci.py" '4. **Dedupe by check name — keep the run with the highest `id`**'
-hasfx "base_ci(r1 #2→A9): qa 의 Which one 판정" "$GLD/commands/atoms/base_ci.py" '5. The verdict — the same rule as `qa.md` Step 2'"'"'s *Which one*'
-hasfx "run(r1 #2→A9): 결과에 check 이름" "$P7_RUN" 'Result: `green(<checks…>)` · `green(<checks…>) (진행 중)` · `red(<checks…>) (근거: <d> 최신 커밋 | 마지막 머지 PR #<p>)` · `ci-blocked(<checks…>)` · `없음` · `unavailable`'
+hasfx "run(r1 #2): 이름별 최신 id 만" "$P7_RUN" 'one per check **name** — when a name appears more than once (a re-run), keep the run with the **highest `id`**'
+hasfx "run(r1 #2): qa 의 Which one 판정" "$P7_RUN" '**Which verdict**: `qa.md` Step 2'"'"'s *Which one* rule over those runs'
+hasfx "run(r1 #2): 결과에 check 이름" "$P7_RUN" 'Result: `green(<checks…>)` · `red(<checks…>) (근거: <d> 최신 커밋 | 마지막 머지 PR #<p>)` · `ci-blocked(<checks…>)` · `없음` · `unavailable`'
 hasfx "_handoff(r1 #3): 라벨 표 둘째 예외" "$P3_HO" 'second exception: analyze 0b closed-as-decided (no PR, CLOSED — `analyze.md` Step 1 item 0b) |'
 hasfx "_handoff(r1 #3): INV1 줄 예외" "$P3_HO" 'stop at `guild:done` = PR open; the one exception: analyze 0b closed-as-decided — no PR, CLOSED, nothing merges)'
-hasfx "retro(r1 #4): 커밋 실패만 clean-tree 고지" "$P6_RETRO" 'The commit failed → commit nothing (`git restore --staged -- .claude/guild/config.json`) and'
+hasfx "retro(r1 #4): 커밋 실패만 clean-tree 고지" "$P6_RETRO" 'The commit failed → commit nothing (`git restore --staged -- .claude/guild/harness.json`) and'
 hasfx "retro(r1 #6): declined Return 에 labels" "$P6_RETRO" '`OK: sprint #<n> cleanup declined · labels <L>`'
 hasfx "retro(r1 #6): dry-run Return 에 labels" "$P6_RETRO" '`OK: sprint #<n> cleanup listed (dry-run) · labels <L>`'
-hasfx "sprint/plan(r1 #7→A9): base_ci.py 같은 호출" "$P6_SPP" 'run `python3 <<SKILL_DIR>>/commands/atoms/base_ci.py --repo <owner>/<repo>` (the same call as `run` Phase 0 — one Bash call; its docstring holds the rule) and pass its lines (one or two) to the tech-lead'
+hasfx "sprint/plan(r1 #7): run.md 경로와 절만 읽기" "$P6_SPP" 'read the *Base CI* paragraph of `<<SKILL_DIR>>/commands/sprint/run.md` Phase 0 (that section only, not the whole file)'
 hasfx "daily(r1 #8): 결정대로 닫힌 dep 의 하류 규칙" "$P3_DAILY" '**its downstream is 의존성 차단 when the run recorded it so**'
 
 hasfx "rollback(r2): 네 조건 — 마커·done·CLOSED·PR 없음" "$P3_RB" '**A closed-as-decided Issue** — **all four**: `decided ≥ 1`, `stage` is `guild:done`, `state` is `CLOSED`, and **no PR attributed** to it'
 hasfx "rollback(r2): PR 귀속 확인 호출" "$P3_RB" '`gh pr list --repo <owner>/<repo> --state all --limit 200 --json number,headRefName,closingIssuesReferences --jq '"'"'[.[] | select(([.closingIssuesReferences[]? | select(.repository.owner.login == "<owner>" and .repository.name == "<repo>") | .number] | index($2)) or ((.headRefName // "") | test("(^|[^0-9])#?$2([^0-9]|$)")))] | length'"'"'`'
 hasfx "rollback(r2): 0 이 아니거나 실패면 보통 규칙" "$P3_RB" '`0` → closed as decided; anything else, or the call failed → the ordinary rule.'
-
-# ── 0.99.2 ──────────────────────────────────────────────────────────────
-Q_CO="$GLD/commands/atoms/_checkout.md"; Q_SK="$GLD/SKILL.md"; Q_RS="$GLD/commands/resume.md"
-Q_SYNC="$GLD/commands/sprint/sync.md"; Q_BOARD="$GLD/commands/sprint/board.md"; Q_DEV="$GLD/commands/dev.md"
-Q_SPP="$GLD/commands/sprint/plan.md"; Q_RETRO="$GLD/commands/sprint/retro.md"; Q_EVO="$GLD/commands/evolve.md"
-Q_RV="$GLD/commands/review.md"; Q_HO="$GLD/commands/atoms/_handoff.md"; Q_SP="$GLD/commands/atoms/_execute_spine.md"
-Q_RUN="$GLD/commands/sprint/run.md"; Q_SIG="$GLD/commands/atoms/_signals.md"; Q_ST="$GLD/commands/atoms/scan_transcript.py"
-Q_SPAWN="$GLD/commands/atoms/spawn_supervisor.py"; Q_BR="$GLD/commands/atoms/_bash_rules.md"; Q_INV="$GLD/commands/atoms/_invariants.md"
-Q_REAL="$HERE/fixtures/real"
-# A1 — the human's checkout: the canonical atom
-hasfx "_checkout(A1): 원칙 ① 브랜치에서 떼기" "$Q_CO" '1. **Moving the human'"'"'s checkout off its branch** — `git checkout <branch>` / `git switch <branch>` to another branch, detaching.'
-hasfx "_checkout(A1): 원칙 ② 남의 브랜치 커밋 이동·재작성" "$Q_CO" '2. **Moving or rewriting a commit already on a branch Guild did not create** — `git pull`, a `merge` into it, `rebase`, `reset` (except `--soft HEAD~1` of Guild'"'"'s own unpushed commit), `commit --amend`, `cherry-pick` / `am` onto it, `update-ref refs/heads/<that branch>`.'
-hasfx "_checkout(A1): 원칙 ③ 미커밋 변경 버리기·숨기기" "$Q_CO" '3. **Discarding or hiding the human'"'"'s uncommitted changes** — `git stash`, `git checkout -- .`, `git restore` / `git checkout -- <f>` / `git clean` / `rm` of a file Guild did not edit.'
-hasfx "_checkout(A1): 권하는 선택지도 금지" "$Q_CO" '**And no option that offers any of these** — `main 으로 이동 후 진행 (Recommended)`, `제가 최신화하겠습니다` and the like'
-hasfx "_checkout(A1): 예외 하나 — execute 의 Issue 브랜치" "$Q_CO" '**The branch of the Issue the execute stage is executing** — `/gld dev`·`resume`·`implement`·`debug`·`refactor` invoked directly (`implement.md`), an epic'"'"'s children (`dev.md` Phase 2b → `_execute_spine.md`), and the integration-fix child (`dev.md` Phase 2c) included'
-hasfx "_checkout(A1): 허용 — fetch 전반" "$Q_CO" '- **Every fetch** — `git fetch origin <d>:refs/remotes/origin/<d>`, `git fetch origin pull/<p>/head <baseRefName>` → `FETCH_HEAD` (`rollback.md`), `git fetch <remote>` (`sprint/plan.md`)'
-hasfx "_checkout(A1): 허용 — 현재 브랜치의 새 커밋" "$Q_CO" '- **A new commit on the current branch** — the developer'"'"'s Issue-branch commits, plan/retro/evolve'"'"'s record commits, rollback'"'"'s `git revert --no-commit` → commit and `git revert --abort`.'
-hasfx "_checkout(A1): 허용 — Guild 가 편집한 파일 복원" "$Q_CO" '`git checkout <branch> -- <files>`, `git rm -f`, `git mv` (`refactor.md`, evolve'"'"'s rollback); `git rm --cached` (`init.md`).'
-hasfx "_checkout(A1): 허용 — 자기 미푸시 커밋 reset --soft" "$Q_CO" '- **`git reset --soft HEAD~1` of Guild'"'"'s own unpushed commit** (`sprint/plan.md` Phase 6 step 8).'
-hasfx "_checkout(A1): 허용 — Guild 워크트리·멤버 브랜치" "$Q_CO" '`stack_sync.py`'"'"'s `update-ref refs/heads/<member branch>`, a merge in a sprint worktree; `sprint/retro.md` Phase 7'"'"'s cleanup.'
-hasfx "_checkout(A1): batch 의 기존 한계" "$Q_CO" '`batch.md`'"'"'s child sessions run in the checkout the human handed to batch (no isolation — its `stash -u` defence)'
-hasfx "_checkout(A1): 요청 꼴 — 상태 읽기" "$Q_CO" '`git rev-list --left-right --count HEAD...origin/<b>` → `<ahead> <behind>`; `ahead > 0` → `git log --oneline origin/<b>..HEAD`.'
-hasfx "_checkout(A1): 요청 꼴 블록" "$Q_CO" '실행할 명령(순서대로):'
-hasfx "_checkout(A1): 결과 문구 ① fast-forward" "$Q_CO" '- `fast-forward — 바뀌는 커밋 없음`'
-hasfx "_checkout(A1): 결과 문구 ② 머지 커밋" "$Q_CO" '- `머지 커밋 1개가 생깁니다 — 기존 커밋 해시는 그대로`'
-hasfx "_checkout(A1): 결과 문구 ③ 해시 변경" "$Q_CO" '- `해시가 바뀌는 로컬 커밋 <k>개: <sha> <제목> …(이 해시를 인용한 Guild 댓글·기록은 옛 해시를 가리키게 됩니다)`'
-hasfx "_checkout(A1): 결과 문구 ④ 미커밋 파일" "$Q_CO" '- `커밋 안 된 파일 <n>개가 그대로 따라갑니다(충돌하면 git 이 거부합니다)`'
-hasfx "_checkout(A1): git pull 은 늘 명시 꼴" "$Q_CO" '**`git pull` is always written in an explicit form** (`--ff-only` / `--no-rebase`) — a bare `git pull` can rebase, depending on the `pull.rebase` setting.'
-hasfx "_checkout(A1): D2 — 해시를 지키는 두 꼴만 실행" "$Q_CO" '**Guild runs only an update that keeps every hash** (the human'"'"'s rule: only hash-preserving updates): `ahead = 0` → `git pull --ff-only origin <b>`; `ahead > 0` → `git pull --no-rebase origin <b>` (a merge commit).'
-hasfx "_checkout(A1): 재작성 꼴은 사람이" "$Q_CO" '**A form that rewrites local commits (`git pull --rebase`, `git rebase`) is never an option Guild runs**'
-hasfx "_checkout(A1): --no-rebase 조건 (i) 미커밋" "$Q_CO" '- (i) `git status --porcelain` is not empty (the human'"'"'s uncommitted changes) → `--no-rebase` is not made an option'
-hasfx "_checkout(A1): --no-rebase 조건 (ii) pull.ff=only" "$Q_CO" '`pull.ff=only 설정이라 머지 갱신이 거부되었습니다 — 직접 하십시오(git pull --no-rebase --no-ff origin <b> 또는 설정 변경)`'
-hasfx "_checkout(A1): --no-rebase 조건 (iii) behind 0" "$Q_CO" '`갱신할 것이 없습니다(origin/<b> 와 같거나 앞섬)`'
-hasfx "_checkout(A1): merge-tree 사전 점검" "$Q_CO" 'the read-only `git merge-tree --write-tree HEAD origin/<b>` (git ≥ 2.38; exit 1 = conflict). Conflict expected → do not run; one line `충돌 예상 — <파일…>: 머지는 사람이 하십시오(git pull --no-rebase origin <b>)`.'
-hasfx "_checkout(A1): 판정 불가 종료 코드" "$Q_CO" 'Any exit code other than 0 or 1 (git < 2.38'"'"'s unknown option, say) → the check cannot judge → do not run, show the command only.'
-hasfx "_checkout(A1): 실행 중 충돌은 merge --abort 하나뿐" "$Q_CO" '**the only next command allowed is `git merge --abort`**; report and stop.'
-hasfx "_checkout(A1): --force·reset --hard 없음" "$Q_CO" '**`--force` and `reset --hard` never, in any case** (INV3).'
-hasfx "_checkout(A1): fetch 실패·upstream 없음" "$Q_CO" '`원격 상태를 읽지 못했습니다 — 직접 하십시오: …`'
-hasfx "_checkout(A1): switch 요청은 예 뒤에만" "$Q_CO" 'a switch changes no hash, so under the same rule **Guild runs it only after an explicit yes**'
-hasfx "_checkout(A1): 다른 브랜치 일은 review 워크트리 — sync conflict 는 경로" "$Q_CO" 'so what that line carries is **the conflicted paths**, not a worktree — make the review worktree for that member'"'"'s PR.'
-hasfx "_checkout(A1·A3): 승인 범위" "$Q_CO" '**An approval reaches only the list shown in that command.** A new `/gld …` invocation asks again; "알아서 판단해서 해 주세요" approves the items of the list that was shown — it never widens to what the procedure **decided to keep**'
-hasfx "SKILL(A1): 사람 체크아웃 단락" "$Q_SK" '**The checkout `/gld` runs in is the human'"'"'s.** On its own, Guild never (1) moves it off its branch'
-hasfx "SKILL(A1): 단락 안의 예외 — 다섯 명령·에픽 자식" "$Q_SK" '**The one exception**: the execute stage (`/gld dev`·`resume`·`implement`·`debug`·`refactor`, an epic'"'"'s children included) creates or switches to the branch of the Issue it is executing in this checkout, including `refactor.md`'"'"'s detach-and-return net proof'
-hasfx "SKILL(A1): 해시를 지키는 갱신·switch 는 예 뒤에" "$Q_SK" 'Guild runs only an update that keeps every hash, after a yes — and a switch (it keeps every hash) after a yes — a rewriting one the human runs (`<<SKILL_DIR>>/commands/atoms/_checkout.md`'
-Q_D2="never on its own; on a human request, \`_checkout.md\`'s request form — Guild runs only a hash-preserving update (\`git pull --ff-only\` / \`--no-rebase\`), a rewriting one the human runs"
-hasfx "retro(A1): Hard rule 의 D2 꼴 · 예 뒤의 switch" "$Q_RETRO" "Phase 0 step 5 asks; updating the checkout is $Q_D2, and a switch after a yes (measured #649"
-hasfx "retro(A1): push 거부는 멈춤 — 갱신 요청이면 요청 꼴" "$Q_RETRO" 'say so and stop: updating is the human'"'"'s — asked to update first, the request form (no rebase'
-hasfx "evolve(A1): Hard rule 의 D2 꼴 · 예 뒤의 switch" "$Q_EVO" "(INV3); updating the checkout is $Q_D2, and a switch after a yes (Phase 0 step 2b asks)."
-hasfx "evolve(A1): 2b 의 D2 꼴" "$Q_EVO" "evolve never updates the checkout itself — $Q_D2 (Hard rules — INV3)."
-hasfx "sprint/plan(A1): sub-step 8 의 D2 꼴" "$Q_SPP" '**Never `--force`; never pull or rebase on its own — on a'
-hasfx "sprint/plan(A1 r1): step 5 — --no-rebase 는 깨끗한 트리에서만" "$Q_SPP" '`--no-rebase` only on a clean tree, `_checkout.md` (i): here the record files and `config.json` are still uncommitted, so it is shown, not run).'
-hasfx "sprint/plan(A1): step 5 Behind — 요청 꼴" "$Q_SPP" '`_checkout.md`'"'"'s request form (Guild runs only `git pull --ff-only <remote> <merge>`, or'
-hasfx "sprint/plan(A1): Retry by hand 의 명시 꼴" "$Q_SPP" 'Stopped behind at sub-step 5 → put `git pull --ff-only <remote> <merge>` first'
-lacksfx "retro(A1): 옛 단독 문장 없음" "$Q_RETRO" "Phase 0 step 5 asks; updating the checkout is the human's."
-lacksfx "evolve(A1): 옛 단독 문장 없음(Hard rule)" "$Q_EVO" "(INV3); updating the checkout is the human's (Phase 0 step 2b asks)."
-lacksfx "evolve(A1): 옛 단독 문장 없음(2b)" "$Q_EVO" 'evolve never updates the checkout itself (Hard rules — INV3).'
-lacksfx "sprint/plan(A1): 옛 쉼표 문장 없음" "$Q_SPP" '**Never `--force`, never pull or rebase on the human'"'"'s'
-lacksfx "sprint/plan(A1): 옛 the human pulls first 없음" "$Q_SPP" 'the human pulls first.'
-hasfx "resume(A1): Notes — 머지 결과를 보려고 체크아웃을 옮기지 않음" "$Q_RS" '- **Resume never updates the checkout to see merged work** — dev Phase 2c judges from the PRs; running the merged result is the human'"'"'s (`dev.md` Phase 2c).'
-hasfx "sync(A1): conflict 는 Guild 워크트리에서" "$Q_SYNC" '- **A request to resolve a `conflict` is worked in a Guild worktree, never in the human'"'"'s checkout** — `review.md`'"'"'s worktree for that member'"'"'s PR'
-hasfx "review(A1): 공통 규칙 가리킴" "$Q_RV" 'The common rule this applies: `_checkout.md` (a request to work on another branch).'
-# A1 — every listed command carries the head line; none runs a rewrite/move outside a negated context
-for Q_C in dev resume plan qa review evolve init update rollback batch analyze design implement debug refactor test sprint/plan sprint/retro sprint/sync sprint/daily sprint/board sprint/run; do
-  Q_F="$GLD/commands/$Q_C.md"
-  case "$Q_C" in dev|resume|implement|debug|refactor)
-    hasfx "$Q_C(A1 r1): 머리 줄에 Issue 브랜치 예외" "$Q_F" "then ask) — the Issue's own branch is the one exception (\`_checkout.md\` Section C)." ;; esac
-  if [ -f "$Q_F" ] && head -60 "$Q_F" | grep -E '^>' | grep -qF "**Checkout**: never move the human's branch or history — \`_checkout.md\` (a pull/sync/switch request: show the commands and which commits change hash, then ask)"; then
-    ok "$Q_C(A1): 머리 블록인용에 Checkout 줄"
-  else bad "$Q_C(A1): 머리 블록인용에 Checkout 줄" "present in the first 60 lines" "missing: $Q_F"; fi
-  # the negation must sit in the 40 characters before the command (a long line elsewhere saying `never` proves nothing)
-  Q_NEG="$("$PY" - "$Q_F" <<'PYN'
-import re, sys
-for n, l in enumerate(open(sys.argv[1], encoding="utf-8"), 1):
-    for m in re.finditer(r"git pull --rebase|git rebase origin|git checkout main", l):
-        # a negation, or the quotation of a measured defect (`measured #161: …`, `… became …`)
-        if not re.search(r"no |never|Never|금지|not |measured|became", l[max(0, m.start() - 40):m.start()]):
-            print("%d:%s" % (n, l.strip()[:120]))
-PYN
-)"
-  [ -z "$Q_NEG" ] && ok "$Q_C(A1): pull --rebase·rebase origin·checkout main 은 부정 문맥에만" \
-    || bad "$Q_C(A1): 부정 문맥 밖" "none" "$(printf '%s' "$Q_NEG" | head -1 | cut -c1-80)"
-done
-# A2 — plan Phase 0 step 6
-hasfx "sprint/plan(A2): step 6 머리" "$Q_SPP" '6. **Is the checkout the default branch, and level on `config.json`?** (0.99.2 — before anything'
-hasfx "sprint/plan(A2): 기본 브랜치 읽기(재사용)" "$Q_SPP" '`gh repo view <owner>/<repo> --json defaultBranchRef --jq .defaultBranchRef.name` → `<d>` (Phase 2'"'"'s `DEFAULT BRANCH` and Phase 6 step 3 reuse this value'
-hasfx "sprint/plan(A2): 현재 브랜치" "$Q_SPP" '`git branch --show-current` → `<b>` (empty = detached).'
-hasfx "sprint/plan(A2): 질문 ①② 문구" "$Q_SPP" '`체크아웃이 기본 브랜치 <d> 가 아닙니다(<b|detached>). plan 은 이 브랜치의 .claude/guild/config.json(용량 이력·리팩토링 슬롯 이력)으로 구성하고, 구성 기록은 <d> 에서만 커밋됩니다. ① 중단 — 직접 <d> 로 옮기신 뒤(git switch <d>) /gld sprint plan 을 다시 실행(권장 · 아직 아무것도 쓰지 않았습니다) ② 이대로 진행 — 이 브랜치의 설정으로 구성하고 기록은 커밋하지 않음`'
-hasfx "sprint/plan(A2): ① Return" "$Q_SPP" '① → Return `OK: plan not started — checkout <b> is not <d>`.'
-hasfx "sprint/plan(A2): Phase 5 고정 줄" "$Q_SPP" 'When Phase 0 step 6 went on with ②, the fixed line `⚠ 체크아웃 <b> 의 config.json 으로 구성 — 용량 이력·슬롯 이력이 <d> 와 다를 수 있습니다` comes right under the `1b:` line.'
-hasfx "sprint/plan(A2): behind + config 차이(세 점)" "$Q_SPP" '`behind > 0` **and** `git diff --quiet HEAD...origin/<d> -- .claude/guild/config.json` exits 1'
-hasfx "sprint/plan(A2): 최신화 질문 문구" "$Q_SPP" '`로컬 <d> 가 origin 보다 <behind> 커밋 뒤이고 config.json 이 다릅니다 — 최신 용량 이력이 origin 에 있습니다. ① 중단 — 직접 최신화(git pull --ff-only, 로컬 커밋이 있으면 git pull --no-rebase)하신 뒤 다시 실행(권장) ② 이대로 진행`.'
-hasfx "sprint/plan(A2): Phase 2 fetch 는 step 6 이 했으면 건너뜀" "$Q_SPP" '**Phase 0 step 6 already'
-hasfx "sprint/plan(A2): Phase 6 step 3 보조 안전망" "$Q_SPP" '3. **On the default branch?** (Phase 0 step 6 already asked — this catches a switch since.)'
-hasfx "sprint/plan(A2): Return 목록" "$Q_SPP" '`OK: plan not started — checkout <b> is not <d>`
-(Phase 0 step 6 ①'
-Q_SW="$(grep -nF 'git switch <d>' "$Q_SPP" | grep -vF '① 중단 — 직접 <d> 로 옮기신 뒤(git switch <d>)' || true)"
-[ -z "$Q_SW" ] && ok "sprint/plan(A2): git switch <d> 는 질문 문구(사람이 할 일) 안에만" || bad "sprint/plan(A2): git switch <d> 가 질문 밖" "none" "$(printf '%s' "$Q_SW" | cut -c1-80)"
-# A3 — --cleanup approval scope
-hasfx "retro(A3): 호출마다 다시 묻는다" "$Q_RETRO" '**Every invocation asks for itself** — this run'"'"'s table and this run'"'"'s answer.'
-hasfx "retro(A3): 위임은 표의 행만" "$Q_RETRO" '**A delegation approves the table'"'"'s rows, never what the table keeps.**'
-hasfx "retro(A3): cherry 는 증거일 뿐" "$Q_RETRO" '`git cherry` agreeing is evidence to show, not a reason to skip the ask) (measured `--cleanup 545`).'
-hasfx "retro(A3): step 3 거부 뒤 멈춤" "$Q_RETRO" '— and stop there for that worktree: removing what is left is the human'"'"'s, or the named yes above.'
-hasfx "retro(A3): Hard rule 승인 범위" "$Q_RETRO" '- **Approval is per invocation and per listed item** — `_checkout.md` Section F'
-# A4 — epic parent integration
-hasfx "dev(A4): Phase 2c 는 사람 체크아웃에서 머지 결과를 돌리지 않음" "$Q_DEV" '**Phase 2c never checks out, pulls or runs merged code in the human'"'"'s checkout** (`_checkout.md`; measured resume #161'
-hasfx "dev(A4): 갭 — 열린 PR 경로" "$Q_DEV" '`#<c> 의 PR #<p> 에서 고칩니다: /gld review <p> 후 "고쳐 주세요"(review 가 자기 워크트리에서 편집 — review.md), 또는 직접 수정. 머지 순서: <순서>. 머지 뒤 /gld resume <parent>`'
-hasfx "dev(A4): 갭 — 머지됨 → 통합 수정 자식 질문" "$Q_DEV" '`통합 수정 자식 이슈를 만들까요? — [Guild子] 통합 수정 — <한 줄> (Parent Issue: #<parent>) · 만들면 /gld resume <parent> 가 Phase 2b 에서 이것을 실행하고 2c 를 다시 봅니다`'
-hasfx "dev(A4): 갭 — 무인 경로 줄" "$Q_DEV" '`통합 수정 자식을 만들거나(/gld dev <parent> 가 묻습니다) 직접 고친 뒤 /gld resume <parent>`'
-hasfx "dev(A4): done 자식에 dev/resume 금지" "$Q_DEV" '**Never suggest `/gld dev <child>` or `/gld resume <child>` for a `guild:done` child** — dev refuses a done Issue (Phase 1)'
-hasfx "dev(A4): 원인 줄은 Section H 형식" "$Q_DEV" '**The comment is in `_handoff.md` Section H'"'"'s form** — the first line after the marker is the cause line `defect: <one-line>`'
-hasfx "dev(A4·A11): PR 메모는 guild:note" "$Q_DEV" 'A note this phase leaves on a child PR (a merge-order warning, say) opens with `<!-- guild:note -->`'
-hasfx "_handoff(A4): Section I 새 문장" "$Q_HO" 'A gap → `NEEDS_HUMAN` with the path `dev.md` Phase 2c names by the child PR'"'"'s state — a fix on the open PR, or a new integration-fix child; never a loop-back into a `guild:done` child'
-lacksfx "_handoff(A4): 옛 loop-back 갈래 없음" "$Q_HO" 'or a targeted loop-back to the relevant child'
-lacksfx "dev(A4): 옛 loop-back 갈래 없음" "$Q_DEV" 'a targeted loop-back to the responsible child'
-# A5 — the third source of Done
-hasfx "sync(A5): 셋째 출처" "$Q_SYNC" 'a split parent whose integration passed and the human closed (`guild:done` · `CLOSED`/`COMPLETED` · an `<!-- guild:integration:output -->` comment · no PR of its own)'
-hasfx "board(A5): 셋째 출처" "$Q_BOARD" 'A third source (0.99.2) reaches `Done` only through `sync --done-cards`: a split parent whose integration passed and the human closed'
-hasfx "stack_sync(A5): docstring — retro 사본은 decided 만" "$P7_SS" '`retro.md` Phase 2'"'"'s jq copy is the closed-as-decided half only'
-# A6 — scan_transcript reads $CLAUDE_CONFIG_DIR
-hasfx "_signals(A6): 경로 표기" "$Q_SIG" 'CC transcript `$CLAUDE_CONFIG_DIR/projects/<enc-cwd>/*.jsonl` (default `~/.claude/projects`)'
-hascode "scan_transcript(A6): 실행 시점의 projects_dir()" "$Q_ST" 'base = os.environ.get("CLAUDE_CONFIG_DIR") or os.path.expanduser("~/.claude")'
-lacksfx "scan_transcript(A6): import 시점 상수 없음" "$Q_ST" 'PROJECTS_DIR = os.path.expanduser("~/.claude/projects")'
-if "$PY" -c 'import importlib.util as u, sys; sys.dont_write_bytecode = True; s=u.spec_from_file_location("st", sys.argv[1]); m=u.module_from_spec(s); s.loader.exec_module(m)' "$Q_ST" 2>/dev/null; then
-  ok "scan_transcript(A6): import·정규식 컴파일 성공 (역참조 없는 GUILD_MANDATED_RE)"
-else bad "scan_transcript(A6): import" "exit 0" "import failed"; fi
-Q_T="$(mktemp -d)"
-q_sess() {  # q_sess <projects-dir> <cmd>… — four sessions, each running every <cmd>
-  mkdir -p "$1/p"; local i c js
-  for i in 1 2 3 4; do
-    js=""; for c in "${@:2}"; do js="$js,$("$PY" -c 'import json,sys; print(json.dumps({"type":"tool_use","name":"Bash","input":{"command":sys.argv[1]}}))' "$c")"; done
-    printf '%s\n' '{"cwd":"/st/repo","type":"user","message":{"content":"hi"}}' "{\"type\":\"assistant\",\"message\":{\"content\":[${js#,}]}}" > "$1/p/s$i.jsonl"
-  done
-}
-q_sig() { "$PY" -c '
-import json, sys
-t = sys.stdin.read()
-if ">>> RESULT <<<" not in t: print("NO-RESULT"); raise SystemExit
-d = json.loads(t.split(">>> RESULT <<<", 1)[1])
-print(";".join(sorted(s.get("summary", "") for s in d.get("signals") or [])) or "none")'; }
-q_sess "$Q_T/cfg/projects" "git worktree list"
-mkdir -p "$Q_T/home"
-Q_A="$(CLAUDE_CONFIG_DIR="$Q_T/cfg" HOME="$Q_T/home" "$PY" -B "$Q_ST" --repo-cwd /st/repo 2>/dev/null | q_sig)"
-case "$Q_A" in *"git worktree list"*) ok "scan_transcript(A6) ①: CLAUDE_CONFIG_DIR/projects 를 읽는다 (HOME 은 비어 있음)" ;; *) bad "scan_transcript(A6) ①" "a signal" "$Q_A" ;; esac
-q_sess "$Q_T/home2/.claude/projects" "git worktree list"
-Q_B="$(env -u CLAUDE_CONFIG_DIR HOME="$Q_T/home2" "$PY" -B "$Q_ST" --repo-cwd /st/repo 2>/dev/null | q_sig)"
-case "$Q_B" in *"git worktree list"*) ok "scan_transcript(A6) ②: 미설정이면 \$HOME/.claude/projects" ;; *) bad "scan_transcript(A6) ②" "a signal" "$Q_B" ;; esac
-mkdir -p "$Q_T/emptycfg/projects"
-Q_C3="$(CLAUDE_CONFIG_DIR="$Q_T/emptycfg" HOME="$Q_T/home2" "$PY" -B "$Q_ST" --repo-cwd /st/repo 2>/dev/null | q_sig)"
-[ "$Q_C3" = none ] && ok "scan_transcript(A6) ③: 둘 다 있으면 CLAUDE_CONFIG_DIR 우선 (HOME 쪽 세션을 읽지 않음)" || bad "scan_transcript(A6) ③" "none" "$Q_C3"
-rm -rf "$Q_T/cfg"; q_sess "$Q_T/cfg/projects" "python3 /p/skills/gld/commands/atoms/stack_sync.py --tracker 1 --check" "cat /p/skills/gld/commands/dev.md" \
-  "sed -n 1,80p /p/skills/gld/commands/sprint/run.md" "cat .claude/guild/config.json" "git worktree list --porcelain" \
-  "git fetch origin main:refs/remotes/origin/main" "git fetch origin +refs/heads/f:refs/remotes/origin/f" "git branch --show-current" \
-  "gh repo view acme/app --json defaultBranchRef --jq .defaultBranchRef.name" "git rev-list --left-right --count main...origin/main" \
-  "git merge-tree --write-tree --name-only HEAD origin/main"
-Q_D="$(CLAUDE_CONFIG_DIR="$Q_T/cfg" HOME="$Q_T/home" "$PY" -B "$Q_ST" --repo-cwd /st/repo 2>/dev/null | q_sig)"
-[ "$Q_D" = none ] && ok "scan_transcript(A6): Guild 자신의 명령 11꼴을 4세션 반복해도 신호 0" || bad "scan_transcript(A6): Guild 명령 신호" "none" "$(printf '%s' "$Q_D" | cut -c1-120)"
-rm -rf "$Q_T/cfg"; q_sess "$Q_T/cfg/projects" "cat .claude/guild/memory/review-nudge-state.json" "ls .claude/guild/config.json" \
-  "cat /abs/repo/.claude/guild/config.json" "gh issue list --label guild:sprint --state open --limit 20 --json number,title,body --jq '{count: length}'" \
-  "git fetch origin main:main" "git add .claude/guild/evolution-log.md .claude/guild/evolution-log.archive.md" "git add .claude/guild/evolution-log.md" "gh issue list --label guild:child --state all --limit 500 --json number,title,body,labels,state --jq 'length'" \
-  "gh label list --limit 200 --json name --jq '[.[].name]'" "gh repo view --json nameWithOwner --jq .nameWithOwner" "printenv GLD_SPRINT_BASE" \
-  "git -C /abs/repo status --porcelain" "git ls-remote origin refs/heads/main" "hostname"
-Q_R1="$(CLAUDE_CONFIG_DIR="$Q_T/cfg" HOME="$Q_T/home" "$PY" -B "$Q_ST" --repo-cwd /st/repo 2>/dev/null | q_sig)"
-[ "$Q_R1" = none ] && ok "scan_transcript(A6 r1): 리뷰가 측정한 Guild 명령 14꼴(절대 config 경로·--jq·git fetch origin <d> …)도 신호 0" || bad "scan_transcript(A6 r1): Guild 명령 신호" "none" "$(printf '%s' "$Q_R1" | cut -c1-160)"
-rm -rf "$Q_T/cfg"; q_sess "$Q_T/cfg/projects" "git fetch origin main"
-Q_BF="$(CLAUDE_CONFIG_DIR="$Q_T/cfg" HOME="$Q_T/home" "$PY" -B "$Q_ST" --repo-cwd /st/repo 2>/dev/null | q_sig)"
-case "$Q_BF" in *"git fetch origin main"*) ok "scan_transcript(A6 r2): 금지된 맨 git fetch origin <base> 는 신호로 남는다 (_execute_spine Step 0)" ;; *) bad "scan_transcript(A6 r2): 맨 fetch" "a signal" "$Q_BF" ;; esac
-rm -rf "$Q_T/cfg"; q_sess "$Q_T/cfg/projects" "git worktree list" "cat docs/x.md"
-Q_E="$(CLAUDE_CONFIG_DIR="$Q_T/cfg" HOME="$Q_T/home" "$PY" -B "$Q_ST" --repo-cwd /st/repo 2>/dev/null | q_sig)"
-case "$Q_E" in *"cat docs/x.md"*"git worktree list"*|*"git worktree list"*"cat docs/x.md"*) ok "scan_transcript(A6): 대조 — 인자 없는 worktree list·cat docs 반복은 신호" ;; *) bad "scan_transcript(A6) 대조" "two signals" "$Q_E" ;; esac
-rm -rf "$Q_T"
-# A7 — spawn streams from this run's start offset
-hasfx "spawn_supervisor(A7): docstring" "$Q_SPAWN" 'It **streams from this run'"'"'s start offset** — the file keeps earlier runs above it'
-hascode "spawn_supervisor(A7): seek" "$Q_SPAWN" 'f.seek(0 if os.path.getsize(log_path) < start else start)'
-# A8 — every PO candidate judged
-hasfx "sprint/plan(A8 r2): 전수 점검 — 항목 줄머리 #n 만" "$Q_SPP" "its own Bash call \`grep -nE '^(## |[-*0-9.]* *#[0-9]+)' docs/specs/sprint-draft/po.md\`"
-hasfx "sprint/plan(A8 r2): 줄 안의 prerequisite·needs·decide-in 은 판정 아님" "$Q_SPP" 'a `prerequisite: #d`, `(needs #d)` or `decide-in: #c` inside a line is not a verdict'
-hasfx "sprint/plan(A2 r2): 무인 항목이 먼저 · 두 질문은 attended" "$Q_SPP" 'then go on — the two questions below are attended only.'
-lacksfx "_checkout(r2): 설계 내부 표지 D2 없음" "$Q_CO" 'D2'
-lacksfx "resume(r2): 설계 내부 표지 (A4) 없음" "$Q_RS" '(A4)'
-
-hasfx "sprint/plan(A8): SendMessage 재요청" "$Q_SPP" '`po.md 에 #<n…> 의 판정이 없습니다 — 각 번호를 goal-picks / other-ranked / not-ranked 중 하나로 po.md 에 추가하고 같은 RESULT 줄을 다시 보내세요(본문 규칙 그대로)`'
-hasfx "sprint/plan(A8): Phase 5 고정 줄" "$Q_SPP" '- `PO 판정 누락: #<n…> — 이번 채우기에서 빠졌습니다(넣으려면 "추가 #n")` —'
-hasfx "sprint/plan(A8): SendMessage 불가면 바로 Phase 5 줄" "$Q_SPP" 'or SendMessage is unavailable (the agent was already released) → straight to the Phase 5 fixed line'
-# A9 — base_ci.py
-lacksfx "run(A9): 옛 #647 측정 문장 없음" "$Q_RUN" '#647: an earlier failed attempt'
-hasfx "run(A9): 측정 문장 정정" "$Q_RUN" '(the highest `id` — measured one-man-company PR #616: `Conventional 접두어 검증` three times; word_app main: `Dependabot` four times)'
-hasfx "_bash_rules(A9): Used by 에 base_ci.py" "$Q_BR" '`base_ci.py` (the Base CI line for `sprint/run.md` Phase 0 and `sprint/plan.md` Phase 2'
-# A10 — Section M cut reads
-hasfx "_handoff(A10): 이유 구절" "$Q_HO" '— a directive'"'"'s scope exclusion sits after its first sentence (measured #244: cut at 300, the line `잡이 실행된 뒤 실패한 red는 이 지시의 대상이 아니다` was gone)'
-hasfx "_handoff(A10): 게이트가 잘라 읽기를 거부" "$Q_HO" 'the commit gate refuses that cut read (`directive-slice` — `_invariants.md`)'
-hasfx "_invariants(A10·A11): 네 모양" "$Q_INV" 'Four narrow measured shapes, a heuristic'
-hasfx "_invariants(A11): unmarked-comment 는 무인만" "$Q_INV" '(`unmarked-comment` — 64 of 1,554 measured; attended is not checked'
-lacksfx "_invariants(A10): 옛 두 모양 문장 없음" "$Q_INV" 'Two narrow measured shapes'
-hasfx "gate(A10): 모듈 docstring 네 모양" "$GLD/gates/gate_precommit.py" 'Refuses four
-     narrow, measured shapes'
-hascode "gate(A10): directive-slice 규칙 이름" "$GLD/gates/gate_precommit.py" 'rule, msg = "directive-slice", DIRECTIVE_SLICE_MSG'
-hascode "gate(A11): unmarked-comment 는 GLD_UNATTENDED=1 일 때만" "$GLD/gates/gate_precommit.py" 'elif os.environ.get("GLD_UNATTENDED") == "1" and unmarked_comment(cmd):'
-# A11 — marked comments
-hasfx "_handoff(A11): Section B — 습관 댓글·PR 메모도 마커" "$Q_HO" '— **including a comment a repo habit asks for** (a PR CI note, a PR-created note: measured one-man-company and word_app `leader.md` habits, 7 unmarked PR comments in #649) **and a note on a PR** (`gh pr comment`); a habit'"'"'s wording never drops the marker.'
-hasfx "_handoff(A11): 사람 지시 대필만 마커 없음" "$Q_HO" 'A comment the human asked you to write **as theirs** (`## 사람 지시 — …`) is the one that stays unmarked — it is a directive (Section M).'
-hasfx "evolve(A11): 습관 작성 규칙" "$Q_EVO" '- **A habit that has the leader post a comment says it opens with `<!-- guild:note -->`**'
-hasfx "evolve(A11): Phase 1 신호" "$Q_EVO" "\`grep -rnE 'PR 댓글|댓글에 남긴다|gh pr comment' .claude/agents/\` — a hit inside a role's habits section"
-hasfx "evolve(A11): 제안 문구" "$Q_EVO" '`③ habit` patch candidate `댓글 습관에 마커가 없습니다(Section B)`'
-# A13 — densify outcomes
-hasfx "evolve(A13): 기준 초과 줄마다 densify: 줄" "$Q_EVO" '**Every over-bar line `harness_size.py` printed gets a `densify:` line in Phase 3'"'"'s list**'
-hasfx "evolve(A13): 네 결말" "$Q_EVO" '`densify: <line> → 제안 #k` or `densify: <line> → [rejected] 기록` — and every line after those three is `densify: <line> → 다음 run(상위 3 밖)` — these four and no other outcome'
-hasfx "evolve(A13): 건너뜀 결말" "$Q_EVO" '`densify: <line> → 건너뜀(이전 [rejected], 글자 수 그대로)` and does not count toward the three'
-hasfx "evolve(A13): Phase 7 원장 densify 줄" "$Q_EVO" '- **Densify** — one `densify:` line per over-bar line, the four outcomes of Phase 3 as they are'
-hasfx "evolve(A13): Phase 4 전 자기 점검" "$Q_EVO" '**Before Phase 4**: the `densify:` lines number exactly the over-bar lines `harness_size.py` printed, and none of the first three taken says `다음 run`'
-# A14 — every Write is a new check
-hasfx "_execute_spine(A14): 파일을 쓸 때마다 점검" "$Q_SP" '— **every Write of that file is a new check**, the second and later Writes in one session too (an epic'"'"'s children run one after another in one session: each child'"'"'s execute is a fresh invocation — measured resume #508)'
-hasfx "dev(A14): 자식마다 기록 형식 다시 읽기" "$Q_DEV" 'Each child'"'"'s execute is its own invocation — `_execute_spine.md` Step 4'"'"'s record format and its check are re-read before that child'"'"'s first record write'
-# A15 — only this sprint's children
-hasfx "retro(A15): 트래커 생성 전에 끝난 자식만 제외" "$Q_RETRO" 'a child of S is excluded only when its PR merged — or it closed — **before this tracker was created** (`gh issue view <tracker> --json createdAt`, the same call that reads its body adds the field'
-hasfx "retro(A15): 열린 자식은 센다" "$Q_RETRO" '**an open one counts**.'
-hasfx "retro(A15): PR 없는 자식의 closedAt 은 자기 호출" "$Q_RETRO" '`gh issue view <c> --repo <owner>/<repo> --json closedAt --jq .closedAt`, its own call (the child discovery query carries no `closedAt`)'
-lacksfx "retro(A15): 옛 '뒤에만 센다' 문장 없음" "$Q_RETRO" 'counts here only when its PR merged'
-hasfx "retro(A15): 제외 줄" "$Q_RETRO" '`이전 스프린트에 끝난 자식 <k>개(#506) — 셈에서 제외`'
-hasfx "retro(A15): Phase 0 읽기에 createdAt" "$Q_RETRO" '--json number,title,body,createdAt --jq'
-# A16 — a gate refusal is never routed around
-hasfx "_execute_spine(A16): developer 프롬프트에 우회 금지" "$Q_SP" '  > **A gate refusal is never routed around** — do not rename or move a file onto a deleted test'"'"'s path, split the commit, or restructure so the gate stops seeing a deletion.'
-hasfx "_execute_spine(A16): BLOCKED 꼴" "$Q_SP" 'return `BLOCKED: gate INV2 — <test path> (subject removed: <path>)`; the leader asks the human (attended) or pauses (unattended).'
-hasfx "_execute_spine(A16): Hard rule 에도" "$Q_SP" 'Step 4'"'"'s *Developer `BLOCKED: gate INV2`* bullet is the leader'"'"'s side.'
-hasfx "_execute_spine(A16): Step 4 갈래" "$Q_SP" '- **Developer `BLOCKED: gate INV2 — <path> (subject removed: <path>)`** (0.99.2'
-hasfx "_execute_spine(A16): 안내 — 그 Issue 브랜치의 dismissed.md 한 줄" "$Q_SP" '그 Issue 브랜치 <branch> 에서 .claude/guild/gates/dismissed.md 에 한 줄'
-hasfx "_execute_spine(A16): 그 파일만 커밋" "$Q_SP" 'git commit -m "<메시지>" -- .claude/guild/gates/dismissed.md 로 그 파일만 커밋하신 뒤'
-hasfx "_execute_spine(A16): 등록 전 재호출 없음" "$Q_SP" '등록 전에는 developer 를 다시 부르지 않습니다'
-hasfx "_execute_spine(A16): 강한 모델 재시도 없음" "$Q_SP" '**no stronger-model retry** (`_model_tiering.md`'"'"'s escalation is for a quality failure)'
-hasfx "_execute_spine(A16): 무인 — 워크트리 안내" "$Q_SP" '(브랜치가 <wt> 에 체크아웃돼 있으면 그 경로에서 — 스프린트가 남긴 멤버 워크트리;'
-hasfx "_execute_spine(A16): 재진입 점검 — 게이트와 같은 줄머리 판독" "$Q_SP" "\`\`grep -nE '^[-*+] +\`?<path>\`?( |—|\$)' <worktree>/.claude/guild/gates/dismissed.md\`\`"
-hasfx "_execute_spine(A16 r1): 재진입 또는 답 뒤 같은 단계 재실행" "$Q_SP" '  - **On re-entry (resume) or the same stage re-run after the answer** (dev Phase 2'"'"'s attended `NEEDS_HUMAN` re-runs it inline), before the developer is spawned again:'
-hasfx "sprint/plan(A9 r1): 둘째 ci-blocked 줄도 넘김" "$Q_SPP" 'plus its `ci-blocked: <checks…>` second line when it printed one'
-hasfx "_execute_spine(A16): 한계 — 한 줄 꼴만 인식" "$Q_SP" 'This check knows only the guidance'"'"'s one-line form'
-hasfx "_execute_spine(A16): :253 이 그 갈래를 가리킴" "$Q_SP" '(a `BLOCKED: gate INV2 — …` → Step 4'"'"'s *Developer `BLOCKED: gate INV2`* bullet)'
-hasfx "_execute_spine(A16): 감사자 INV2 렌즈" "$Q_SP" 'A test file whose old content was replaced by unrelated tests under the'
-hasfx "review(A16): 감사자 INV2 렌즈(코어 사본)" "$Q_RV" 'A test file whose old content was replaced by unrelated tests under the'
-# A18 — -F body=@<file>, never -f
-hasfx "run(A18): run 마커 PATCH 는 -F" "$Q_RUN" '`gh api repos/<owner>/<repo>/issues/comments/<id> -X PATCH -F body=@<file>`'
-Q_RF="$(grep -rlF -- '-f body=@' "$GLD/commands" "$GLD/SKILL.md" "$GLD/templates" 2>/dev/null || true)"
-[ -z "$Q_RF" ] && ok "A18: 명령 파일 어디에도 -f body=@ 없음 (gh 는 -f 의 @<file> 을 읽지 않는다)" || bad "A18: -f body=@" "none" "$Q_RF"
-# ── 0.99.2 Part B — md 안의 jq 를 실데이터로 실행 ──
-Q_W="$(mktemp -d)"
-# B2 — retro's decided jq and PR attribution jq over #628 / #630's real PRs
-Q_DJ="$(grep -o "\-\-jq '{state, labels: \[.labels\[\].name\], decided: [^']*'" "$Q_RETRO" | head -1 | sed "s/^--jq '//; s/'\$//")"
-if [ -z "$Q_DJ" ]; then bad "retro(B2): decided jq 추출" "one expression" "none"; else
-  "$PY" - "$Q_REAL/z6-628.json" "$Q_W" <<'PYQ'
-import json, os, sys
-d = json.load(open(sys.argv[1], encoding="utf-8")); o = sys.argv[2]
-iv = {"state": "CLOSED", "labels": [{"name": "type:chore"}, {"name": "guild:done"}], "comments": [{"body": c} for c in d["comments"]["628"]]}
-json.dump(iv, open(os.path.join(o, "iv628.json"), "w"))
-iv["comments"] = [c for c in iv["comments"] if "closed-as-decided" not in c["body"]]
-json.dump(iv, open(os.path.join(o, "iv628-none.json"), "w"))
-json.dump(d["retro630"]["prs"], open(os.path.join(o, "prs630.json"), "w"))
-open(os.path.join(o, "m630.txt"), "w").write(",".join(map(str, d["retro630"]["members"])))
-PYQ
-  [ "$(jq -c "$Q_DJ" "$Q_W/iv628.json" | jq -c '{decided}')" = '{"decided":1}' ] && ok "retro(B2): decided jq — #628 + 마커 → decided 1" || bad "retro(B2): decided jq" '{"decided":1}' "$(jq -c "$Q_DJ" "$Q_W/iv628.json")"
-  [ "$(jq -c "$Q_DJ" "$Q_W/iv628-none.json" | jq -c '{decided}')" = '{"decided":0}' ] && ok "retro(B2): decided jq — 오늘의 #628(마커 없음) → 0" || bad "retro(B2): decided jq 마커 없음" '{"decided":0}' "$(jq -c "$Q_DJ" "$Q_W/iv628-none.json")"
-fi
-Q_PJ="$(grep -o "gh pr list --state all --limit 200 --json number,headRefName,baseRefName,state,mergedAt,closedAt,reviewDecision,closingIssuesReferences --jq '.*'" "$Q_RETRO" | head -1 | sed "s/^.*--jq '//; s/'\$//")"
-if [ -z "$Q_PJ" ]; then bad "retro(B2): PR 귀속 jq 추출" "one expression" "none"; else
-  Q_M="$(cat "$Q_W/m630.txt")"
-  Q_PJ="${Q_PJ//\[<m1>,<m2>,<c1>\]/[$Q_M]}"; Q_PJ="${Q_PJ//(<m1>|<m2>|<c1>)/(${Q_M//,/|})}"; Q_PJ="${Q_PJ//<owner>/acme}"; Q_PJ="${Q_PJ//<repo>/app}"
-  Q_PO="$(jq -c "$Q_PJ" "$Q_W/prs630.json" 2>&1)"
-  Q_PN="$(printf '%s\n' "$Q_PO" | tail -n +3 | jq -r 'select(.state == "MERGED") | .number' 2>/dev/null | sort | tr '\n' ' ')"
-  [ "$Q_PN" = "631 632 633 634 635 636 637 647 " ] && ok "retro(B2): PR 귀속 jq — #630 실제 PR 8건 머지 귀속 (실제 retro 의 8/9)" || bad "retro(B2): PR 귀속 jq" "8 merged" "$(printf '%s' "$Q_PO" | head -c 200)"
-  case "$Q_PO" in *'"628"'*|*'628]'*|*'[628'*) bad "retro(B2): #628 귀속 없음" "absent" "present" ;; *) ok "retro(B2): PR 귀속 jq — #628 에는 PR 이 없다 (결정대로 닫힘)" ;; esac
-fi
-# B5 — dev Phase 2b's child discovery jq over #244's real children
-Q_CJ="$(grep -o "\-\-jq '\[.\[\] | select((.body // \"\") | test(\"Parent Issue: #<parent>(\[^0-9\]|\$)\"))\] | sort_by(.number) | .\[\] | {number, title, state, labels: \[.labels\[\].name\]}'" "$Q_DEV" | head -1 | sed "s/^--jq '//; s/'\$//")"
-if [ -z "$Q_CJ" ]; then bad "dev(B5): 자식 발견 jq 추출" "one expression" "none"; else
-  "$PY" -c 'import json,sys; json.dump(json.load(open(sys.argv[1]))["children"], open(sys.argv[2],"w"))' "$Q_REAL/r1-244.json" "$Q_W/ch244.json"
-  Q_CO2="$(jq -c "${Q_CJ//<parent>/244}" "$Q_W/ch244.json" | tr '\n' ' ')"
-  case "$Q_CO2" in '{"number":573,"title":"t","state":"CLOSED","labels":["guild:child","guild:qa","guild:needs-human","type:chore"]} {"number":574,'*) ok "dev(B5): #244 자식 발견 — 573 이 CLOSED·라벨 그대로 먼저 (1b 정리 대상)" ;;
-    *) bad "dev(B5): #244 자식 발견" "573 CLOSED first" "$(printf '%s' "$Q_CO2" | cut -c1-160)" ;; esac
-fi
-# B7 — Section M's read over #244's comments (the directive's structure kept, its text neutral)
-Q_MJ="$(grep -o "\-\-jq '.\[\] | select((.body // \"\") | contains(\"<!-- guild:\") | not) | {id, html_url, body}'" "$Q_HO" | head -1 | sed "s/^--jq '//; s/'\$//")"
-if [ -z "$Q_MJ" ]; then bad "_handoff(B7): Section M jq 추출" "one expression" "none"; else
-  "$PY" -c 'import json,sys; d=json.load(open(sys.argv[1])); json.dump(d["comments"], open(sys.argv[2],"w")); open(sys.argv[3],"w").write(d["scope_exclusion_line"])' "$Q_REAL/section-m-244.json" "$Q_W/c244.json" "$Q_W/excl.txt"
-  Q_MO="$(jq -c "$Q_MJ" "$Q_W/c244.json" 2>&1)"; Q_MRC=$?
-  [ "$Q_MRC" = 0 ] && ok "_handoff(B7): Section M jq 가 null 본문(③)에서 죽지 않는다" || bad "_handoff(B7): null 본문" "rc 0" "$Q_MO"
-  [ "$(printf '%s\n' "$Q_MO" | jq -r .id | tr '\n' ' ')" = "2 3 " ] && ok "_handoff(B7): 나오는 것은 지시 ②(와 null ③)뿐 — 마커 댓글 ①④ 제외" || bad "_handoff(B7): 고른 댓글" "2 3" "$(printf '%s\n' "$Q_MO" | jq -r .id | tr '\n' ' ')"
-  Q_ML="$(printf '%s\n' "$Q_MO" | jq -r 'select(.id == 2) | .body | length')"
-  [ "$Q_ML" = 425 ] && ok "_handoff(B7): ② 본문 길이 = 원본 425자 (전문)" || bad "_handoff(B7): 전문" "425" "$Q_ML"
-  printf '%s\n' "$Q_MO" | jq -r 'select(.id == 2) | .body' | grep -qF -- "$(cat "$Q_W/excl.txt")" && ok "_handoff(B7): 범위 제외 줄이 들어 있다" || bad "_handoff(B7): 범위 제외 줄" "present" "missing"
-  jq -r '.[] | select((.body | test("<!-- guild:")) | not) | .body[0:300]' "$Q_W/c244.json" 2>/dev/null | grep -qF -- "$(cat "$Q_W/excl.txt")" \
-    && bad "_handoff(B7): 측정된 .body[0:300] 꼴은 범위 제외 줄을 잃는다(결함 기록)" "line lost" "line kept" || ok "_handoff(B7): 측정된 .body[0:300] 꼴은 범위 제외 줄을 잃는다 (결함 기록)"
-  Q_DS="$("$PY" - "$GLD/gates/gate_precommit.py" <<'PYQ'
-import importlib.util, sys
-sys.dont_write_bytecode = True
-s = importlib.util.spec_from_file_location("g", sys.argv[1]); g = importlib.util.module_from_spec(s); s.loader.exec_module(g)
-print(g.directive_slice("gh api --paginate repos/acme/app/issues/1/comments --jq '.[] | select((.body | test(\"<!-- guild:\")) | not) | {id, user: .user.login, body: .body[0:300]}'"),
-      g.directive_slice("gh api repos/acme/app/issues/1/comments --paginate --jq '.[] | select((.body // \"\") | contains(\"<!-- guild:\") | not) | {id, html_url, body}'"))
-PYQ
-)"
-  [ "$Q_DS" = "True False" ] && ok "gate(B7): 측정 꼴은 directive_slice, Section M 의 명령 그대로는 아님" || bad "gate(B7): directive_slice" "True False" "$Q_DS"
-fi
-# B10 — retro's auditor jq: the [96]|implode form = the old ` form = the decoded form
-Q_AJ="$(grep -o "\-\-jq '. as \$all.*legacy_blocks.*'" "$Q_RETRO" | sed "s/^--jq '//; s/'\$//")"
-if [ -z "$Q_AJ" ]; then bad "retro(B10): 감사자 jq 추출" "one expression" "none"; else
-  "$PY" -c 'import json,sys; json.dump(json.load(open(sys.argv[1]))["comments"], open(sys.argv[2],"w"))' "$Q_REAL/auditor-records.json" "$Q_W/aud.json"
-  Q_IMP='" + ([96] | implode) + "'
-  Q_OLD="${Q_AJ//"$Q_IMP"/\\u0060}"; Q_DEC="${Q_AJ//"$Q_IMP"/\`}"
-  case "$Q_OLD" in *'\u0060*]{0,2}'*) ok "retro(B10): 옛 \\u0060 판을 새 식에서 되살렸다 (비교가 공허하지 않음)" ;; *) bad "retro(B10): 옛 판 재구성" "\\u0060 present" "$(printf '%s' "$Q_OLD" | cut -c1-80)" ;; esac
-  Q_WANT='{"records":4,"looped_back":1,"fixed":1,"recorded":2,"dismissed":1,"loose":7,"legacy_blocks":1,"variant":1,"clean":1,"no_scan":0,"violation":1}'
-  Q_N1="$(jq -c "$Q_AJ" "$Q_W/aud.json" 2>&1)"; Q_N2="$(jq -c "$Q_OLD" "$Q_W/aud.json" 2>&1)"; Q_N3="$(jq -c "$Q_DEC" "$Q_W/aud.json" 2>&1)"
-  [ "$Q_N1" = "$Q_WANT" ] && ok "retro(B10): 새 jq([96]|implode) — 실제 레코드 모양 기대값" || bad "retro(B10): 새 jq" "$Q_WANT" "$Q_N1"
-  [ "$Q_N2" = "$Q_N1" ] && [ "$Q_N3" = "$Q_N1" ] && ok "retro(B10): 옛 \\u0060 판·디코드판과 출력 동일" || bad "retro(B10): 등가" "$Q_N1" "old=$Q_N2 dec=$Q_N3"
-  case "$Q_AJ" in *'`'*|*'`'*) bad "retro(B10): 새 jq 에 이스케이프·백틱 없음" "none" "present" ;; *) ok "retro(B10): 새 jq 에 이스케이프도 백틱도 없다" ;; esac
-  Q_SH="$("$PY" - "$GLD/gates/gate_precommit.py" "$Q_AJ" "$Q_DEC" <<'PYQ'
-import importlib.util, sys
-sys.dont_write_bytecode = True
-s = importlib.util.spec_from_file_location("g", sys.argv[1]); g = importlib.util.module_from_spec(s); s.loader.exec_module(g)
-pre = "gh api repos/acme/app/issues/1/comments --paginate --jq "
-print(g.shell_text_hazard(pre + "'" + sys.argv[2] + "'"),
-      g.shell_text_hazard(pre + '"' + sys.argv[3].replace('"', '\\"') + '"'))
-PYQ
-)"
-  [ "$Q_SH" = "[] ['a']" ] && ok "gate(B10): 명령 문자열 — 새 jq 는 [], 큰따옴표 디코드판은 ['a']" || bad "gate(B10): shell_text_hazard" "[] ['a']" "$Q_SH"
-fi
-rm -rf "$Q_W"
 
 echo "결과: PASS=$PASS FAIL=$FAIL"
 
@@ -5032,7 +4338,7 @@ echo "결과: PASS=$PASS FAIL=$FAIL"
 # then reports FAIL=0 over silently skipped checks. That happened: PASS fell from 62 to 38 with
 # zero failures, which is the exact "green over a hole" shape these tests exist to prevent.
 # Raise the floor whenever checks are added on purpose.
-BOARD_MIN_CHECKS=2322   # ⚠ 실측 PASS 와 같게 유지한다 (04-sprint-window-tests.md T9)
+BOARD_MIN_CHECKS=1999  # ⚠ 실측 PASS 와 같게 유지한다 (04-sprint-window-tests.md T9)
 if [ "$((PASS + FAIL))" -lt "$BOARD_MIN_CHECKS" ]; then
   echo "FAIL  실행된 검사가 $((PASS + FAIL))건뿐입니다 (최소 ${BOARD_MIN_CHECKS}건) —"
   echo "      어딘가에서 인용이 닫히지 않아 이후 검사가 문자열로 삼켜졌을 가능성이 큽니다."

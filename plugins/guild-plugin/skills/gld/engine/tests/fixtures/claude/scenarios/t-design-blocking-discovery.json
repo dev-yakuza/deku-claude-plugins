@@ -1,0 +1,36 @@
+{
+  "format": 1,
+  "description": "Stage 3: … before the developer step → F1, no step (TF1).",
+  "stream": "../f2/r4.jsonl",
+  "init_from_argv": true,
+  "role": {
+    "example": "result-work-s3",
+    "expect": "done"
+  },
+  "structured_output": {
+    "status": "done",
+    "outputs": [
+      "docs/specs/42/skeleton.md"
+    ],
+    "requests": [],
+    "blocked_by": null,
+    "discoveries": [
+      {
+        "kind": "bug",
+        "where": "src/a.py",
+        "note": "fixture",
+        "blocks_current_ac": true
+      }
+    ],
+    "irreversible": [],
+    "golden_reasons": [],
+    "note": "fixture"
+  },
+  "actions": [
+    {
+      "op": "write",
+      "path": "docs/specs/42/skeleton.md",
+      "content": "# design\n"
+    }
+  ]
+}

@@ -1,0 +1,40 @@
+{
+  "format": 1,
+  "template": "start",
+  "version": "exp-1",
+  "description": "Plugin-fixed start procedure (design §3.1). analyze → ac-format → plan. Not a template: evolve never changes it. In stage 1 the plan step is the I1 machine rule (acparse.plan_rule_stop): type != feature, a split proposal, an open prerequisite or risk high stop for a human; otherwise the engine posts the assumptions and goes on. From stage 2 it is the leader's plan gate (tasks/plan-gate.md): risk high still goes to a human (scope D4, conservative); the engine writes the template steps after the leader's plan answer.",
+  "steps": [
+    {
+      "id": "analyze",
+      "role": "requirements-engineer",
+      "inputs": [
+        "in:issue.md",
+        "in:git-history.md",
+        "in:failure-summary.md",
+        "in:leader-decision.md"
+      ],
+      "outputs": [
+        "docs/specs/{issue}/analysis.md"
+      ]
+    },
+    {
+      "id": "ac-format",
+      "run": "ac-format",
+      "inputs": [
+        "docs/specs/{issue}/analysis.md"
+      ],
+      "on_fail": {
+        "back_to": "analyze",
+        "max": 2
+      }
+    },
+    {
+      "id": "plan",
+      "check": "plan-gate",
+      "inputs": [
+        "docs/specs/{issue}/analysis.md",
+        "in:issue.md"
+      ]
+    }
+  ]
+}

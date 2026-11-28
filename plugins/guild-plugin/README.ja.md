@@ -17,7 +17,7 @@ Claude Code のための**自己進化するエージェント組織**。Guild �
 
 ```bash
 claude /plugin marketplace add dev-yakuza/deku-claude-plugins
-claude /plugin install guild-plugin@deku-claude-plugins
+claude /plugin install deku-claude-plugins@guild-plugin
 ```
 
 ## クイックスタート
@@ -41,6 +41,8 @@ claude /plugin install guild-plugin@deku-claude-plugins
 **オンデマンド・観察** — `rollback <target>`（非破壊アンドゥ）· `ask <question>`（standards+⑥ に基づく引用付き Q&A）· `monitoring [--html]`（状態スナップショット）
 
 **イテレーション** — `sprint plan`（目標を 1 つ決めて容量まで埋める — 目標の Issue を先に、残りの枠は目標外の着手可能な Issue で。人がいれば答え 1 つで解ける決定質問を出し、待っている Issue を着手可能にする（`--no-ask` で無効）。過去のスプリント実績で容量を減らさない — 今回のスプリントに入れる Issue の選別 + 依存順序 + 追跡 Issue 作成 — スプリントが触るコードのリファクタリング枠を根拠付きで 1 つ予約し — そのコードのテストが不足していれば特性化テスト（VRT が動くならビジュアルケースも）を先に、変更前のコードで green にして敷き、リファクタリング候補がなければテスト不足のホットスポットに安全網だけを敷く枠として使い — 該当がなければ理由を記録して空ける。lint ルールは `evolve` が担う）· `sprint run`（依存順に無人開発 → **PR スタック**、Issue ごとの git worktree 隔離、レート制限は自動待機・再開 — その間に人間がレビュー・マージ）· `sprint daily`（何をどの順にマージするか · 人間待ち · 失敗）· `sprint sync`（squash 専用リポジトリで下段 PR をマージした後：その上に積まれた PR へデフォルトブランチをマージ・検証・push し ready にする — レビューで変わった依存は人間が追従する）· `sprint board`（スプリントを GitHub Projects のカンバンに映す — `Issues → Backlog → Ready → In progress → Blocked → In review → Done` — 設定は最初の一度だけ、以降は `plan`・`run` が自動更新）· `sprint retro`（指標 → キャパシティ較正 → evolve → スプリントのクローズ）
+
+**Guild 0.98.7 が計画したスプリントの継続。** エンジンはその追跡 Issue を読みます（メンバー表・plan ハッシュの形式は同じ）が、0.98.7 の作業は引き継ぎません。メンバーの完了はこのマシンのエンジン記録か「完了」でクローズされた Issue だけで判定し、0.98.7 のラベル・ブランチ・PR は読みません。`sprint run` の**前に** 0.98.7 のメンバー PR をレビューしてマージかクローズしてください。開いた PR がすでにクローズするメンバーはエンジンが拒否し（`open-closing-pr`）、二度目の開発はしません。スタックのマージで開いたまま残った Issue は手でクローズし、再開発するメンバーは `guild:done` を外し、0.98.7 の監督プロセスが動いていないことを確認し、時間枠は `--window` で指定してください — `sprint run` がこのチェックリストを表示します。エンジンがそのトラッカーを実行した後は、`sprint daily`・`sprint retro` は 0.98.7 の `.sprint-logs/<tracker>/failures.jsonl` を読みません（エンジン以前の記録）。
 
 ## 安全性（不変条件）
 
@@ -71,8 +73,8 @@ Guild はそれをレビューの証拠として使います。UI の Issue で�
 *ビジュアルケース*（画面・状態・テーマ・サイズ）を書き、developer が基準画像にし、test ステージが
 `commands.vrt` を実行し、designer が QA で画像を直接開いて確認し、PR には GitHub の画像比較へ案内する
 **ビジュアル変更**セクションが付きます。既存の基準画像の書き換えは期待値を変えることなので PR に根拠を
-残す必要があり、コミットゲートはこれを**警告**します（ブロックはしない — `config.json` の
-`visual.baselines` で設定）。`visual.tests` のファイルはテストとして扱われ、削除・skip はブロック、
+残す必要があり、コミットゲートはこれを**警告**します（ブロックはしない — `visual` ブロックの `visual.baselines` で設定しますが、
+この版はそのブロックを書きません（`harness.json`・エンジン設定のどちらにもない）。エンジンは自分のパス規則で基準画像を知り、書き換えた画像を PR 本文にすべて載せます）。`visual.tests` のファイルはテストとして扱われ、削除・skip はブロック、
 スクリーンショット/golden マッチャー呼び出しの純減は警告します（この警告は全リポジトリで）。Guild がビジュアルテストのツールを導入することはなく、UI リポジトリに
 なければ `audit` が指摘します。
 
@@ -104,7 +106,8 @@ CLAUDE.md                      # 助言: リポジトリマップ + 検証コマ
 .claude/settings.json          # パーミッション許可リスト + PreToolUse コミットゲートフック
 .claude/agents/                # 役割エージェント（= Guild）
 .claude/guild/
-  config.json                  # Guild 設定（/gld config が管理）
+  harness.json                 # Guild コマンド設定（/gld config が管理）
+  config.json                  # エンジン設定 — /gld init（P2.9）が作る。手で編集せず、harness.json のキーを入れないこと
   knowledge/                   # ⑥ コードベースの事実: index.md（常に読み込み）+ facts/（関連するものだけ取得）。init が基準を播き、evolve が育てる
   memory/                      # ④ エピソード的な作業層（gitignore → クローンごとにローカル、低信頼）: ground-truth.jsonl（捕捉したシグナル。プリフライト Item 8 が実行時に読む）+ consolidated.jsonl（evolve が ③/⑥ に育てた項目の保管庫）+ gate-firings.jsonl（evolve のルール・スコアカードに入るゲート発火ログ）+ review-nudge-state.json（review の evolve 促しクールダウン。最後に促した時点のリポジトリ全体の {count, runs} 一つだけを持つ — 充分な状態が毎回の review で促さないよう、あえて PR 単位のキーにしていない。1 Issue に 1 PR が通常の流れなので、PR 単位キーではほぼ全ての review が「初回」になり結局促してしまった。代わりに、近い時点でレビューされた 2 つの PR 間の稀な競合を受け入れる。自己回復する）
   gates/                       # 強制層: scripts/gate_precommit.py — コミットゲート。3 経路で実行される（.git/hooks/pre-commit = 正本 · PreToolUse(Bash) = 早期警告 · PreToolUse(Edit|Write) --guard-config = ゲート自身のオフスイッチ・ルール編集の前に確認を求める）。+ rules/secrets.md, rules/verification.md（ゲートが何を強制するかの人間可読な宣言 — 検査自体はハードコードである。普遍的で、幻覚されてはならないため）+ rules/boundaries.md（唯一のデータ駆動ルールファイル: `- forbid:` 行。フロントマター status: draft → 人間が確認するまで WARN のみ — INV6）+ dismissed.md（受容したリスクの登録簿）+ findings.json（未解決の違反）
@@ -121,9 +124,8 @@ docs/adr/ , docs/specs/
 |---|---|
 | 開発状態（ステージ・出力） | GitHub Issue/PR + `guild:*` ラベル |
 | ロールエージェント（習慣） | `.claude/agents/*.md` |
-| コードベースの事実（⑥、関連分のみ検索） | `.claude/guild/knowledge/` |
+| コードベースの事実（⑥、関連分のみ検索） | `.claude/guild/knowledge/` (shared by both channels — K2) |
 | 生のエピソード記憶 | `.claude/guild/memory/`（gitignore） |
-| ローカル developer のジョブログ（オプトイン） | `.claude/guild/memory/local-dev/`（gitignore） |
 | 進化台帳 + ゲート + 設定 | `.claude/guild/` |
 | キュレーション標準（charter・architecture…） | `docs/standards/` |
 

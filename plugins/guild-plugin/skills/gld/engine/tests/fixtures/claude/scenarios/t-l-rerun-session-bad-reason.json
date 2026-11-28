@@ -1,0 +1,22 @@
+{
+  "format": 1,
+  "description": "Stage 3: leader, needs_leader: a session with a reason that is not a model reason (E28).",
+  "stream": "../leader/real-2.1.323/plan-gate-plan.jsonl",
+  "init_from_argv": true,
+  "leader": {
+    "example": "leader-answer-s3",
+    "expect": "models-invalid"
+  },
+  "structured_output": {
+    "answer": "rerun",
+    "reason": "transient",
+    "step": "implement",
+    "note": "Try again with a stronger session.",
+    "recommendation": null,
+    "defer": null,
+    "session": {
+      "model": "opus",
+      "effort": "high"
+    }
+  }
+}

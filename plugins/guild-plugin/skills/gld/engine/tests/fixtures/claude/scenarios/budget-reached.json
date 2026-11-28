@@ -1,0 +1,14 @@
+{
+  "format": 1,
+  "description": "--max-budget-usd reached (S3). Result shape re-recorded from the real CLI 2.1.323 (P4 canary budget probe): subtype error_max_budget_usd, is_error, terminal_reason budget_exhausted, errors, exit 1.",
+  "stream": "../f2/r4.jsonl",
+  "init_from_argv": true,
+  "result": {
+    "subtype": "error_max_budget_usd",
+    "is_error": true,
+    "terminal_reason": "budget_exhausted",
+    "stop_reason": "tool_use",
+    "errors": ["Reached maximum budget ($8.0)"]
+  },
+  "exit_code": 1
+}

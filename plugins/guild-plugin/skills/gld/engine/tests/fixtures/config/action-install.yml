@@ -1,0 +1,11 @@
+name: 'Install Dependencies'
+runs:
+  using: 'composite'
+  steps:
+    - uses: subosito/flutter-action@v2
+      with:
+        flutter-version-file: pubspec.yaml
+        cache: true
+    - name: Change environment
+      shell: bash
+      run: dart run :change_project ildangongbu

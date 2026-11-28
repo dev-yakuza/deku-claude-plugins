@@ -1,10 +1,10 @@
 # INIT
 
-**One-time bootstrap + onboarding.** Sets up Guild's harness in the current repo, founds the role organization (the Guild), and drafts standards. Goal: build the environment where Guild works best. Growth is `evolve` (later); structural upgrades are `update` (later). `init` is NOT a growth path — re-running reports "already initialized."
+**One-time bootstrap + onboarding.** Sets up Guild's harness in the current repo, makes the **engine settings** with the human (P2.9), and drafts standards. Goal: build the environment where Guild works best. Growth is `evolve` (later); structural upgrades are `update` (later). `init` is NOT a growth path — re-running reports "already initialized."
 
-`$1` = language for interviews/standards/labels display: `ko`/`korean`/`한국어` → Korean, `ja`/`japanese`/`日本語` → Japanese, `en`/`english`/empty → English (default). This is stored in `config.json` `language`.
+`$1` = language for interviews/standards/labels display: `ko`/`korean`/`한국어` → Korean, `ja`/`japanese`/`日本語` → Japanese, `en`/`english`/empty → English (default). This is stored in `harness.json` `language`.
 
-> **Bash**: simple calls only (`<<SKILL_DIR>>/commands/atoms/_bash_rules.md`). Codebase discovery via Grep/Glob/Read. All comment/file bodies via the Write tool. **Checkout**: never move the human's branch or history — `_checkout.md` (a pull/sync/switch request: show the commands and which commits change hash, then ask).
+> **Bash**: simple calls only (`<<SKILL_DIR>>/commands/atoms/_bash_rules.md`). Codebase discovery via Grep/Glob/Read. All comment/file bodies via the Write tool.
 
 ---
 
@@ -27,10 +27,10 @@ These govern every file init writes — role agents, standards, CLAUDE.md, confi
 
 1. Check for an existing install (its own Bash call):
    ```bash
-   ls .claude/guild/config.json
+   ls .claude/guild/harness.json
    ```
-2. **If it exists** → Guild is already initialized. Report: "Guild is already initialized in this repo. Use `/gld update` to adopt central improvements, or edit `.claude/guild/config.json` / `docs/standards/` directly." **Stop.** (Do not re-scan or overwrite.)
-3. **If absent** → proceed to P1.
+2. **If it exists** → Guild is already initialized. Report: "Guild is already initialized in this repo. Use `/gld update` to adopt central improvements, or edit `.claude/guild/harness.json` / `docs/standards/` directly." Then look at the engine settings (`ls .claude/guild/config.json`): absent → offer **P2.9 alone** (its draft and answers are resumed); present → `init migrate --json` (P0b step 1): `state: migrated` (a 0.98.x install moved here, its old config.json not yet replaced) → offer **P2.9 alone**; otherwise P2.9 step 0 only (`init propose --compare`, nothing is written). **Stop.** (Do not re-scan or overwrite.)
+3. **If absent** → `ls .claude/guild/config.json` (its own Bash call): present → a 0.98.x Guild may have set this folder up — do **P0b** (after P2.9 below) first; absent → proceed to P1.
 4. Verify this is a GitHub repo (needed for the dev flow's state model):
    ```bash
    gh repo view --json nameWithOwner -q .nameWithOwner
@@ -78,7 +78,7 @@ Create the harness. **Track every file created/merged** for the P4 summary and p
 
 ### 0b. Ensure the harness will not break the repo's own linters (DETERMINISTIC, do this with step 0)
 
-Guild writes files **into the user's repo** — `gate_precommit.py`, 16 agent definitions, the
+Guild writes files **into the user's repo** — `gate_precommit.py`, the engine settings, the
 `CLAUDE.md` block, `docs/standards/*` — and those files then fall under whatever linting the repo
 already runs on commit. Guild does not control that tooling, and a Guild-authored file that trips
 it **blocks the human's commits**, which is a far worse first impression than a missing feature.
@@ -126,19 +126,19 @@ Guild's harness under `.claude/` (agents, guild state, settings.json) is **meant
 (INV4: this is an additive edit to `.gitignore`; existing rules are preserved.)
 
 ### 1. Guild state skeleton
-**Resolve the installed plugin version first** (its own Read call — do NOT hardcode a version string): Read `<<SKILL_DIR>>/../../.claude-plugin/plugin.json` and take its `version` field. Use that literal value for `config.json`'s `version` below. (A hardcoded literal here goes stale the moment the plugin ships a new version — every fresh `init` would then falsely report itself as behind via `/gld update --check`.)
+**Resolve the installed plugin version first** (its own Read call — do NOT hardcode a version string): Read `<<SKILL_DIR>>/../../.claude-plugin/plugin.json` and take its `version` field. Use that literal value for `harness.json`'s `version` below. (A hardcoded literal here goes stale the moment the plugin ships a new version — every fresh `init` would then falsely report itself as behind via `/gld update --check`.)
 
 Create via Write tool:
-- `.claude/guild/config.json` — the M1 config (see schema below).
-- `.claude/guild/knowledge/` — the ⑥ semantic-memory **baseline** (`<<SKILL_DIR>>/commands/atoms/_knowledge.md` format), seeded from the P1 scans — **not** a blank header:
+- `.claude/guild/harness.json` — the LLM commands' settings (see schema below). **Never `config.json`** — that file is the engine's alone (P2.9, H13): an M1 key in it makes the engine refuse to start.
+- `.claude/guild/knowledge/` — the ⑥ semantic-memory **baseline** (`<<SKILL_DIR>>/commands/atoms/_knowledge.md` format; one folder **shared by both channels**, written only where the channel value `writes_knowledge` is on — `python3 -I <<SKILL_DIR>>/engine/engine.py channel show --json` → `values.writes_knowledge`: off → seed nothing; on → seed only when `index.md` is not there yet, never over existing facts), seeded from the P1 scans — **not** a blank header: <!-- promote: literal; rename-exception: K2 shared knowledge -->
   - `index.md` — a finite pointer map keyed by path/area (one line per seeded slice → its `facts/` file + a one-line hook).
   - `facts/<area>.md` — seed a **solid baseline** (not exhaustive): the top bug-**hotspot** files (with approx `fix:` frequency), the strongest **co-change** groups (X↔Y), and the main **layer/coupling** boundaries from structure-scan. Each fact evidence-anchored to git history, provenance `init-scan`. **Reuse the same scan findings** that fill the agent specialization's hotspot line (step 2) so ③ and ⑥ agree. `evolve` grows the rest.
 - `.claude/guild/evolution-log.md` — ledger header (used by evolve later).
 - `.claude/guild/gates/` — the **강제층 (enforcement layer, M3 minimal set)**:
-  - `scripts/gate_precommit.py` — **copy** the bundled gate verbatim from `<<SKILL_DIR>>/gates/gate_precommit.py` (Read it, Write it to the repo path). It blocks a commit carrying a **secret** (keystore/.p12/.jks/.pem/.key/serviceAccount/.env/key material — public identifiers like `google-services.json` and `.env.example` excluded) or **weakening verification** (INV2 — deleted test file / net-removed assertions / added skip·focus directives). Off-switch = config `gates.enabled`. It runs in **three modes** (step 6 installs the git hook; step 5 wires the two settings hooks):
+  - `scripts/gate_precommit.py` — **copy** the bundled gate verbatim from `<<SKILL_DIR>>/gates/gate_precommit.py` (Read it, Write it to the repo path). It blocks a commit carrying a **secret** (keystore/.p12/.jks/.pem/.key/serviceAccount/.env/key material — public identifiers like `google-services.json` and `.env.example` excluded) or **weakening verification** (INV2 — deleted test file / net-removed assertions / added skip·focus directives). It has no off-switch in guild-plugin (it reads `gates.enabled` of `config.json`, where the engine schema allows no such key → always on). It runs in **three modes** (step 6 installs the git hook; step 5 wires the two settings hooks):
     - `--git-hook` → **the authoritative layer.** Only here is the index final, so this is the only layer that sees a compound `create-and-commit` in one Bash call.
     - no args → `PreToolUse(Bash)` **early warning**, so the agent gets a specific reason before spending a turn. It self-filters to commits via `is_git_commit()` (Claude Code's hook-level `if` matching is documented as best-effort, too weak to gate a security check on) and scopes its scan to what the command being run will actually commit.
-    - `--guard-config` → `PreToolUse(Edit|Write|MultiEdit)`. The commit gate only ever sees Bash, so its own off-switch, rule files and `dismissed.md` are editable with no hook firing. This mode does **not** block (`/gld config --gates=off` is legitimate) — it returns `ask`, so disabling the gate is a human decision on the record rather than a side effect.
+    - `--guard-config` → `PreToolUse(Edit|Write|MultiEdit)`. The commit gate only ever sees Bash, so its own off-switch, rule files and `dismissed.md` are editable with no hook firing. This mode does **not** block — it returns `ask`, so touching the gate is a human decision on the record rather than a side effect.
   - `rules/secrets.md` + `rules/verification.md` — one-line rule statements, `status: confirmed` (universal + non-hallucinated → they **block**).
   - `rules/boundaries.md` — **structure/boundary rules, `status: draft` (= WARN only, never blocks until the human confirms — INV6)**. Seed 0–2 `- forbid: <layer-glob> imports <path-substr>` rules from the structure-scan's layer boundaries (e.g. `- forbid: lib/ui/** imports lib/db/`); if the layers are unclear, write the `status: draft` header + a commented example + a note that `evolve`/`audit` grow it. Draft rules warn; confirming a rule (`status: confirmed`) promotes it to a block.
   - `dismissed.md` — accepted-risk registry (header only; `` - `<path/pattern>` — <reason> `` (backticks recommended, optional) downgrades that item to a warning). The gate reads the path from the **front** of a top-level bullet only — a leading backtick token, or the plain text before the first em dash — never from the reason; an indented sub-bullet, or a plain-text front part holding a backtick, is ignored with an informational note. Write the header's format line in this form **as a `>` quote or a plain sentence — never as a bullet**: a top-level `- ` line is read as an entry, so a bulleted format line would register `<path/pattern>` itself.
@@ -147,55 +147,61 @@ Create via Write tool:
 - `.claude/guild/.gitignore` — containing `memory/` (episodic memory is gitignored), **`.gld-sprint-*.window`** and **`.gld-sprint-*.board`** (per-run sidecar config: a sprint that has not completed keeps them for days, and the parent `!.claude/guild/` negation would otherwise show them as untracked and let `git add .` commit a machine-local window into the repo — after which `cleanup`'s `rm -f` deletes a TRACKED file; 04-sprint-window.md §6.5 INV3), and `gates/scripts/local/__pycache__/` (a repo-local gate extension is imported at commit time; the gate sets `sys.dont_write_bytecode` so none should appear, but a repo whose own `.gitignore` does not cover `__pycache__` would otherwise commit any that slipped through — Guild owns this file, so it should not depend on the repo's).
 - `.claude/guild/memory/.gitkeep`.
 
-**config.json (M1 subset):**
+**harness.json (M1 subset — H13; the engine never reads it, `gates` and `visual` are not in it, D7):**
 ```json
 {
   "version": "<the plugin.json version resolved above — e.g. 0.40.0, NOT a literal copied from this doc>",
   "language": "<lang from $1>",
-  "roles": ["leader", "tech-lead", "developer", "tester", "product-owner", "qa", "designer", "infra", "dba", "security", "performance", "i18n", "analytics", "tech-writer", "release-manager", "support-triage"],
-  "commands": { "test": "<simple cmd>", "lint": ["<step1>", "<step2>"], "typecheck": null, "build": null, "e2e": "<simple cmd or null>", "vrt": "<simple cmd or null>" }, "visual": { "baselines": ["<glob>"], "tests": ["<glob>"], "matchers": ["<name>"], "packages": ["<dir>"], "config_files": ["<path or glob>"], "runnable": false, "env": "<one line or null>", "create": "<scoped recipe with <file>, or null>", "run_file": "<scoped compare with <file>, or null>" },
+  "roles": ["<the role files that exist in .claude/agents/ — step 2>"],
+  "commands": { "test": "<simple cmd>", "lint": ["<step1>", "<step2>"], "typecheck": null, "build": null,
+                "e2e": "<simple cmd or null>", "vrt": "<simple cmd or null>" },
   "automation": { "evolve_nudge": true },
-  "gates": { "enabled": true },
-  "sprint": { "capacity": null, "max_stack_depth": 3, "refactor_slot": true,
-              "stage_groups": false, "history": [], "board": null, "window": null }
+  "sprint": { "capacity": null, "max_stack_depth": 3, "refactor_slot": true, "history": [],
+              "board": null, "window": null }
 }
 ```
-- `commands.*` values are the **normalized, simple-bash-safe** forms from command-scan (see `scan_repo.md` Section 2): each is either a single simple command string, or an **array** of simple commands run in sequence. They MUST NOT contain `$(...)` or backticks, `&&`, `||`, `|`, `;`, `&`, newlines, or redirections — Guild runs them one per Bash call. (Backticks are the older spelling of `$(...)`; they were missing from this list while `render_supervisor.py` rejected them, so a reader taking the list literally would have narrowed the enforcer and let `` `id` `` reach the template's `eval`.) (e.g. `flutter test --fail-fast --concurrency=$(nproc --all)` → store `"flutter test --fail-fast"`; `flutter analyze && npx remark . --quiet --frail` → store `["flutter analyze", "npx remark . --quiet --frail"]`.) A missing category → `null`.
+- `commands.*` values are the **normalized, simple-bash-safe** forms from command-scan (see `scan_repo.md` Section 2): each is either a single simple command string, or an **array** of simple commands run in sequence. They MUST NOT contain `$(...)` or backticks, `&&`, `||`, `|`, `;`, `&`, newlines, or redirections — Guild runs them one per Bash call. (Backticks are the older spelling of `$(...)`; they were missing from this list while the 0.98.7 supervisor renderer rejected them, so a reader taking the list literally would have narrowed the enforcer — `stack_sync.py` enforces this list today.) (e.g. `flutter test --fail-fast --concurrency=$(nproc --all)` → store `"flutter test --fail-fast"`; `flutter analyze && npx remark . --quiet --frail` → store `["flutter analyze", "npx remark . --quiet --frail"]`.) A missing category → `null`.
 - `commands.e2e` records the detected integration/E2E command (e.g. `flutter test integration_test`). **M1 detects and records it but does NOT auto-run E2E** (test stage runs unit/existing tests only; E2E auto-run is a later milestone). Recording it here keeps the info from being lost and lets a human run it manually.
-- `commands.vrt` + `visual.*` record the **visual regression** setup from command-scan (`scan_repo.md` 3b — `vrt` → `commands.vrt`, `vrt_baselines` → `visual.baselines`, `vrt_tests` → `visual.tests`, `vrt_matchers` → `visual.matchers`, `vrt_packages` → `visual.packages`, `vrt_run_file` → `visual.run_file`, `vrt_config_files` → `visual.config_files`, `vrt_runnable` → `visual.runnable`, `vrt_env` → `visual.env`, `vrt_create` → `visual.create`). Their meaning and every rule built on them are `_handoff.md` Section L — read it before filling these. Unlike `e2e`, `vrt` **is** run (test stage, when `visual.runnable`, for an Issue with visual cases or one that changed a visual package — Section L.3 `run:`). The commit gate reads `visual.baselines` + `visual.config_files` and **warns** (never blocks) when a commit rewrites one, and treats `visual.tests` as test files (deleting or skipping one **blocks** like any test; dropping its screenshot matcher calls **warns** — `verification:visual-assertion-drop`). `visual.create` is the developer's scoped recipe only — never put an update command under `commands`. **Show the human the detected `visual` block in P4's summary**, with `runnable` and `env` spelled out: a wrong `runnable: true` makes every UI Issue loop on rendering noise. No visual tests → `"vrt": null` and `"visual": {"baselines": [], "tests": [], "matchers": [], "packages": [], "run_file": null, "config_files": [], "runnable": false, "env": null, "create": null}`; Guild does not install a visual test tool (`audit_readiness.md` reports the gap).
-- `roles` lists the **full installed roster** (16) — the spine roles plus every participation/gate specialist. It records who is *available*; the leader decides who *participates* per task (`_handoff.md` Section G). Keep it in sync with the agents actually written in step 2.
-- `gates.enabled` (M3) is the **off-switch** for the enforcement layer — `true` = the pre-commit gate blocks (secret / verification-weakening); `false` = advisory only (off-switch) — and the Bash text guard (`shell-text` · `bodies-save` · `directive-slice` · `unmarked-comment`) is off too. `automation.evolve_nudge` (default `true`) is the **off-switch for the review-stage evolve nudge** (`review.md` Step 5) — `false` silences it entirely; toggle via `/gld config --evolve-nudge=<on|off>`.
+- These `commands` are for the LLM commands only. The engine's named commands are made in **P2.9** from the repository's own files — never copy one list into the other.
+- `commands.vrt` records the **visual regression** command from command-scan (`scan_repo.md` 3b). The other `vrt_*` findings are shown to the human in P4's summary and stay out of `harness.json` (D7: the gate reads only `config.json`, and guild-plugin has no `visual` there; the engine's golden and comparison-config path rules come from P2.9). Deleting or skipping a visual test blocks like any test; dropping its screenshot matcher calls **warns**.
+- `roles` lists the role files that **exist** in `.claude/agents/` once step 2 is done (the answer's `roles` — step 2). It records who is *available*; the leader decides who *participates* per task (`_handoff.md` Section G).
+- `automation.evolve_nudge` (default `true`) is the **off-switch for the review-stage evolve nudge** (`review.md` Step 5) — `false` silences it entirely; toggle via `/gld config --evolve-nudge=<on|off>`. The commit gate and the Bash text guard (`shell-text` · `bodies-save`) are always on in guild-plugin.
 
-### 2. Role agents (the Guild's full roster — 16)
-Install the **entire roster** so the leader can assemble any of them per task ("전 역할 활성화; init이 로스터 전체 설치, 리더가 태스크별 조건부 참여"). The roster has three participation kinds (documented in `_handoff.md` Section G):
+### 2. Role agents (the Guild's full roster — 16; written only where the channel writes role files)
+Whether this run writes role files is a **channel value** (`writes_role_files`, readiness T2 R4-3): on in the stable
+channel, off in the development channel. Ask the engine — its own Bash call, it reads the checkout only (without a
+GitHub repository pass `--repo local/<folder name>`):
+```bash
+python3 -I <<SKILL_DIR>>/engine/engine.py init roles --repo <owner>/<repo> --json
+```
+It answers `writes_role_files`, `write` (the roles to write now — the missing ones, empty when the value is off),
+`missing`, `existing` (each with its `differences` from this plugin's template), `others` and `roles`.
+
+**`writes_role_files: false`** → `init` writes **no** role file, edits none and merges none.
+- Put exactly the answer's `roles` into `harness.json` `roles`.
+- Missing roles do not stop init: the engine settings are still made. P2.9 names them (`roles_missing` — the roles the proposed templates and the step catalog need and the plugin does not ship). Tell the human: "역할 파일이 없습니다: <names>. 안정 채널의 init 이 만듭니다 — 이 채널은 역할 파일을 만들지 않습니다." (in the `$1` language). Until they exist, the steps that need them stop.
+
+**`writes_role_files: true`** → install the roster so the leader can assemble any of them per task ("전 역할 활성화; init이 로스터 전체 설치, 리더가 태스크별 조건부 참여"). The roster has three participation kinds (documented in `_handoff.md` Section G):
 - **Spine roles (always in the flow)**: `leader`, `tech-lead`, `developer`, `tester`, `qa`.
 - **Participation roles (leader convenes conditionally)**: `product-owner`, `designer`, `infra`, `dba`, `security`, `performance`, `i18n`, `analytics`, `tech-writer`, `release-manager`, `support-triage`.
 - **Gate roles (conditional review checks)**: `designer` (UI/UX review), `security` (security review), `infra` (CI/CD·deploy·env·IaC review — gate-only, never authors its own diff) — same files as their participation entry.
 
-For **each of the 16** roles (`leader`, `tech-lead`, `developer`, `tester`, `product-owner`, `qa`, `designer`, `infra`, `dba`, `security`, `performance`, `i18n`, `analytics`, `tech-writer`, `release-manager`, `support-triage`):
+For **each role the answer's `write` names — and no other**:
 - Read `<<SKILL_DIR>>/templates/agents/<role>.md`.
 - Fill the `{{...}}` placeholders from the P1 scans + P1.5 interview:
-  - **Read each template's own tokens — do not work from a list held here.** Most placeholders are now **role-scoped and self-describing**: `tech-lead.md` asks for `{{ARCHITECTURE_BOUNDARIES_AND_KEY_COUPLING}}` and `{{TECH_LEAD_TRAPS_AND_HOTSPOTS}}`, `designer.md` for `{{DESIGN_SYSTEM_AND_THEME_CONVENTIONS}}`, and so on — the token says what it wants, so fill it from that meaning plus the Korean bullet label next to it. ⚠ They used to be two shared tokens, `{{CONVENTIONS}}` (in 15 of 16 files) and `{{BOUNDARIES}}` (in 7), carrying about a dozen unrelated meanings between them — and *inverting* between files: in `tech-lead` `{{BOUNDARIES}}` meant architectural boundaries while `{{CONVENTIONS}}` meant hotspots, but in `performance` `{{BOUNDARIES}}` meant hotspots. Filling them correctly required inferring the intended meaning from surrounding prose on every file. Do not reintroduce a shared token for role-specific content.
-  - Genuinely shared tokens, unchanged: `{{PROJECT_NAME}}` (all 16), `{{DOMAIN}}`, `{{STACK}}`, `{{VALUES}}`, `{{ARCHITECTURE}}`, `{{LEADER_NOTES}}`, `{{TEST_CMD}}`, `{{LINT_CMD}}`, `{{TYPECHECK_CMD}}`, `{{TEST_FRAMEWORK}}`, `{{TEST_LOCATION}}`, `{{E2E_SETUP}}`, `{{VISUAL_TEST_SETUP}}` (tester + designer — `commands.vrt`, `visual.baselines` and `visual.env` from config, and whether Guild can run them (`visual.runnable`); "없음" in `config.language` when there are none). (`{{E2E_CMD}}`/`{{BUILD_CMD}}` appear only in `verification.md`/`CLAUDE.md.tmpl`, and `{{VRT_CMD}}`/`{{VRT_BASELINES}}` only in `verification.md` — none in any agent template.) ⚠ **This covers the 16 agent templates only, NOT the 5 standards templates** (step 3 below) — those introduce their own, separate placeholder set (`{{MISSION}}`, `{{VISION}}`, `{{VALUES}}`, `{{GOALS}}`, `{{NON_GOALS}}`, `{{CODE_STYLE}}`, `{{COMMIT_STYLE}}`, `{{TEST_CONVENTION}}`, `{{PR_CONVENTION}}`, `{{MUST_PASS}}`, `{{QUALITY_EXPECTATIONS}}`, `{{TRADEOFFS}}`, `{{VERIFY_RULES}}`, `{{DOD}}`, `{{DIRECTORY_MAP}}`, `{{SEAMS}}`, `{{PITFALLS}}`), filled per step 3's own generic "content placeholders from scans + interview" instruction — do not assume this list is exhaustive across every templated file init writes.
-  - `{{TEST_CMD}}`/`{{LINT_CMD}}`/`{{TYPECHECK_CMD}}` use the **normalized** commands from config (no `$(...)`/`&&`; render an array as a comma- or slash-separated list of the simple steps).
-  - **Every `{{*_HOTSPOTS}}` token MUST be filled from the hotspot-scan (scan 6) findings** — list the concrete top bug-hotspot files/areas (with their approximate `fix:` frequency) and any strong co-change groups. This is evidence from git history, not a guess — do NOT reduce such a line to "규칙 미정". The `_HOTSPOTS` suffix is the mechanical handle for this rule and is **exactly co-extensive** with the five roles it applies to, so you can check your own work in one call: `grep -l '_HOTSPOTS}}' .claude/agents/*.md` must come back empty once they are filled, and the templates carrying them are precisely `tech-lead`/`developer`/`tester`/`qa`/`performance`. (dba's data-hotspot slot is deliberately *not* named `_HOTSPOTS` — this rule does not cover it, and the suffix must keep matching the rule exactly.) (Hidden *rules/intent* may be "(미정 — evolve가 채움)", but **hotspots are known and must appear.**) Example: "핫스팟: `db_helper.dart`(fix 최다)·`sync_data_controller`·`iap_controller`·`tts_controller` — 변경 시 회귀 주의".
-  - **Carry the three persona markers through verbatim** — `<!-- guild:persona:start -->`,
-    `<!-- guild:persona:end -->`, `<!-- guild:persona:habits -->`. They are never translated and
-    never dropped: `update` replaces exactly the region between the first two, and the migration
-    path anchors on them. A template whose markers did not survive is a persona `update` can
-    never refresh.
-  - **The text BETWEEN `persona:start` and `persona:end` is localized, not rewritten.** Translate
-    it for `ja`/`en`; do not reword, reorder or trim it for `ko`. That region is central-owned —
-    `update` overwrites it wholesale, so any local improvement made here is lost on the next run.
-    Put repo-specific content in 프로젝트 특화 (below the end marker) instead.
-  - **`## 역할 습관` is localized like any other heading, but its marker stays.** Fill the section
-    with the single "(아직 없음 …)" line from the template, localized; `/gld evolve` grows it from
-    there.
-  - Fill the specialization section concretely — this is what makes the role *this repo's* senior, not a generic shell. Apply the **Output conventions** above: no raw `{{...}}` (use a localized "(미정)" note if unknown), structure enumerations as nested sub-bullets, and localize the heading (the template's `프로젝트 특화` heading stays localized — never emit `[PROJECT SPECIALIZATION]`).
-  - **Not-applicable specialists**: a participation role the repo genuinely never needs (e.g. `dba`/`i18n`/`designer` for a single-language headless library) still gets **installed**, but its 프로젝트 특화 section is filled with a localized "(해당 없음 — 이 레포에 <해당 영역> 없음)" per that template's authoring hint. Installing it is cheap and lets `evolve` promote it later; the leader simply won't convene it. Do NOT skip creating the file.
-- Write the result to `.claude/agents/<role>.md`. **If a file of that name already exists, do not touch it — report it and move on.** `init` never merges an agent file; that is `update`'s job (it replaces the persona marker region and refreshes the central frontmatter keys, leaving everything else alone). ⚠ This line used to say "see Merge rules below" and there was no such section.
+  - **Read each template's own tokens — do not work from a list held here.** Most placeholders are **role-scoped and self-describing**: `tech-lead.md` asks for `{{ARCHITECTURE_BOUNDARIES_AND_KEY_COUPLING}}` and `{{TECH_LEAD_TRAPS_AND_HOTSPOTS}}`, `designer.md` for `{{DESIGN_SYSTEM_AND_THEME_CONVENTIONS}}`, and so on — the token says what it wants, so fill it from that meaning plus the Korean bullet label next to it. Do not reintroduce a shared token for role-specific content.
+  - Genuinely shared tokens: `{{PROJECT_NAME}}` (all 16), `{{DOMAIN}}`, `{{STACK}}`, `{{VALUES}}`, `{{ARCHITECTURE}}`, `{{LEADER_NOTES}}`, `{{TEST_CMD}}`, `{{LINT_CMD}}`, `{{TYPECHECK_CMD}}`, `{{TEST_FRAMEWORK}}`, `{{TEST_LOCATION}}`, `{{E2E_SETUP}}`, `{{VISUAL_TEST_SETUP}}` (tester + designer — `commands.vrt` from `harness.json` and what step 1's command-scan found about visual tests; "없음" in the `$1` language when there are none). ⚠ This covers the 16 agent templates only, NOT the 5 standards templates (step 3) — those have their own placeholder set.
+  - `{{TEST_CMD}}`/`{{LINT_CMD}}`/`{{TYPECHECK_CMD}}` use the **normalized** commands from `harness.json` (no `$(...)`/`&&`; render an array as a comma- or slash-separated list of the simple steps).
+  - **Every `{{*_HOTSPOTS}}` token MUST be filled from the hotspot-scan (scan 6) findings** — the concrete top bug-hotspot files/areas (with their approximate `fix:` frequency) and any strong co-change groups; never "규칙 미정". The templates carrying them are exactly `tech-lead`/`developer`/`tester`/`qa`/`performance` (dba's data-hotspot slot is deliberately not named `_HOTSPOTS`).
+  - **Carry the three persona markers through verbatim** — `<!-- guild:persona:start -->`, `<!-- guild:persona:end -->`, `<!-- guild:persona:habits -->`. Never translated, never dropped: `update` replaces exactly the region between the first two.
+  - **The text BETWEEN `persona:start` and `persona:end` is localized, not rewritten** (translate for `ja`/`en`; do not reword, reorder or trim it for `ko`). Repo-specific content goes into 프로젝트 특화 below the end marker.
+  - **`## 역할 습관` is localized like any other heading, but its marker stays.** Fill it with the template's single "(아직 없음 …)" line, localized; `/gld evolve` grows it.
+  - Fill the specialization section concretely, per the **Output conventions** (no raw `{{...}}`, nested sub-bullets, a localized heading).
+  - **Not-applicable specialists** (e.g. `dba`/`i18n`/`designer` for a headless library) are still **installed**, with a localized "(해당 없음 — 이 레포에 <해당 영역> 없음)" specialization. Do NOT skip creating the file.
+- Write the result to `.claude/agents/<role>.md` — only a role `write` names. **A role file that exists is never written over, edited or merged** (`existing`): show its `differences` in P4 (one line per file that has any — "kept; `/gld update` refreshes the persona region"), never act on them here.
+- Then put the answer's `roles` into `harness.json` `roles`.
 
-Static copy + specialization only — no HR (hire/retire/promote) in M1. The roster is installed as-is; growing/pruning it is `evolve`.
+Static copy + specialization only — no HR (hire/retire/promote). Growing/pruning the roster is `evolve`.
 
 ### 3. Standards drafts
 For each of `charter`, `architecture`, `conventions`, `quality-bar`, `verification`:
@@ -212,8 +218,8 @@ Also create `docs/adr/0000-template.md` (a minimal ADR skeleton) and ensure `doc
   - Else → append the filled Guild block (with markers) to the end, preserving all existing content.
 
 ### 5. settings.json (key-level merge — preserve existing)
-- Read `<<SKILL_DIR>>/templates/settings.json.tmpl`. **It contains no placeholders and is already valid JSON as shipped** — its `permissions.allow` lists only the **eight** commands Guild itself always needs — `gh`, `git`, `jq`, `ls`, and `python3`, `bash`, `chmod`, `ps`. ⚠ **Do not trim it to four.** The last four are what `sprint run` needs: step 2 renders the supervisor with `python3`, and step 5 launches it with `bash`; the renderer `chmod`s its output, and the duplicate-run guard reads `ps`. Removing them makes `/gld sprint run` prompt or fail on the unattended path.
-- **Append one `"Bash(<bin>:*)"` element to `permissions.allow` per distinct binary this repo's verification commands use.** Collect them from config `commands.test`/`lint`/`typecheck`/`build`: each value is either a single command string or a normalized **array** of steps (Section 2's rule — e.g. `["flutter analyze", "npx remark . --quiet --frail"]` uses **two** distinct binaries, `flutter` and `npx`). Take the first word of each step, dedupe against what is already listed, and add the rest. Missing one only costs a permission prompt on every lint/test run — not a broken file.
+- Read `<<SKILL_DIR>>/templates/settings.json.tmpl`. **It contains no placeholders and is already valid JSON as shipped** — its `permissions.allow` lists only the **eight** commands Guild itself always needs — `gh`, `git`, `jq`, `ls`, and `python3`, `bash`, `chmod`, `ps`. ⚠ **Do not trim it to four.** `python3` is how `sprint run` starts the engine's supervisor (`python3 -I <<SKILL_DIR>>/engine/engine.py sprint run …`, `commands/engine/sprint.md`) — removing it makes `/gld sprint run` prompt or fail. `bash`, `chmod` and `ps` were what the 0.98.7 generated supervisor needed (launch, the renderer's `chmod`, the duplicate-run guard); the shipped template keeps them unchanged in this edition.
+- **Append one `"Bash(<bin>:*)"` element to `permissions.allow` per distinct binary this repo's verification commands use.** Collect them from `harness.json` `commands.test`/`lint`/`typecheck`/`build`: each value is either a single command string or a normalized **array** of steps (Section 2's rule — e.g. `["flutter analyze", "npx remark . --quiet --frail"]` uses **two** distinct binaries, `flutter` and `npx`). Take the first word of each step, dedupe against what is already listed, and add the rest. Missing one only costs a permission prompt on every lint/test run — not a broken file.
   - ⚠ Earlier versions of this template carried a `{{ADDITIONAL_BIN_ENTRIES}}` slot that the model had to fill with a **raw JSON fragment including its own leading comma** (`,\n      "Bash(npx:*)"`). Getting that wrong produced an unparseable `settings.json`, which silently took the gate hooks down with it — the whole enforcement layer, lost to a comma. Adding array elements to an already-valid document has no such failure mode. Do not reintroduce a fragment placeholder here.
 - The template also wires the two **`PreToolUse` gate hooks** (step 6 covers the third, authoritative wiring): `Bash` → `gate_precommit.py` early warning (fires on every Bash call; the script's own `is_git_commit()` decides whether it is a commit), and `Edit|Write|MultiEdit` → `--guard-config` (asks before the gate's own off-switch or rule files are edited). Both carry a `timeout`.
 - **If `.claude/settings.json` does not exist** → Write the filled template.
@@ -228,13 +234,14 @@ Also create `docs/adr/0000-template.md` (a minimal ADR skeleton) and ensure `doc
    ```bash
    git rev-parse --git-path hooks/pre-commit
    ```
-   Hold the literal it prints and use it for every step below. In a **git worktree** `.git` is a *file* (a `gitdir:` pointer), not a directory, so a literal `.git/hooks/…` path does not exist there and every step would silently target nothing — `batch.md` hit exactly this with `info/exclude`. `--git-path` resolves correctly from a normal checkout and a worktree alike (worktrees share the main checkout's hooks, which is what we want: one gate for all of them).
+   Hold the literal it prints and use it for every step below. In a **git worktree** `.git` is a *file* (a `gitdir:` pointer), not a directory, so a literal `.git/hooks/…` path does not exist there and every step would silently target nothing — the 0.98.7 `batch.md` hit exactly this with `info/exclude`. `--git-path` resolves correctly from a normal checkout and a worktree alike (worktrees share the main checkout's hooks, which is what we want: one gate for all of them).
 2. **Ask who owns the existing hook** — this decides everything below. Pass the resolved path to the detector **as an argument** (its own Bash call — the plugin's copy, substituting the literal resolved path):
    ```bash
    python3 <<SKILL_DIR>>/gates/gate_precommit.py --detect-hook-manager <resolved-path>
    ```
    ⚠ **By argument, never "stdin = the hook's text".** The Bash tool runs every command with stdin at `/dev/null`, so the old stdin form always read nothing and answered `none` — and on a lefthook/husky repo `none` is the path that overwrites the manager's hook, which its next `install` silently erases along with the gate. The plugin's copy is used because the repo's copy can lag (`update` may skip refreshing it), and a lagging script ignores the path argument.
    It prints one word: `absent` · `guild` · `none` · or a manager name (`lefthook` / `husky` / `pre-commit` / `overcommit` / `simple-git-hooks`). **Exit non-zero, or any other output, is not an answer**: do not install a hook on it — stop this step and report the detector's error.
+   With no hook file it also reads the checkout's **committed** manager config (`lefthook.yml` and its variants, `.husky/pre-commit`, `.pre-commit-config.yaml`, `.overcommit.yml`) — a fresh clone where `lefthook install` never ran answers `lefthook`, not `absent`, so the gate is registered in the config (step 2b) instead of a hook the next `lefthook install` replaces. Tell the human the manager is not installed in this clone yet (nothing runs at commit until its install).
 
    - **`absent`** → no hook yet; nothing to move aside. Continue to step 3.
    - **`guild`** → already ours; overwrite in place at step 3.
@@ -284,6 +291,19 @@ After registering, still run step 5's `core.hooksPath` check — a manager may s
 
 ⚠ Either way, `git commit --no-verify` skips it, as it skips every git hook — Guild's gate raises the cost of a mistake, it is not a boundary against a determined bypass.
 
+### 6c. The active channel (readiness T1, R4-14)
+
+One repository uses one Guild channel at a time; a first init makes this channel the active one. After step 6, one
+Bash call — outside the sandbox, as `commands/engine/dev.md` step 1.3 (it rewrites the gate hook of step 6 in place,
+which leaves it as it is):
+```bash
+python3 -I <<SKILL_DIR>>/engine/engine.py channel set gld --repo <owner>/<repo>
+```
+It writes `.claude/guild-channel` (commit it with the harness files; when its output says the file is ignored, add
+the `.gitignore` exception it names). Exit 4 = the other channel still has engine runs of this repository on this
+machine: report its line in P4 as a readiness gap — until the human switches with `/gld channel gld`, a
+repository with both channels' settings refuses every Guild command.
+
 ### 7. GitHub labels (skip if P0 found no GitHub repo)
 Create the eleven `guild:*` labels. Run each as its own Bash call; if any fails, report which and continue (labels are not transactional in M1 — they are idempotent with `--force`):
 ```bash
@@ -299,7 +319,88 @@ gh label create "guild:harness" --color "5319e7" --description "Guild: Harness r
 gh label create "guild:needs-human" --color "b60205" --description "Guild: Paused — needs a human decision (unattended run)" --force
 gh label create "guild:sprint" --color "0052cc" --description "Guild: Sprint tracking Issue" --force
 ```
-(`guild:harness` labels the remediation issues that P3.5's readiness audit proposes. `guild:needs-human` marks an Issue an unattended `/gld batch`·`sprint` run paused at a high-stakes gate — the human resolves it, then re-runs `/gld dev`/`resume`.)
+(`guild:harness` labels the remediation issues that P3.5's readiness audit proposes. `guild:needs-human` marks an Issue whose engine stopped for a human (`needs_human`, attended or unattended — the engine adds it and takes it off when the Issue runs again); the human answers with `/gld resume`.)
+
+---
+
+### P2.9 Engine settings — `.claude/guild/config.json` (S4-init)
+
+The engine (`/gld dev`) runs only commands that stand in this file. **You never write it, never edit it and never make up a command text**: `engine.py init` takes every command from a file of the repository (0.98.x settings → CI → lefthook → manifests) or from the human's own words, and keeps the draft outside the repository until it is checked. You show questions and pass the answers on — nothing else.
+
+Hold the literal `OWNER/REPO` (P0 step 4) and the repository root (`git rev-parse --show-toplevel`). Without a GitHub repository skip P2.9 and say so in P4. Every command is one Bash call; `--json` output is for you, show the human a summary in the `$1` language.
+
+0. **Pre-checks**: `python3 -I <<SKILL_DIR>>/engine/engine.py init doctor --repo OWNER/REPO --checkout REPO_ROOT --json`
+   - Only `no-settings` fails (the settings exist already) → they are never overwritten: run `init propose --compare --repo OWNER/REPO --checkout REPO_ROOT --json`, show the differences (`loosened: true` first) and end P2.9. Nothing is written.
+   - Anything else fails → show it and end P2.9 (the harness part stays). Exit 4 with `exists from stage 4` → this engine has no init yet: skip P2.9 and say so.
+1. **Draft**: `init propose --repo OWNER/REPO --checkout REPO_ROOT --json`. Show: the commands with their `description` (where each text comes from), `warnings`, `unusable` templates, `roles_missing`, and where `report.md` is. The draft is of the commit at HEAD.
+2. **Questions**: ask **exactly** the entries of `questions` (all but `followups-dry-run`, which is never asked — see the table) — nothing more, nothing fewer, no default you pick yourself. One `AskUserQuestion` per entry (text + `choices`; a question with `choices: null` is free text the human types). `required: true` must be answered; `required: false` (`risk-rules`, `narrow-glob`, `risk-add` and the questions after a red check) may be skipped — an unjudged line **stays in**, an unnarrowed glob stays as it is, nothing is added.
+   | question | asked when |
+   |---|---|
+   | `test-command` | no test command was found anywhere — the human writes it |
+   | `command-conflict` | the sources give different texts for one command — the human picks one by its id |
+   | `not-local` | a CI step cannot run here (secrets, another platform, deploy), or a command is red on the base |
+   | `sandbox-exception` | the engine measured that an exception makes a red command green |
+   | `quarantine` | a command is red on the base and the human knows the test — the human writes the command text that leaves it out |
+   | `risk-rules` | a path looks like a security / data / irreversible area — line by line |
+   | `registry-host` | packages come from a host outside the default table |
+   | `toolchain` | the SDK copy has several possible sources, or none |
+   | `risk-add` | always (optional) — a risk / irreversible rule line the path names missed: ask the human once whether there is one. The item is the line, `risk:<security\|data-migration>:<glob>` or `irreversible:<external-side-effect\|hard-to-revert\|human-executed>:<glob>`, in the human's words; `--note` is its reason (required). `withdraw` takes a line back |
+   | `narrow-glob` | a `test-code` / `safety-net` glob candidate, line by line — the human may narrow it: `keep`, `drop`, or narrower globs (space-separated, free text). A wider glob, or one the engine cannot prove narrower, is refused |
+   | `followups-dry-run` | **never asked** (optional; no answer = `create`: the engine really creates the follow-up Issues it recommends). Only when the human asks on their own for records only (e.g. a validation repository): `init answer … --question followups-dry-run --answer dry-run --note "<who, why>"` — or, after init, the line `"followups_dry_run": true` in `.claude/guild/config.json`, committed |
+
+   Record each answer at once: `init answer --repo OWNER/REPO --checkout REPO_ROOT --question <id> [--item <item>] (--answer <text> | --answer-file <path>) --note "<who answered and why, in their words>" --json`. Put a free text (a command) into a file with the Write tool and use `--answer-file`. A refused answer changed nothing — show the reason and ask again. **Never answer for the human** — not even when the choice looks obvious.
+3. **Check**: tell the human first that this runs every named command on the base commit (minutes) and then the paid role canaries (at most $5 in total). Run it **outside the conversation's sandbox** (`dangerouslyDisableSandbox: true`, F4) and **in the background** (`run_in_background: true`, timeout 7200000), then read its output: `init check --repo OWNER/REPO --checkout REPO_ROOT --json`.
+   - `ok: true` → step 4.
+   - base red → show the red commands and the new `questions` (step 2 rules), record the answers, and check again. No answer fits → the repository has to be repaired first; end P2.9 and say so. A `problem` (worktree, prepare, settings, srt-canary, engine-error) is shown as it is.
+   - a canary failed → show its note and end P2.9. Never retry a failed canary: a human looks at it.
+4. **Write**: `init write --repo OWNER/REPO --checkout REPO_ROOT --json` — writes `config.json`, `procedures/*.yaml` and `roles/leader.md` under `.claude/guild/`, exactly what the check passed, and refuses when any of them exists. Then tell the human to read `report.md` and **commit** them: the engine reads its settings only from a commit. Do not edit the written files: a change by hand needs a new check.
+
+---
+
+## P0b — A 0.98.x install in this folder (readiness T2, parity P4 · R4-13 H1)
+
+P0 step 3 found `.claude/guild/config.json` and no `harness.json`. A 0.98.x Guild keeps its settings in that file
+(`version`, `roles`, `commands`, `visual`, `gates`, `sprint` with its history …) — the engine cannot read it, and
+init must neither fail on it nor write over anything the 0.98.x Guild left (role files, CLAUDE.md, standards,
+knowledge, the evolve ledger, memory, the gate's rules). The engine moves it — dry run, the human confirms, then the
+real run. Hold `<owner>/<repo>` (P0 step 4 — run it now if it has not run).
+
+1. **Dry run** (its own Bash call; reads the checkout and GitHub's label list once, writes nothing):
+   ```bash
+   python3 -I <<SKILL_DIR>>/engine/engine.py init migrate --repo <owner>/<repo> --json
+   ```
+   - `state: none` / `initialized` → nothing to migrate: back to P0 (step 2 when `harness.json` exists, else P1).
+   - `state: migrated` → moved already on this machine: offer **P2.9 alone** (P0 step 2).
+   - exit 4 (`refused: …`) → show the line and **stop**; nothing was written. (A `harness.json` without this
+     machine's record, a `config.json` that is no JSON object, a `sprint.history` that is no list — a human decides.)
+   - `state: legacy` → show the human the plan, **in the `$1` language**, line by line from the answer: every
+     `changes[]` entry (`write` harness.json — language, roles, commands, capacity, how many history entries are
+     copied as they are; `change` config.json — `gates` taken out, and when it says `gates.enabled was false` say
+     plainly that **the commit gate was off and will be on**; `update` the gate script; `hook`; `add` .gitignore
+     lines), every `kept[]` line, the `labels` line, `not_carried[]` (what harness.json does not take and why),
+     `notes[]`, and the `backup` folder. Say that `config.json` stays the 0.98.x file until P2.9 replaces it, and that
+     the engine refuses to run an Issue until then.
+2. **Confirm** — one `AskUserQuestion`: migrate now (the plan above) / not now. Not now → stop; nothing was written.
+   Never migrate in an unattended run.
+3. **Run it** — its own Bash call, **outside the sandbox** (`dangerouslyDisableSandbox: true`: it rewrites the
+   pre-commit hook under `.git/`, as step 6c does):
+   ```bash
+   python3 -I <<SKILL_DIR>>/engine/engine.py init migrate --repo <owner>/<repo> --apply
+   ```
+   Exit 4 → show its line; whatever it had written is put back from the backup. Exit 0 → it copied every file it
+   changed into the backup folder first (`manifest.json` there lists them — undo = copy them back and delete
+   `harness.json`), then wrote them.
+4. **Then**, skipping P1, P1.5 and the rest of P2 (every file they would write exists and is kept):
+   - P2 step 2 with `init roles` — only to report the role files (a missing one is written only where the channel
+     writes role files; existing ones are never touched);
+   - P2 step 6c (the active channel) and step 7 (labels — `--force` keeps the existing ones and refreshes their color
+     and description);
+   - Ask the human to **commit** the migration (harness.json, the changed config.json / .gitignore / gate script, a
+     changed hook-manager config) — P2.9's draft is of the commit at HEAD;
+   - **P2.9 in full** — `init doctor` now passes `no-settings`; the draft tool reads the 0.98.x `commands`, `visual`
+     and `engine` keys from the committed `config.json`; `init write` replaces that file with the engine settings
+     (one more copy of it goes into the backup folder first) and writes `procedures/`, `roles/leader.md`;
+   - P4 reports the migration's lines (what was written, kept, not carried, the backup folder) in the summary.
 
 ---
 
@@ -367,48 +468,27 @@ Items the human leaves out are not an error. If the human skips remediation enti
 ## P3.9 — Placeholder sweep (deterministic, before reporting success)
 
 Output convention 2 says never to leave a literal `{{TOKEN}}` in a generated file, but nothing
-verified it. A surviving `{{CONVENTIONS}}` in a role agent is not cosmetic: that agent is loaded
-as a persona on every task it joins, and it teaches the model that the repo's conventions are the
-literal string `{{CONVENTIONS}}`. Check, don't assume — one Bash call:
+verified it. A surviving `{{CODE_STYLE}}` in a standard is not cosmetic: every role reads that file
+as a hard constraint, and it teaches the model that the repo's style is the
+literal string `{{CODE_STYLE}}`. Check, don't assume — one Bash call:
 
 ```bash
-grep -rn "{{" .claude/agents docs/standards CLAUDE.md .claude/settings.json
+grep -rn "{{" docs/standards CLAUDE.md .claude/settings.json
 ```
+When step 2 wrote role files, grep those files too (`grep -n "{{" <the agent files this run wrote>`) and confirm the
+persona skeleton survived the write — **only for the files this run wrote** (a pre-existing file is kept as it is), one
+Bash call; skip it when the run wrote none (`--file` with no argument is a usage error, exit 64):
+```bash
+python3 <<SKILL_DIR>>/commands/atoms/persona_migrate.py --mode check --anchor '<the project-specialization heading this run rendered>' --file <the agent files this run wrote>
+```
+Every line must start with `ok:`; exit `3` = a `FAIL:` — `update.md` rule 3b maps each `FAIL:` string to its cause and
+repair. `--anchor` is required even for `ko` (pass the heading you rendered). Fix the file before reporting success.
 
 - **No output** → clean; proceed to P4.
 - **Any hit** → for each, fill it now from the P1 scans / P1.5 interview, or replace it with an
   explicit localized note (`(미정 — 추후 확정)` / `(TBD)`). Re-run the grep until it is empty.
   Report in P4 which files needed a second pass — a token that survived the first write is a
   signal about that template, worth a `/gld contribute` flag if it keeps happening.
-
-Then confirm the persona skeleton survived the write — **only for the agent files this run
-created**, not the whole directory (a pre-existing file without markers would otherwise trap
-`init` forever). One Bash call:
-
-```bash
-python3 <<SKILL_DIR>>/commands/atoms/persona_migrate.py --mode check --anchor '<the project-specialization heading this run rendered>' --file <the agent files this run wrote>
-```
-
-⚠ **If that list is empty — every agent file already existed and this run wrote none — do not run
-the command.** `--file` with no argument is a usage error (exit 64) on a healthy repo.
-
-Every line must start with `ok:`; the script exits `3` if any is a `FAIL:`. **Not every FAIL is a
-marker problem.** Do not re-derive the cases here — `update.md`'s rule 3b carries the full table
-mapping every `FAIL:` string to its cause and its repair, and it is kept in step with the script.
-Read the values against that table. The init-time shapes it covers that matter most:
-`start at P, fence2=-, …` the closing YAML fence was lost · `anchor x0` **the localized
-specialization heading was dropped or renamed, and the markers are fine** · `h1=-`/`h1 x0` the
-translated H1 was lost · `anchor x2` the heading was written twice · `marker appears 0 time(s)`
-a marker line was translated or deleted — fix that file before reporting success,
-because `update` keys on exactly this shape and a persona without the pair is one `update`
-can never refresh. ⚠ The headings are localized and the markers are not — which is exactly why
-`--anchor` is passed rather than compiled in. The script **does** compare the first `## ` below the
-end marker against the heading you name, and that comparison is the only check that catches a
-mis-placed end marker. So a `FAIL: first heading below end is …` means one of **three** things: you
-passed the wrong `--anchor`, the localized specialization heading itself was dropped or renamed,
-or the markers did not survive localization. Check the argument first, then the heading, then the markers. ⚠ `--anchor` is **required here even for `ko`**: this check runs on
-files `init` just localized, so pass the heading you actually rendered. Omitting it works by
-accident in a `ko` repo and fails every file in any other language.
 
 Also confirm the settings file actually parses (its own Bash call — a malformed `settings.json`
 silently disables the gate hooks it carries):
@@ -426,11 +506,12 @@ Non-zero exit → fix it before reporting success; the harness is not installed 
 **Report what verification shows, never what was intended.** Each line below states that something exists on disk — so check it before writing it (P3.9 already confirmed the generated files carry no leftover placeholders and that `settings.json` parses; `git status` confirms the harness is visible to git). An install reported as complete when a step silently failed is worse than an obvious failure: the human then believes the enforcement layer is in place when it is not. If anything from the completeness set is missing, say which, and that init is **partial** — do not round up to success.
 
 Report what was installed:
-- Guild: 16 role agents at `.claude/agents/` — spine (leader, tech-lead, developer, tester, qa) + participation/gate specialists (product-owner, designer, infra, dba, security, performance, i18n, analytics, tech-writer, release-manager, support-triage). Note that the leader convenes the specialists **conditionally** per task (spine roles always run; specialists join by work-type/risk — see `_handoff.md` Section G).
+- Engine settings (P2.9): written and checked (`config.json`, the usable templates, `roles/leader.md` — **not committed yet**: the human reads `report.md` and commits), or why not (which question is open, which command is red, which canary failed). Name `unusable` templates and `not_checked_locally`.
+- Roles: which role files this run wrote (`write`), which existed and were kept (with their `differences`), which are still missing (`roles_missing`) — in the development channel (`writes_role_files: false`) none is written and the stable channel's init makes them.
 - Standards: 5 drafts at `docs/standards/` (note which are `draft` vs `confirmed`).
 - Harness: `CLAUDE.md` (created or merged), `.claude/settings.json` (created or merged), `.claude/guild/` state skeleton. Note whether `.gitignore` was reconciled (P2 step 0) so `.claude/` harness is committable — and confirm the harness is visible to git (`git status` shows it), since ignored files silently look "not created".
-- ⑥ Knowledge baseline: `.claude/guild/knowledge/index.md` + `facts/` seeded from the scans (hotspots · co-change · coupling). Note the seeded slice count; `evolve` grows it from here.
-- 강제층 게이트 (M3): `.claude/guild/gates/scripts/gate_precommit.py`, wired three ways — `.git/hooks/pre-commit` (**authoritative**), `PreToolUse(Bash)` (early warning), `PreToolUse(Edit|Write)` (control-file guard). Blocks committing secrets / weakening verification; + PreToolUse 가 명령 줄 텍스트의 백틱 치환·Issue 본문 묶음 저장·마커 없는 댓글 잘라 읽기·무인 실행의 마커 없는 댓글을 막음 (`shell-text` · `bodies-save` · `directive-slice` · `unmarked-comment`). Off-switch: config `gates.enabled` (or `/gld config`). **State the two honest limits**: `.git/hooks/` is not tracked, so a fresh clone needs `/gld update` to reinstall the hook; and `git commit --no-verify` skips it. If step 6 found a non-empty `core.hooksPath`, say that the authoritative layer is **not** active and what to do about it.
+- ⑥ Knowledge baseline: `.claude/guild/knowledge/index.md` + `facts/` seeded from the scans (hotspots · co-change · coupling) — or why not: the channel does not write knowledge (`writes_knowledge` off — both channels still read it), or `index.md` existed and was kept. Note the seeded slice count; `evolve` grows it from here. <!-- promote: literal; rename-exception: K2 shared knowledge -->
+- 강제층 게이트 (M3): `.claude/guild/gates/scripts/gate_precommit.py`, wired three ways — `.git/hooks/pre-commit` (**authoritative**), `PreToolUse(Bash)` (early warning), `PreToolUse(Edit|Write)` (control-file guard). Blocks committing secrets / weakening verification; + PreToolUse 가 명령 줄 텍스트의 백틱 치환·Issue 본문 묶음 저장을 막음 (`shell-text` · `bodies-save`). No off-switch in guild-plugin. **State the two honest limits**: `.git/hooks/` is not tracked, so a fresh clone needs `/gld update` to reinstall the hook; and `git commit --no-verify` skips it. If step 6 found a non-empty `core.hooksPath`, say that the authoritative layer is **not** active and what to do about it.
 - Labels: 11 `guild:*` (analyze, design, execute, test, qa, done, child, children, harness, needs-human, sprint) (or "skipped — no GitHub repo").
 - Readiness audit (P3.5): report at `.claude/guild/readiness-report.md` — summarize the gap counts (BLOCKER/MAJOR/MINOR) and list any `guild:harness` issues created (by number — only those whose create printed a URL), local fixes applied, and `이슈 등록 필요` gaps the human left out.
 - Next steps: "`/gld dev <issue>` to develop a GitHub Issue end-to-end (including any `guild:harness` remediation issues). `/gld status <issue>` to check progress. Day-1 agents are intentionally rough — they improve as you work (evolve, a later milestone)."
@@ -439,9 +520,12 @@ Report what was installed:
 
 ## Partial-failure repair (not a hard dead-end)
 
-`init` is additive and idempotent per-file. If it is interrupted, re-running detects `.claude/guild/config.json` at P0 and reports "already initialized." To repair a partial install, the completeness set is everything P2 creates: `config.json` + 16 role agents (full roster) + 5 standards + `docs/adr/0000-template.md` + `docs/specs/.gitkeep` + CLAUDE.md guild block + settings.json allowlist **+ both PreToolUse gate hooks + an executable `.git/hooks/pre-commit`** + the `guild:*` labels created by P2 §7 (currently 11) + `knowledge/` baseline (index.md + facts/) + `gates/` (gate_precommit.py + rules + dismissed.md + findings.json) + `evolution-log.md` + `overlay/.gitkeep` + `.claude/guild/.gitignore` + `memory/.gitkeep`. Re-running does not auto-repair in M1 (P0 stops early) — instead, report any missing pieces from the completeness set in P4 so the user can address them, or delete `.claude/guild/config.json` to force a clean re-init.
+`init` is additive and idempotent per-file. If it is interrupted, re-running detects `.claude/guild/harness.json` at P0 and reports "already initialized." To repair a partial install, the completeness set is everything P2 creates: `harness.json` + (P2.9) `config.json`, `procedures/*.yaml`, `roles/leader.md` + 5 standards + `docs/adr/0000-template.md` + `docs/specs/.gitkeep` + CLAUDE.md guild block + settings.json allowlist **+ both PreToolUse gate hooks + an executable `.git/hooks/pre-commit`** + the `guild:*` labels created by P2 §7 (currently 11) + `knowledge/` baseline (index.md + facts/ — only where the channel writes knowledge) + `gates/` (gate_precommit.py + rules + dismissed.md + findings.json) + `evolution-log.md` + `overlay/.gitkeep` + `.claude/guild/.gitignore` + `memory/.gitkeep`. Re-running does not auto-repair in M1 (P0 stops early) — instead, report any missing pieces from the completeness set in P4 so the user can address them, or delete `.claude/guild/harness.json` to force a clean re-init. P2.9 alone can be repeated at any time while `config.json` does not exist (`/gld init` resumes its draft and answers).
 
 ## Hard rules (safety)
-- **Additive only** (INV4): existing files are merged/preserved, never clobbered. This stays true of `init` without exception — it never rewrites an agent file it did not create. Marker-based merging of a persona's central region is `update`'s job, not this command's. CLAUDE.md via markers; settings.json via key union; existing `docs/standards/*` and `.claude/agents/*` are not overwritten.
+- **Additive only** (INV4): existing files are merged/preserved, never clobbered — `init` writes only the missing role files `init roles` names (none where the channel does not write role files), never rewrites one it did not create, and never overwrites engine settings. CLAUDE.md via markers; settings.json via key union; existing `docs/standards/*` are not overwritten.
+- **No command text from you** (§7.10): the engine settings come from `engine.py init` only; an answer is the human's own words.
 - **Read-only scans** (P1) — no code changes during analysis.
 - All Bash per `_bash_rules.md`; all file bodies via the Write/Edit tools.
+
+> **Channels (readiness T2):** only a channel whose `writes_role_files` is on writes role files (`.claude/agents/*.md`) — the stable channel; the development channel only READS them. (Placed at the end so `init.md:163`-style line citations stay valid.)

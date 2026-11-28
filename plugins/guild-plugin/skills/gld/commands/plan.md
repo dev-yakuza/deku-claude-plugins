@@ -5,18 +5,17 @@
 `$1` = **a design-doc file path** *or* **an Issue number/URL** (auto-detected). `$2` = `--create` (default = **dry-run**: propose only, create nothing).
 
 > **Bash**: `<<SKILL_DIR>>/commands/atoms/_bash_rules.md`. Handoff / owner-repo / labels / parent-child: `<<SKILL_DIR>>/commands/atoms/_handoff.md` (Sections A, F, I). Roles: product-owner + tech-lead personas.
-> **Checkout**: never move the human's branch or history — `_checkout.md` (a pull/sync/switch request: show the commands and which commits change hash, then ask).
 > **Output language**: all human-readable output (proposal, discuss, report) in `config.language` (`_handoff.md` Section K). Machine tokens / `file:line` / `#N` stay ASCII.
 
 > **This is a MULTI-TURN, attended flow** (Phase 2 discuss). It runs in the **main session** — decomposing a backlog is a high-judgment decision the human refines before anything is created.
 
-> **`plan` vs design's multi-PR split** — both produce parent/child Issues, but differ in intent/timing: `plan` (issue mode) is the *deliberate, upfront* decomposition of an epic into its backlog (before dev); design's split is the *emergent* one discovered while designing one Issue. Both converge on the same `dev` Phase 2b orchestration. `plan` decomposes only to **dev-unit grain**, so its children are leaves design won't re-split.
+> **`plan` vs design's multi-PR split** — both produce parent/child Issues, but differ in intent/timing: `plan` (issue mode) is the *deliberate, upfront* decomposition of an epic into its backlog (before dev); design's split is the *emergent* one discovered while designing one Issue. Both used to converge on `dev` Phase 2b orchestration; that is not in this edition — epics are not supported yet, so the children are developed one by one (`/gld dev <child>`) and `dev` refuses the parent (`unsupported-epic`). `plan` decomposes only to **dev-unit grain**, so its children are leaves design won't re-split.
 
 ---
 
 ## Phase 0 — Preflight & mode detection
 
-1. **Guild initialized?** `ls .claude/guild/config.json` — absent → `FAIL: Guild not initialized (run /gld init first)`. `plan` needs the config, the product-owner/tech-lead role defs, and `docs/standards/charter.md` (value-alignment).
+1. **Guild initialized?** `ls .claude/guild/harness.json` — absent → `FAIL: Guild not initialized (run /gld init first)`. `plan` needs the config, the product-owner/tech-lead role defs, and `docs/standards/charter.md` (value-alignment).
 2. **Resolve owner/repo** once (`_handoff.md` Section F).
 3. **Detect mode** (its own Bash call — inspect `$1`): a bare integer or a URL containing `/issues/` → **issue mode**; otherwise → **file mode**.
 4. **Load the source + context**:
@@ -102,14 +101,14 @@ Create issues in **dependency order** (temp-file body per `_bash_rules.md`; each
 
 **Record the manifest (idempotency + humans):**
 - **file mode**: write `docs/specs/PLAN-<doc-slug>.md` — the created issues (`#<n>` · epic · title · one-line scope · order · depends-on). Committed with the work.
-- **issue mode**: post the roster on the parent under `<!-- guild:children:output -->` … `<!-- /guild:children:output -->` (one row per child) — the label was already set above, right after the last child was created. This routes `/gld dev $1` into child orchestration (dev Phase 2b).
+- **issue mode**: post the roster on the parent under `<!-- guild:children:output -->` … `<!-- /guild:children:output -->` (one row per child) — the label was already set above, right after the last child was created. Epics are not supported yet — develop the children one by one (`/gld dev <child>`); `/gld dev $1` refuses the parent (`unsupported-epic`), and a human closes it when its children are done.
 
 ## Phase 4 — Return + next steps
 
 - **dry-run** (no `--create`): present the proposed set + *"확정하려면 `--create`로 다시 실행하세요."* Return `OK: proposed N issues (dry-run)`.
 - **created**: report the created issues (#s, titles, order) + the next command:
   - **file mode** → *"`/gld batch <issues>`로 일괄 개발하거나, 순서대로 `/gld dev <첫 이슈>`부터 시작하세요."*
-  - **issue mode** → *"`/gld dev #$1` — 자식들을 의존성 순서로 오케스트레이션합니다 (Phase 2b)."*
+  - **issue mode** → *"에픽은 아직 지원하지 않습니다 — 자식을 의존성 순서대로 하나씩 `/gld dev <자식>` 으로 개발하세요 (부모 `/gld dev #$1` 은 `unsupported-epic` 으로 거부됩니다). 자식이 모두 끝나면 부모는 사람이 닫습니다."*
 
 Returns: `OK: created N issues` · `OK: proposed N issues (dry-run)` · `NEEDS_HUMAN: <...>` · `FAIL: <reason>`.
 

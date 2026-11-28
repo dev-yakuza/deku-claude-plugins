@@ -90,10 +90,10 @@ spec = importlib.util.spec_from_file_location("t", sys.argv[1])
 m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
 Q = chr(34)
 cases = [
-    ("gh issue edit 42 --add-label " + Q + "guild:execute" + Q, "execute", "라벨 전이"),
-    ("gh api x --jq select(.body|contains(" + Q + "guild:design:output" + Q + "))", None, "코멘트 마커"),
-    ("cat <<EOF\n<!-- guild:test-evidence:step-1 -->\nEOF", None, "test-evidence"),
-    ("gh issue edit 42 --add-label guild:qa", "qa", "따옴표 없는 전이"),
+    ("gh issue edit 42 --add-label " + Q + "guild:execute" + Q, "execute", "라벨 전이"),  # promote: literal
+    ("gh api x --jq select(.body|contains(" + Q + "guild:design:output" + Q + "))", None, "코멘트 마커"),  # promote: literal
+    ("cat <<EOF\n<!-- guild:test-evidence:step-1 -->\nEOF", None, "test-evidence"),  # promote: literal
+    ("gh issue edit 42 --add-label guild:qa", "qa", "따옴표 없는 전이"),  # promote: literal
 ]
 bad = []
 for arg, want, why in cases:
@@ -246,7 +246,7 @@ rows = [
     ev({"type": "assistant", "message": {"id": "a1", "usage": {"input_tokens": 100},
         "content": [{"type": "tool_use", "id": "t1", "name": "Write",
                      "input": {"file_path": "/tmp/b.md",
-                               "content": "x\n<!-- guild:manual-qa -->\n- item\n"}}]}}),
+                               "content": "x\n<!-- guild:manual-qa -->\n- item\n"}}]}}),  # promote: literal
     ev({"type": "user", "message": {"content": [
         {"type": "tool_result", "tool_use_id": "t1", "content": "ok"}]}}),
     ev({"type": "assistant", "message": {"id": "a2", "usage": {"input_tokens": 120},
@@ -271,7 +271,7 @@ else bad "§10: 파일 경유 본문의 마커" "$QM"; fi
 
 # ⚠⚠ **한 단위만 찍으면 안 된다.** 호출 기준은 **재시도를 품질로** 센다(실측: arm-C 는 파일당
 # 1.43회 쓰고 arm-A 는 1.03회 — 호출 기준이 arm-C 를 후하게 준다). 파일 기준은 **흐름이
-# 파일을 쪼개면** 부푼다(`gld-pr-404-manualqa.md` + `…-body-new.md`). 방향이 같고 크기가
+# 파일을 쪼개면** 부푼다(`gld-pr-404-manualqa.md` + `…-body-new.md`). 방향이 같고 크기가  # promote: literal
 # 다르면(증거 −15% ↔ −39%) **그 폭이 불확실성**이고, 그것을 숨기면 안 된다.
 hasfx_tool2 "§10: 마커를 호출·파일 **두 단위**로 찍는다" '호출 · '
 hasfx_tool2 "§10: 두 단위의 오염 방향을 적는다" '호출은 재시도에 부풀고, 파일은 흐름이 쪼개지면'
@@ -283,16 +283,16 @@ LEAK="$($PY - "$TOOL" <<'LKPY'
 import importlib.util, sys
 spec = importlib.util.spec_from_file_location("t", sys.argv[1])
 m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
-tag = "/tmp/b.md \x00markers:guild:test-evidence,guild:auditor:execute,manual-qa"
+tag = "/tmp/b.md \x00markers:guild:test-evidence,guild:auditor:execute,manual-qa"  # promote: literal
 clean = tag.split(" \x00markers:")[0]
 bad = []
-for pat in ("docs/specs/", "docs/standards", "guild-plugin", "tool-results/", ".claude/"):
+for pat in ("docs/specs/", "docs/standards", "guild-plugin", "tool-results/", ".claude/"):  # promote: literal
     if (pat in tag) != (pat in clean):
         bad.append("경로 버킷 " + pat)
 if m._STAGE_TRANSITION.search(tag):
     bad.append("전이 정규식이 표식에 걸린다")
 if m._STAGE_LABEL.search(tag):
-    bad.append("라벨 정규식이 표식에 걸린다 (guild:test-evidence 의 하이픈 경계)")
+    bad.append("라벨 정규식이 표식에 걸린다 (guild:test-evidence 의 하이픈 경계)")  # promote: literal
 print("OK" if not bad else "LEAK | " + " | ".join(bad))
 LKPY
 )"

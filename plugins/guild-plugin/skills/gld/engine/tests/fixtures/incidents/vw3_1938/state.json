@@ -1,0 +1,244 @@
+{
+  "format": 1,
+  "issue": 1938,
+  "revision": 2,
+  "steps": [
+    {
+      "id": "analyze",
+      "status": "done",
+      "latest_attempt": 1,
+      "start_head": "41bdcdc8f0416d1394ecccfdae40501db049d004",
+      "output_format_retries": 0
+    },
+    {
+      "id": "ac-format",
+      "status": "done",
+      "latest_attempt": 3,
+      "start_head": "27dffac98f13b6d8524bba8719a68e00c137786c",
+      "output_format_retries": 0
+    },
+    {
+      "id": "plan",
+      "status": "done",
+      "latest_attempt": 1,
+      "start_head": "57ab408a7890a3c5cf7a755535735cedff75a70b"
+    },
+    {
+      "id": "test-cases",
+      "status": "done",
+      "latest_attempt": 1,
+      "start_head": "df29b033beab14efffee8e16766c92a6c669e2c9",
+      "output_format_retries": 0
+    },
+    {
+      "id": "ac-coverage",
+      "status": "done",
+      "latest_attempt": 3,
+      "start_head": "27dffac98f13b6d8524bba8719a68e00c137786c",
+      "output_format_retries": 0
+    },
+    {
+      "id": "setup",
+      "status": "done",
+      "latest_attempt": 3,
+      "start_head": "27dffac98f13b6d8524bba8719a68e00c137786c",
+      "output_format_retries": 0
+    },
+    {
+      "id": "safety-net",
+      "status": "done",
+      "latest_attempt": 2,
+      "start_head": "540c6aadaf63f276f2001c67993c7b4b96eaf7c9",
+      "session_id": "49258134-e1d5-4788-8ef0-6e1d9a4989f8",
+      "output_format_retries": 0,
+      "returns": 1,
+      "resume_count": 1
+    },
+    {
+      "id": "safety-net-proof",
+      "status": "done",
+      "latest_attempt": 2,
+      "start_head": "27dffac98f13b6d8524bba8719a68e00c137786c",
+      "output_format_retries": 0
+    },
+    {
+      "id": "no-production-change",
+      "status": "done",
+      "latest_attempt": 2,
+      "start_head": "27dffac98f13b6d8524bba8719a68e00c137786c",
+      "output_format_retries": 0
+    },
+    {
+      "id": "test",
+      "status": "done",
+      "latest_attempt": 2,
+      "start_head": "27dffac98f13b6d8524bba8719a68e00c137786c",
+      "output_format_retries": 0
+    },
+    {
+      "id": "lint",
+      "status": "done",
+      "latest_attempt": 2,
+      "start_head": "27dffac98f13b6d8524bba8719a68e00c137786c",
+      "output_format_retries": 0
+    },
+    {
+      "id": "check-verification-doc-refs",
+      "status": "done",
+      "latest_attempt": 2,
+      "start_head": "27dffac98f13b6d8524bba8719a68e00c137786c",
+      "output_format_retries": 0
+    },
+    {
+      "id": "review-tests",
+      "status": "done",
+      "latest_attempt": 2,
+      "added_checks": [
+        "test-change-review"
+      ],
+      "start_head": "27dffac98f13b6d8524bba8719a68e00c137786c",
+      "output_format_retries": 0
+    },
+    {
+      "id": "review-audit",
+      "status": "done",
+      "latest_attempt": 2,
+      "start_head": "27dffac98f13b6d8524bba8719a68e00c137786c",
+      "output_format_retries": 0
+    },
+    {
+      "id": "verify-gate",
+      "status": "done",
+      "latest_attempt": 2,
+      "start_head": "27dffac98f13b6d8524bba8719a68e00c137786c",
+      "output_format_retries": 0
+    },
+    {
+      "id": "done-gate",
+      "status": "needs_human",
+      "latest_attempt": 2,
+      "start_head": "27dffac98f13b6d8524bba8719a68e00c137786c",
+      "output_format_retries": 0
+    },
+    {
+      "id": "pr",
+      "status": "pending",
+      "latest_attempt": null,
+      "output_format_retries": 0
+    },
+    {
+      "id": "followups",
+      "status": "pending",
+      "latest_attempt": null,
+      "output_format_retries": 0
+    }
+  ],
+  "last_head": "27dffac98f13b6d8524bba8719a68e00c137786c",
+  "repo": "owner/app_a",
+  "mode": "unattended",
+  "plugin_version": "1.0.0-exp.3",
+  "procedure": {
+    "path": "docs/specs/1938/procedure.yaml",
+    "commit": "df29b033beab14efffee8e16766c92a6c669e2c9"
+  },
+  "github": {
+    "summary_comment_id": 7188470063,
+    "engine_comment_ids": [
+      7188470063,
+      7188517916,
+      7189227283
+    ],
+    "last_seen_comment_id": 7188517916,
+    "pr_number": null,
+    "pr_url": null,
+    "is_private": true
+  },
+  "developer_started": true,
+  "base_branch": "main",
+  "draft": false,
+  "sprint": 1986,
+  "totals": {
+    "attempts": 32,
+    "cost_usd": 2.855522,
+    "leader_calls": 0,
+    "warnings": 0
+  },
+  "stop": {
+    "status": "needs_human",
+    "reason": "done-gate",
+    "step": "done-gate",
+    "attempt": 2,
+    "at": "2026-11-26T10:20:07Z",
+    "allowed_answers": [
+      "approve",
+      "rerun",
+      "escalate"
+    ],
+    "recommendation": {
+      "answer": "approve",
+      "step": null,
+      "note": "로컬에서 `lib/features/kanji_detail_modal/widgets/kanji_strokes_section.dart` 37행 `if (_isProbeStarted) return;` 을 지운 뒤 `flutter test test/features/kanji_detail_modal/widgets/kanji_strokes_section_probe_safety_net_test.dart` 를 단독으로 실행하세요. '의존성이 바뀌어 다시 그려도…' 케이스와 '여러 번 연속으로…' 케이스가 `counter.keys.length` 또는 `replacement.ownLoads` 단언에서 red 인지 확인합니다. red 이면 되돌리고 같은 파일이 green 인지 본 다음 approve 하세요. 뮤테이션은 커밋하지 마세요. 반대로 뮤테이션 상태에서도 green 이면 테스트가 가드를 잡지 못하는 것이니 safety-net 을 rerun 하세요.",
+      "reason": "env-problem"
+    },
+    "leader_failed": null
+  },
+  "created_at": "2026-11-26T09:47:10Z",
+  "updated_at": "2026-11-26T10:20:10Z",
+  "git": {
+    "git_dir": "/home/u/projects/app_a/.git/worktrees/-gld-app_a-1938",
+    "common_dir": "/home/u/projects/app_a/.git",
+    "work_tree": "/home/u/projects/.gld-app_a-1938",
+    "main_checkout": "/home/u/projects/app_a"
+  },
+  "base_sha": "a0bb96001b31f175c1c520eb5197d85b9c171818",
+  "remote_url": "git@personal:owner/app_a.git",
+  "branch": "gld/1938",
+  "leader_calls": [
+    {
+      "kind": "check",
+      "k": 1,
+      "sessions": [
+        1
+      ],
+      "situation": "plan-gate",
+      "step": null,
+      "answer": "plan",
+      "reason": "fits-template",
+      "cost_usd": 0.210143,
+      "counted": false,
+      "failed": null
+    },
+    {
+      "kind": "check",
+      "k": 1,
+      "sessions": [
+        1
+      ],
+      "situation": "done-gate",
+      "step": "safety-net",
+      "answer": "rerun",
+      "reason": "real-defect",
+      "cost_usd": 0.417619,
+      "counted": false,
+      "failed": null
+    },
+    {
+      "kind": "check",
+      "k": 2,
+      "sessions": [
+        2
+      ],
+      "situation": "done-gate",
+      "step": null,
+      "answer": "escalate",
+      "reason": "env-problem",
+      "cost_usd": 0.456586,
+      "counted": false,
+      "failed": null
+    }
+  ],
+  "catalog_adds": [],
+  "counters": {
+    "done_rerun": 1
+  }
+}

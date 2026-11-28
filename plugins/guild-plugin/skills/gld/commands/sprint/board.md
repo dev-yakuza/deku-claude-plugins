@@ -10,9 +10,13 @@ retired and lives in `$2`, so it is matched on the whole argument list, not on `
 Phase 0 step 0.
 
 > **Bash**: `<<SKILL_DIR>>/commands/atoms/_bash_rules.md`. State/labels: `_handoff.md`.
-> **Checkout**: never move the human's branch or history — `_checkout.md` (a pull/sync/switch request: show the commands and which commits change hash, then ask).
 > **Output language**: all human-readable output in `config.language` (`_handoff.md` Section K).
 > Machine tokens (column tokens, reason tokens, `state:` values) stay ASCII.
+
+> ⚠ **Experimental engine (stage 4).** "The supervisor" below is the 0.98.7 generated bash supervisor. This
+> edition's supervisor is the engine (`commands/engine/sprint.md`) and it **projects nothing onto a board** (U5 —
+> no card writes, no `board_*` keys in the run marker, no `.board` file read at launch). A board set up here is
+> written by `plan` and `sync` only; tell the human so when they set one up for a sprint the engine will run.
 
 ---
 
@@ -43,7 +47,7 @@ Phase 0 step 0.
    만드는 것으로 끝났습니다. `/gld sprint board --setup` 은 스프린트용 프로젝트를 새로 만듭니다.
    ```
 
-1. **Guild initialized?** `ls .claude/guild/config.json` — absent → `FAIL: Guild not initialized (run /gld init first)`.
+1. **Guild initialized?** `ls .claude/guild/harness.json` — absent → `FAIL: Guild not initialized (run /gld init first)`.
 2. **Resolve owner/repo** once (`_handoff.md` Section F).
 3. **Read `config.sprint.board`.** `null` and `$1` is not `--setup` → `OK: no board configured`
    plus one line telling the human `/gld sprint board --setup` exists. ⚠ This is **`OK`, not
@@ -361,15 +365,15 @@ they are not.
 |---|---|---|
 | `Order` | NUMBER | **Sorting gives the merge order.** Stacked PRs must merge bottom-up and GitHub does not enforce it. Labels filter; they do not sort. The strongest of the four |
 | `Depends on` | TEXT | This PR's base is not the default branch — its diff is a delta. That fact lives only in the tracking Issue **body**, which cards do not show |
-| `Needs human` | TEXT | A **classification token** — the set below, never prose: `needs-human` · `failed:<class>` (one per `record_failure` site) · `split-children` · `interrupted` · `pr-unknown` (the PR list could not be read, so *"there is a PR to review"* is not something we know) · `dep-unresolved` (the run ended with this member's dependency still not landed, so it will not move again by itself) · `branch-ambiguous` · `base-unresolved` (the other two end-of-run block classes — they are **not** dependency waits and their repairs differ, so they do not share `dep-unresolved`'s token) · `account-rate-limited` (the account was rate limited with a reset more than 4h away, or six waits were spent — **not a failure**: the member is untouched and the re-run picks it up) · `create-unsettled` (0.102 — an Issue create the engine made stayed of unknown landing after six settle waits; **not** a rate limit and not a failure: `guild:needs-human` stays and the re-run re-checks it) · `gh-unavailable` (0.102 — GitHub was unavailable for six waits and the engine could not write a pause; not a failure, the re-run picks it up). ⚠ Since K6 (user decision 2) a 0.102 supervisor WRITES these two as `account-rate-limited` (the 0.101.3 token of the same action — the rollback target renders it); the precise class is `class_exact` in `failures.jsonl`. `Blocked` says *"your turn"*; this says which turn |
+| `Needs human` | TEXT | A **classification token** — the set below, never prose: `needs-human` · `failed:<class>` (one per `record_failure` site) · `split-children` · `interrupted` · `pr-unknown` (the PR list could not be read, so *"there is a PR to review"* is not something we know) · `dep-unresolved` (the run ended with this member's dependency still not landed, so it will not move again by itself) · `branch-ambiguous` · `base-unresolved` (the other two end-of-run block classes — they are **not** dependency waits and their repairs differ, so they do not share `dep-unresolved`'s token) · `account-rate-limited` (the account was rate limited with a reset more than 4h away, or six waits were spent — **not a failure**: the member is untouched and the re-run picks it up). `Blocked` says *"your turn"*; this says which turn |
 | `Sprint` | NUMBER | Boards are not recreated per sprint, so cards accumulate. This is how a human filters to one sprint |
 
-**Done has two sources** (0.98.7): a member whose PR merged, and a member **closed as decided** (`analyze.md` Step 1 item 0b — `guild:done`, `CLOSED`, no PR at all). The supervisor's done arm writes `In review` · `split-children` for a PR-less done member first (P3), and its merged sweep (P5, `board_sweep_merged` — it reads `run.json`'s `closed_done`) corrects that card to `Done` in the same pass; `sync --done-cards` finds the same member by its `<!-- guild:closed-as-decided -->` comment. A third source (0.99.2) reaches `Done` only through `sync --done-cards`: a split parent whose integration passed and the human closed (`guild:done` · `CLOSED`/`COMPLETED` · an `<!-- guild:integration:output -->` comment · no PR of its own) — the supervisor's sweep does not see it (a run ends before the parent is closed; measured #161), and the sync's write clears its `Needs human` with the column.
+**Done has two sources** (0.98.7): a member whose PR merged, and a member **closed as decided** (`analyze.md` Step 1 item 0b — `guild:done`, `CLOSED`, no PR at all). The supervisor's done arm writes `In review` · `split-children` for a PR-less done member first (P3), and its merged sweep (P5, `board_sweep_merged` — it reads `run.json`'s `closed_done`) corrects that card to `Done` in the same pass; `sync --done-cards` finds the same member by its `<!-- guild:closed-as-decided -->` comment.
 
 ### 6. Record the config
 
 ⚠ Write it with the Read/Write tools, never with `jq -i` (`config.md`'s rule): this key joins
-an existing `config.json`, it does not replace it.
+an existing `.claude/guild/harness.json` (`sprint.board`), it does not replace it.
 
 ```json
 "board": {

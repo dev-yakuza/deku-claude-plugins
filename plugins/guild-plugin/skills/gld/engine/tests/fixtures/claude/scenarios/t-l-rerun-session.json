@@ -1,0 +1,22 @@
+{
+  "format": 1,
+  "description": "Stage 3: leader, needs_leader: rerun with a stronger session (TM7).",
+  "stream": "../leader/real-2.1.323/plan-gate-plan.jsonl",
+  "init_from_argv": true,
+  "leader": {
+    "example": "leader-answer-s3",
+    "expect": "accepted"
+  },
+  "structured_output": {
+    "answer": "rerun",
+    "reason": "repeated-failure",
+    "step": "implement",
+    "note": "Try again with a stronger session.",
+    "recommendation": null,
+    "defer": null,
+    "session": {
+      "model": "opus",
+      "effort": "high"
+    }
+  }
+}

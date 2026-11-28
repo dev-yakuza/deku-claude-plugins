@@ -1,0 +1,54 @@
+{
+  "format": 1,
+  "description": "Stage 3: leader, plan-gate: the same step twice.",
+  "stream": "../leader/real-2.1.323/plan-gate-plan.jsonl",
+  "init_from_argv": true,
+  "leader": {
+    "example": "leader-answer-plan-gate-s3",
+    "expect": "adjust-invalid"
+  },
+  "structured_output": {
+    "answer": "plan",
+    "reason": "fits-template",
+    "step": null,
+    "note": "A bug with a widget-test reproduction.",
+    "recommendation": null,
+    "requirements": [
+      {
+        "row": "R1",
+        "covered": true
+      },
+      {
+        "row": "R2",
+        "covered": true
+      }
+    ],
+    "missing_requirements": [],
+    "plan": {
+      "template": "bug",
+      "adjust": [
+        {
+          "op": "add",
+          "step": "i18n-review",
+          "trigger": "user-facing-text",
+          "note": "three languages"
+        },
+        {
+          "op": "add",
+          "step": "i18n-review",
+          "trigger": "user-facing-text",
+          "note": "three languages"
+        }
+      ],
+      "models": [
+        {
+          "step": "fix",
+          "model": "opus",
+          "effort": "high"
+        }
+      ],
+      "new_template_candidate": false
+    },
+    "close": null
+  }
+}

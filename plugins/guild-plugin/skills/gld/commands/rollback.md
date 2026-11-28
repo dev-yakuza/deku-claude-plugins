@@ -5,13 +5,12 @@
 `$1` = what to undo: a **PR number**, a **commit SHA**, or the literal word `stage` (move an Issue back one stage). When `$1 == "stage"`, `$2` = the **Issue number** to move back — per `SKILL.md`'s routing (`$1`, `$2`… are space-separated tokens passed positionally), `/gld rollback stage 42` arrives as `$1="stage"`, `$2="42"`; there is no single two-word `$1`.
 
 > **Bash**: `_bash_rules.md`. State/handoff + owner/repo: `_handoff.md`.
-> **Checkout**: never move the human's branch or history — `_checkout.md` (a pull/sync/switch request: show the commands and which commits change hash, then ask).
 > **Output language**: all human-readable output in `config.language` (`_handoff.md` Section K).
 
 ---
 
 ## Process
-**0. Preflight** — as the leader, confirm Guild is initialized; resolve `<owner>/<repo>` (`_handoff.md` Section F).
+**0. Preflight** — as the leader, confirm Guild is initialized; resolve `<owner>/<repo>` (`_handoff.md` Section F). **Then the engine guard** (`_preflight.md` **Section 0**), before step 1 reads anything else: `$1 == "stage"` → for the Issue `$2`; `$1` a PR number → `gh pr view $1 --json headRefName,closingIssuesReferences` (its own Bash call) — a head `gld/<M>` is the engine's branch of Issue `<M>`: refuse as Section 0 does (`/gld resume <M>`); any other head → the guard for each Issue of this repository in `closingIssuesReferences`; `$1` a commit SHA → no Issue, no guard. An engine Issue is never rolled back here.
 
 **1. Identify the target**
 - **`$1` is a PR number** (call it `<p>` below) → `gh pr view <p> --json state,mergedAt,commits,headRefName,baseRefName,mergeCommit` — merged vs open, its commits/branch. For a merged PR, first make its own commits and today's base local — its own Bash call, `git fetch origin pull/<p>/head <baseRefName>`. Its **evolve runs** are the commits whose `messageHeadline` **starts** `chore(guild): evolve #` + a run number + ` —` (any number — not `<p>`), leaving out any that end `— 0 changes applied` (nothing to undo).

@@ -1,0 +1,8 @@
+Reproduce the bug as a failing automated test, on the current branch, and change nothing else. Your inputs are `analysis.md`, `diagnosis.md` (its **Reproduction** section is your plan) and `test-cases.md` (the `(regression)` cases are what your test must prove).
+
+Rules the engine checks right after you (the `repro-red` step):
+- **Test code only.** Every file you add or change must be a test-code file of this repository (the paths under Outputs below). A production file, a golden image, a snapshot or a test configuration changed here fails the step (`repro-scope`). Do not fix the bug here.
+- **Red today, for the bug's reason.** The engine runs the repository's `test` command on the recorded base plus your test files, twice: it must fail both times, and the base without your files must be green. Run your test yourself before you finish, see it fail, and make sure it fails at the assertion that names the bug — not on a compile error, a missing import, a timeout or a flaky wait (a reviewer checks the reason later, `regression-proof`). Put the raw failing output line(s) in `note`.
+- **These files are yours.** After this step the regression test is fixed: the `fix` step may not change any file you wrote here, so write the assertion that states the correct behaviour now — it is what the fix must turn green.
+
+Commit your test files. If the bug cannot be reproduced by an automated test here (it shows only on a real device, by eye, or under conditions the sandbox cannot create), do not write a test that passes or a test of something else: return `status: blocked` with `blocked_by.kind: other` and a note starting `repro:` that says what you tried and why it cannot be reproduced.

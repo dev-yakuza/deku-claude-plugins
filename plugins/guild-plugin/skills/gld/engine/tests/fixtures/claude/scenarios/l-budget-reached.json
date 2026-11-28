@@ -1,0 +1,15 @@
+{
+  "format": 1,
+  "description": "Stage 2 leader session reaches its --max-budget-usd (defaults.SESSION_MAX_BUDGET_USD['leader']) — L14: leader_failed session-limit, no re-call. Result shape as the real CLI 2.1.323 (P4).",
+  "stream": "../f2/r4.jsonl",
+  "init_from_argv": true,
+  "leader": {"example": null, "expect": "session-limit"},
+  "result": {
+    "subtype": "error_max_budget_usd",
+    "is_error": true,
+    "terminal_reason": "budget_exhausted",
+    "stop_reason": "tool_use",
+    "errors": ["Reached maximum budget ($6.0)"]
+  },
+  "exit_code": 1
+}

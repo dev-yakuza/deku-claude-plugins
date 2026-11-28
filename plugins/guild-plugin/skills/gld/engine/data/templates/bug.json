@@ -1,0 +1,246 @@
+{
+  "format": 1,
+  "template": "bug",
+  "version": "exp-1",
+  "description": "Bug template (stage 3, scope §2.2; the 0.98.7 debug flow): reproduce the bug as a failing test, find the root cause, make the smallest fix, keep every test green. The evidence rule — a regression test that was red before the fix — is engine facts: `reproduce` writes test code only ({path:test-code}, owned by that step), the plugin run `repro-red` proves the reproduction on an overlay tree (the recorded base plus those test files: red twice, the base itself green), `fix` may not touch the reproduce files. The developer step (E5) is `fix`. Named commands it needs in the repository settings: setup, lint, typecheck, test, build, e2e, plus the plugin commands ac-coverage, repro-red and verify-gate, and a `test-code` path rule. A repository without lint, typecheck, build or e2e drops that step in its own copy (the conversion script does it).",
+  "steps": [
+    {
+      "id": "test-cases",
+      "role": "tester",
+      "inputs": [
+        "docs/specs/{issue}/analysis.md",
+        "in:failure-summary.md",
+        "in:leader-decision.md"
+      ],
+      "outputs": [
+        "docs/specs/{issue}/test-cases.md"
+      ]
+    },
+    {
+      "id": "ac-coverage",
+      "run": "ac-coverage",
+      "inputs": [
+        "docs/specs/{issue}/analysis.md",
+        "docs/specs/{issue}/test-cases.md"
+      ],
+      "on_fail": {
+        "back_to": "test-cases",
+        "max": 2
+      }
+    },
+    {
+      "id": "diagnose",
+      "role": "tech-lead",
+      "inputs": [
+        "docs/specs/{issue}/analysis.md",
+        "docs/specs/{issue}/test-cases.md",
+        "in:failure-summary.md",
+        "in:leader-decision.md"
+      ],
+      "outputs": [
+        "docs/specs/{issue}/diagnosis.md"
+      ]
+    },
+    {
+      "id": "setup",
+      "run": "setup"
+    },
+    {
+      "id": "reproduce",
+      "role": "developer",
+      "inputs": [
+        "docs/specs/{issue}/analysis.md",
+        "docs/specs/{issue}/diagnosis.md",
+        "docs/specs/{issue}/test-cases.md",
+        "in:failure-summary.md",
+        "in:leader-decision.md"
+      ],
+      "outputs": [
+        "{path:test-code}"
+      ],
+      "on_fail": {
+        "back_to": "reproduce",
+        "max": 2
+      }
+    },
+    {
+      "id": "repro-red",
+      "run": "repro-red",
+      "on_fail": {
+        "back_to": "reproduce",
+        "max": 2
+      }
+    },
+    {
+      "id": "fix",
+      "role": "developer",
+      "inputs": [
+        "docs/specs/{issue}/analysis.md",
+        "docs/specs/{issue}/diagnosis.md",
+        "docs/specs/{issue}/test-cases.md",
+        "in:repro-evidence.md",
+        "in:failure-summary.md",
+        "in:leader-decision.md",
+        "in:pr-review.md",
+        "in:blocking-discoveries.md"
+      ],
+      "outputs": [],
+      "on_fail": {
+        "back_to": "fix",
+        "max": 2
+      }
+    },
+    {
+      "id": "lint",
+      "run": "lint",
+      "on_fail": {
+        "back_to": "fix",
+        "max": 2
+      }
+    },
+    {
+      "id": "typecheck",
+      "run": "typecheck",
+      "on_fail": {
+        "back_to": "fix",
+        "max": 2
+      }
+    },
+    {
+      "id": "test",
+      "run": "test",
+      "on_fail": {
+        "back_to": "fix",
+        "max": 2
+      }
+    },
+    {
+      "id": "build",
+      "run": "build",
+      "on_fail": {
+        "back_to": "fix",
+        "max": 2
+      }
+    },
+    {
+      "id": "e2e",
+      "run": "e2e",
+      "on_fail": {
+        "back_to": "fix",
+        "max": 2
+      }
+    },
+    {
+      "id": "review-design",
+      "role": "tech-lead",
+      "inputs": [
+        "in:review.diff",
+        "docs/specs/{issue}/diagnosis.md",
+        "docs/specs/{issue}/analysis.md",
+        "in:repro-evidence.md",
+        "in:leader-decision.md"
+      ],
+      "outputs": [],
+      "checks": [
+        "root-cause-addressed"
+      ],
+      "on_fail": {
+        "back_to": "fix",
+        "max": 2
+      }
+    },
+    {
+      "id": "review-tests",
+      "role": "tester",
+      "inputs": [
+        "in:review.diff",
+        "docs/specs/{issue}/test-cases.md",
+        "docs/specs/{issue}/analysis.md",
+        "in:repro-evidence.md",
+        "in:leader-decision.md"
+      ],
+      "outputs": [],
+      "checks": [
+        "test-quality",
+        "regression-proof"
+      ],
+      "on_fail": {
+        "back_to": "fix",
+        "max": 2
+      }
+    },
+    {
+      "id": "review-audit",
+      "role": "auditor",
+      "inputs": [
+        "in:review.diff",
+        "docs/specs/{issue}/analysis.md",
+        "docs/specs/{issue}/diagnosis.md",
+        "docs/specs/{issue}/test-cases.md",
+        "in:leader-decision.md"
+      ],
+      "outputs": [],
+      "checks": [
+        "diff-review"
+      ],
+      "on_fail": {
+        "back_to": "fix",
+        "max": 2
+      }
+    },
+    {
+      "id": "qa",
+      "role": "qa",
+      "inputs": [
+        "in:review.diff",
+        "docs/specs/{issue}/analysis.md",
+        "docs/specs/{issue}/diagnosis.md",
+        "docs/specs/{issue}/test-cases.md",
+        "in:leader-decision.md"
+      ],
+      "outputs": [
+        "docs/specs/{issue}/manual-test-checklist.md"
+      ],
+      "checks": [
+        "qa-acceptance"
+      ],
+      "on_fail": {
+        "back_to": "fix",
+        "max": 2
+      }
+    },
+    {
+      "id": "verify-gate",
+      "run": "verify-gate",
+      "on_fail": {
+        "back_to": "fix",
+        "max": 2
+      }
+    },
+    {
+      "id": "done-gate",
+      "check": "done-gate",
+      "inputs": [
+        "docs/specs/{issue}/analysis.md",
+        "docs/specs/{issue}/test-cases.md",
+        "docs/specs/{issue}/diagnosis.md",
+        "docs/specs/{issue}/manual-test-checklist.md",
+        "in:review.diff",
+        "in:repro-evidence.md",
+        "in:leader-decision.md"
+      ]
+    },
+    {
+      "id": "pr",
+      "op": "create-pr",
+      "inputs": [
+        "docs/specs/{issue}/analysis.md",
+        "docs/specs/{issue}/manual-test-checklist.md"
+      ]
+    },
+    {
+      "id": "followups",
+      "op": "create-followups"
+    }
+  ]
+}

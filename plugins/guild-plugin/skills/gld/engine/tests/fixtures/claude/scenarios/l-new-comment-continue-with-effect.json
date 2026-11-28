@@ -1,0 +1,15 @@
+{
+  "format": 1,
+  "description": "Stage 2 leader, new collaborator comment: continue although comment 9102 corrects an assumption — schema-valid, refused by D16 (L11, continue-with-effect).",
+  "stream": "../leader/real-2.1.323/new-comment-escalate.jsonl",
+  "init_from_argv": true,
+  "leader": {"example": "leader-answer-new-comment", "expect": "continue-with-effect"},
+  "structured_output": {
+    "answer": "continue",
+    "reason": "comment-no-effect",
+    "step": null,
+    "note": "Probably fine.",
+    "recommendation": null,
+    "comments": [{"id": 9101, "effect": "none"}, {"id": 9102, "effect": "corrects-assumption"}]
+  }
+}

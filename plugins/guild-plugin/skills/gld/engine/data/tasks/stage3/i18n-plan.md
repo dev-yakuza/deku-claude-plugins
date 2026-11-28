@@ -1,0 +1,5 @@
+The engine added this step from the plugin step catalog because the change adds or changes user-facing text. Plan the texts and write the plan to `docs/specs/<issue>/i18n.md`, before the developer builds it: read `issue.md`, `analysis.md`, the repository's localisation files and how it loads them (the supported languages are the ones the repository already ships).
+
+Write one row per new or changed text: the key (following the repository's naming), where it is shown, and its text in every supported language — or, when you cannot write a language reliably, say so on that row so a human fills it. Add plural, gender, number and date format rules where the text needs them, and note texts that must not be translated (brand names, codes). Error messages a user sees are texts too.
+
+You plan; you do not change code or localisation files. Write prose in the language of the Issue, follow the repository's document rules (its markdown lint), and never use square brackets for a tag or a reference. Write only that one file.

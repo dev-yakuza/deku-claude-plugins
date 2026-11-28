@@ -1,0 +1,20 @@
+{
+  "format": 1,
+  "repo": "acme/app",
+  "answers": [
+    {
+      "question": "test-command",
+      "item": null,
+      "answer": "pnpm test",
+      "note": "owner, 2026-11-25",
+      "at": "2026-11-25T01:02:03Z"
+    },
+    {
+      "question": "registry-host",
+      "item": "registry.npmjs.org",
+      "answer": "approve",
+      "note": "owner",
+      "at": "2026-11-25T01:02:03Z"
+    }
+  ]
+}

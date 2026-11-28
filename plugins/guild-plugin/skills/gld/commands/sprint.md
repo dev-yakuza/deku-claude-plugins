@@ -20,8 +20,8 @@ as **that file's** `$1, $2, …` (shift by one).
 
 | `$1` | Action |
 |---|---|
-| `plan` | `commands/sprint/plan.md` — choose this sprint's issues, order them, create the tracking Issue, and commit + push the PO/tech-lead verdicts (`docs/specs/sprint-<tracker>/`) with `config.json` |
-| `run` | `commands/sprint/run.md` — develop the members unattended to PRs |
+| `plan` | `commands/sprint/plan.md` — choose this sprint's issues, order them, create the tracking Issue, and commit + push the PO/tech-lead verdicts (`docs/specs/sprint-<tracker>/`) with `harness.json` |
+| `run` | `commands/sprint/run.md` — develop the members unattended to PRs (the engine's supervisor, `commands/engine/sprint.md`) |
 | `daily` | `commands/sprint/daily.md` — read-only status; merge order; what is stuck |
 | `sync` | `commands/sprint/sync.md` — after a merge: on a squash/rebase-only repo, bring the stacked PRs above it level with the default branch (`_sprint_dag.md` Section G); with a board, move the merged members' cards to `Done` (any merge strategy) |
 | `retro` | `commands/sprint/retro.md` — metrics, capacity calibration, evolve, close the sprint, clean up its worktrees and branches |
@@ -47,22 +47,30 @@ as **that file's** `$1, $2, …` (shift by one).
 - At most one sprint is expected to be open. Two or more → ask the human which one; concurrent
   sprints are not supported (a member in two sprints has no defined base).
 
+### A tracker planned by Guild 0.98.7
+The engine **reads** it (the member table and plan hash are the same format) but does **not take over**
+what 0.98.7 did: a member is finished only by this machine's engine record or by its Issue being closed as
+completed — 0.98.7 labels, branches and PRs never count. The human merges or closes the 0.98.7 member PRs
+first (an open one makes the engine refuse that member, `open-closing-pr` — it never opens a second PR);
+`run.md` Phase 1 step 3b is the checklist. Once the engine ran a tracker, `daily` and `retro` do not read
+its 0.98.7 `.sprint-logs/<tracker>/failures.jsonl` (readiness T3 P8).
+
 ### Markers on the tracking Issue
 | Marker | Written by | How |
 |---|---|---|
 | `<!-- guild:sprint:plan -->` | `plan` | body, **immutable** after creation (guarded by `plan-hash`) |
-| `<!-- guild:sprint:run -->` | `run` supervisor (**shell**) | comment, in-place replace — the run ledger |
+| `<!-- guild:sprint:run -->` | the engine's supervisor (**code**) | comment, in-place replace — a copy of the run's state (codes and numbers); the original is engine-local (`engine.py sprint status`) |
 | `<!-- guild:sprint:daily -->` | `daily` (**LLM**) | comment, in-place replace |
 | `<!-- guild:sprint:retro -->` | `retro` (**LLM**) | comment, appended once per sprint |
 
-⚠ **LLM and shell writers follow different procedures.** An LLM writer inherits the
+⚠ **An LLM never writes the run marker.** An LLM writer of the other markers inherits the
 read-then-splice pattern *and its truncation check* (`_execute_spine.md` Step 4): a preview-
-truncated read must not be written back. A shell writer cannot be truncated but also cannot
-perform that recovery — its procedure is in `sprint/run.md`.
+truncated read must not be written back. The run marker is the engine's alone; it finds the
+**oldest** collaborator comment that carries it and PATCHes that one.
 
 ### Two termination axes
-- **run finished** — the queue is empty. Every member ended as done, needs-human, failed or
-  blocked. **Not all of them have to be done.**
+- **run finished** — every member was looked at once: done, closed, stopped (a human's answer),
+  blocked, skipped, refused or failed. **Not all of them have to be done.**
 - **sprint finished** — run finished **and** no member PR is `OPEN`, and none is `CLOSED`
   unmerged. Only then is a retro meaningful; `daily` judges both.
 
@@ -86,4 +94,4 @@ through unchanged. Its own returns are for the paths that never reach a subcomma
 shrinks that number from history (the capacity number is not asked; attended, `plan` asks
 one-answer decision questions that turn waiting candidates into ready ones), and `retro`
 compares plan against outcome and recommends the next number, which is stored in
-`config.json` → `sprint.capacity` after per-item human approval.
+`harness.json` → `sprint.capacity` after per-item human approval.

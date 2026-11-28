@@ -1,0 +1,15 @@
+{
+  "format": 1,
+  "description": "Stage 2 leader, new collaborator comment: both comments have no effect — continue (L11).",
+  "stream": "../leader/real-2.1.323/new-comment-escalate.jsonl",
+  "init_from_argv": true,
+  "leader": {"example": "leader-answer-new-comment", "expect": "accepted"},
+  "structured_output": {
+    "answer": "continue",
+    "reason": "comment-no-effect",
+    "step": null,
+    "note": "Both comments only confirm progress.",
+    "recommendation": null,
+    "comments": [{"id": 9101, "effect": "none"}, {"id": 9102, "effect": "none"}]
+  }
+}

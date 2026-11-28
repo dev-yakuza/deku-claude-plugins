@@ -1,0 +1,709 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "gld/leader-input",
+  "title": "in/leader-input.json — the engine facts of one leader call (stage 2, scope §2.0 D25, §2.1–§2.5, V3)",
+  "description": "Machine-made by the engine (gxengine/leader.py, V3) into the call's in/ folder, next to the other in/ files (issue.md, leader-decision.md, failure-summary.md, review.diff as the situation needs). Engine facts only — the judgment documents are passed as worktree paths (`docs`, §6.2 'paths only'). Ids the engine numbers (requirement rows R1..Rn, discoveries D1..Dn) are stable within one Issue: the same row / discovery keeps its id on every call. Free-text fields (notes, findings, assumptions, requirement texts) are copied verbatim and cut at defaults.LEADER_INPUT_TEXT_MAX characters with defaults.LEADER_INPUT_TRUNCATION_MARK. Every top-level key is present; a situation section that does not apply is null. Engine-local, never sent outside (secret scanning happens when text leaves through a comment / PR, not here). Stage 3 adds sections and fields (marked); they are required from stage 3 (the anyOf) and never written before.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["format", "issue", "stage", "situation", "call", "mode", "allowed", "docs", "in_files", "steps", "counters", "cost", "plan_gate", "done_gate", "stopped", "budget", "comments"],
+  "anyOf": [
+    {"properties": {"stage": {"maximum": 2}, "plan_gate": {"properties": {"templates": {"minItems": 1}}}}},
+    {
+      "required": ["defer", "removal", "add_limit", "pr_review"],
+      "properties": {
+        "stage": {"minimum": 3, "maximum": 3},
+        "allowed": {"required": ["models", "efforts"]},
+        "counters": {"required": ["catalog_adds", "catalog_adds_max", "followups", "followups_max"]},
+        "plan_gate": {
+          "required": ["requested_steps", "catalog", "templates_unusable"],
+          "properties": {"analysis": {"required": ["safety_net"]}}
+        },
+        "done_gate": {
+          "required": ["included_fixes", "followup_candidates", "deferred_rows"],
+          "properties": {"requests": {"items": {"required": ["outcome", "reason"]}}}
+        }
+      }
+    },
+    {
+      "required": ["defer", "removal", "add_limit", "pr_review"],
+      "properties": {
+        "stage": {"minimum": 4},
+        "allowed": {"required": ["models", "efforts"]},
+        "counters": {"required": ["catalog_adds", "catalog_adds_max", "followups", "followups_max"]},
+        "plan_gate": {
+          "required": ["requested_steps", "catalog", "templates_unusable"],
+          "properties": {"analysis": {"required": ["safety_net"]}}
+        },
+        "done_gate": {
+          "required": ["included_fixes", "followup_candidates", "deferred_rows", "mutations", "commits"],
+          "properties": {"requests": {"items": {"required": ["outcome", "reason"]}}}
+        }
+      }
+    }
+  ],
+  "properties": {
+    "format": {"const": 1},
+    "issue": {"type": "integer", "minimum": 1},
+    "stage": {"type": "integer", "minimum": 2},
+    "situation": {"$ref": "#/$defs/situation"},
+    "call": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "step", "attempt", "format_retry", "errors"],
+      "description": "Where this call is recorded (D13): kind check = runs/<step>/<attempt>/ of the plan-gate / done-gate step; kind leader = <records>/leader/<attempt>/ (attempt = k).",
+      "properties": {
+        "kind": {"enum": ["check", "leader"]},
+        "step": {"$ref": "#/$defs/name", "description": "The check step, or the step the needs_leader situation is attached to."},
+        "attempt": {"type": "integer", "minimum": 1},
+        "format_retry": {"type": "integer", "minimum": 0, "description": "0 = first call of this situation; n = n-th re-call after a rejected answer (D12)."},
+        "errors": {"type": "array", "items": {"type": "string"}, "description": "Why the previous answer was rejected (LeaderFormatReason code + detail per line); empty on the first call."}
+      }
+    },
+    "mode": {"enum": ["attended", "unattended"]},
+    "allowed": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["answers", "rerun_steps", "human_answers", "human_rerun_steps", "narrowed"],
+      "description": "The enums rendered into this call's answer schema, and why answers were removed.",
+      "properties": {
+        "answers": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"$ref": "#/$defs/answer"}},
+        "rerun_steps": {"type": "array", "uniqueItems": true, "items": {"$ref": "#/$defs/name"}},
+        "human_answers": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"$ref": "#/$defs/answer"}, "description": "recommendation.answer choices: the human's row (codes.STAGE2_ALLOWED_ANSWERS, no narrowing — D17)."},
+        "human_rerun_steps": {"type": "array", "uniqueItems": true, "items": {"$ref": "#/$defs/name"}},
+        "narrowed": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["reason", "removed"],
+            "anyOf": [{"properties": {"removed": {"minItems": 1}}}, {"required": ["field"]}],
+            "properties": {
+              "reason": {"$ref": "#/$defs/narrow_reason"},
+              "removed": {"type": "array", "items": {"$ref": "#/$defs/answer"}, "description": "Empty only with `field`."},
+              "field": {"enum": ["defer", "followup"], "description": "Stage 3 (codes.NARROWING_FIELDS): what a reason that removes no answer took away."}
+            }
+          }
+        },
+        "models": {"type": "array", "uniqueItems": true, "items": {"enum": ["haiku", "sonnet", "opus", "fable"]}, "description": "Stage 3: models this answer may name ([] = none)."},
+        "efforts": {"type": "array", "uniqueItems": true, "items": {"enum": ["low", "medium", "high", "xhigh", "max"]}, "description": "Stage 3."}
+      }
+    },
+    "docs": {"type": "array", "uniqueItems": true, "items": {"$ref": "#/$defs/relpath"}, "description": "Worktree-relative judgment documents to read (analysis.md, test-cases.md, skeleton.md, manual-test-checklist.md, the stopped step's inputs)."},
+    "in_files": {"type": "array", "uniqueItems": true, "items": {"$ref": "#/$defs/in_file"}, "description": "The other engine inputs present in this call's in/ folder."},
+    "steps": {
+      "type": "array",
+      "minItems": 1,
+      "description": "The step table of the current procedure revision, in order.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "kind", "name", "status", "attempts", "on_fail_count", "on_fail_max"],
+        "properties": {
+          "id": {"$ref": "#/$defs/name"},
+          "kind": {"enum": ["role", "run", "check", "op"]},
+          "name": {"$ref": "#/$defs/name", "description": "The role / run / check / op value."},
+          "status": {"$ref": "#/$defs/status"},
+          "attempts": {"type": "integer", "minimum": 0},
+          "on_fail_count": {"type": "integer", "minimum": 0},
+          "on_fail_max": {"type": ["integer", "null"], "minimum": 1, "description": "on_fail.max plus any granted extra; null = no on_fail."}
+        }
+      }
+    },
+    "counters": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["leader_calls", "leader_calls_max", "plan_rerun", "plan_rerun_max", "done_rerun", "done_rerun_max", "on_fail_rerun_used", "soft_budget_rerun_used"],
+      "properties": {
+        "leader_calls": {"type": "integer", "minimum": 0, "description": "Counted needs_leader calls so far (codes.LEADER_CALL_COUNTED, D14)."},
+        "leader_calls_max": {"type": "integer", "minimum": 1},
+        "plan_rerun": {"type": "integer", "minimum": 0},
+        "plan_rerun_max": {"type": "integer", "minimum": 0},
+        "done_rerun": {"type": "integer", "minimum": 0},
+        "done_rerun_max": {"type": "integer", "minimum": 0},
+        "on_fail_rerun_used": {"type": "boolean"},
+        "soft_budget_rerun_used": {"type": "boolean"},
+        "catalog_adds": {"type": "integer", "minimum": 0, "description": "Stage 3 (E15): catalog steps added to this Issue."},
+        "catalog_adds_max": {"type": "integer", "minimum": 0},
+        "followups": {"type": "integer", "minimum": 0, "description": "Stage 3 (E19): follow-ups this Issue already made."},
+        "followups_max": {"type": "integer", "minimum": 0}
+      }
+    },
+    "cost": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["issue_usd", "soft_usd", "absolute_usd"],
+      "properties": {
+        "issue_usd": {"type": "number", "minimum": 0, "description": "Issue cost so far, leader sessions included (D13)."},
+        "soft_usd": {"type": "number", "minimum": 0},
+        "absolute_usd": {"type": "number", "minimum": 0}
+      }
+    },
+    "plan_gate": {
+      "anyOf": [
+        {"type": "null"},
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["analysis", "acs", "requirement_rows", "assumptions", "referenced_issues", "templates", "decision_marker"],
+          "description": "§2.1. Present exactly when situation = plan-gate.",
+          "properties": {
+            "analysis": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["type", "size", "risk", "split", "prerequisite_open"],
+              "description": "analysis.md machine fields (acparse.parse_analysis).",
+              "properties": {
+                "type": {"enum": ["feature", "bug", "refactor", "docs", "chore"]},
+                "size": {"enum": ["small", "medium", "large"]},
+                "risk": {"enum": ["low", "high"]},
+                "split": {"type": "boolean"},
+                "prerequisite_open": {"type": "boolean"},
+                "safety_net": {"enum": ["none", "with-refactor", "only"], "description": "Stage 3 (E3)."}
+              }
+            },
+            "acs": {"$ref": "#/$defs/ac_ids"},
+            "requirement_rows": {"$ref": "#/$defs/requirement_rows"},
+            "assumptions": {"type": "array", "items": {"type": "string"}},
+            "referenced_issues": {
+              "type": "array",
+              "description": "Issues the body references, with the same state facts as issue.md.",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["number", "state", "state_reason"],
+                "properties": {
+                  "number": {"type": "integer", "minimum": 1},
+                  "state": {"type": ["string", "null"], "description": "GitHub state (OPEN / CLOSED) as gh reports it; null = not readable."},
+                  "state_reason": {"type": ["string", "null"], "description": "GitHub stateReason (COMPLETED / NOT_PLANNED / REOPENED) or null."}
+                }
+              }
+            },
+            "requested_steps": {
+              "type": "array",
+              "description": "Stage 3 (E15-1): add requests of the start-procedure roles (deferred-to-plan).",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["from_step", "step", "trigger", "note"],
+                "properties": {
+                  "from_step": {"$ref": "#/$defs/name"},
+                  "step": {"$ref": "#/$defs/name"},
+                  "trigger": {"$ref": "#/$defs/trigger"},
+                  "note": {"type": "string"}
+                }
+              }
+            },
+            "catalog": {
+              "type": "array",
+              "description": "Stage 3 (E12): the requestable catalog entries.",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["id", "role", "class", "summary", "usable"],
+                "properties": {
+                  "id": {"$ref": "#/$defs/name"},
+                  "role": {"$ref": "#/$defs/name"},
+                  "class": {"enum": ["design-time", "diff-review", "fix"]},
+                  "summary": {"type": "string"},
+                  "usable": {"type": "boolean", "description": "false = this repository cannot run the role (not in the adjust enum)."}
+                }
+              }
+            },
+            "templates_unusable": {
+              "type": "array",
+              "description": "Stage 3 (E2): templates procedure.check refused at Issue start, with the reasons.",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["name", "reasons"],
+                "properties": {"name": {"$ref": "#/$defs/name"}, "reasons": {"type": "array", "minItems": 1, "items": {"type": "string"}}}
+              }
+            },
+            "templates": {
+              "type": "array",
+              "description": "The templates this call may choose. Stage 2: at least one. Stage 3: the usable ones of codes.TYPE_TEMPLATES (may be empty — then plan is narrowed away).",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["name", "version", "steps"],
+                "properties": {
+                  "name": {"$ref": "#/$defs/name"},
+                  "version": {"type": "string", "minLength": 1},
+                  "steps": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/name"}}
+                }
+              }
+            },
+            "decision_marker": {"type": "boolean", "description": "A `<!-- guild:plan-decision -->` block exists in the body or a collaborator comment (D18). Content is for the leader."}
+          }
+        }
+      ]
+    },
+    "done_gate": {
+      "anyOf": [
+        {"type": "null"},
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["acs", "requirement_rows", "runs", "not_checked_locally", "reviews", "discoveries", "requests", "verification_paths_changed", "refused_writes", "comment_decisions"],
+          "description": "§2.2. Present exactly when situation = done-gate.",
+          "properties": {
+            "acs": {"$ref": "#/$defs/ac_ids"},
+            "requirement_rows": {"$ref": "#/$defs/requirement_rows"},
+            "runs": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["step", "name", "exit_code", "flaky", "base_red", "quarantined"],
+                "properties": {
+                  "step": {"$ref": "#/$defs/name"},
+                  "name": {"$ref": "#/$defs/name"},
+                  "exit_code": {"type": ["integer", "null"]},
+                  "flaky": {"type": "boolean", "description": "I8: an attempt was red, then green on the same tree (the run stays red). VW4 O1: a safety-net-proof attempt was not green on the overlay tree, then green on the same tree — that one passed (facts.run.head_flaky)."},
+                  "base_red": {"type": "boolean"},
+                  "quarantined": {"type": "integer", "minimum": 0}
+                }
+              }
+            },
+            "not_checked_locally": {"type": "array", "items": {"type": "string"}},
+            "reviews": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["step", "role", "verdict", "checks", "findings"],
+                "properties": {
+                  "step": {"$ref": "#/$defs/name"},
+                  "role": {"$ref": "#/$defs/name"},
+                  "verdict": {"enum": ["pass", "block"]},
+                  "checks": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": ["id", "result"],
+                      "properties": {"id": {"$ref": "#/$defs/name"}, "result": {"enum": ["pass", "fail", "n/a"]}}
+                    }
+                  },
+                  "findings": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": ["severity", "file", "line", "text"],
+                      "properties": {
+                        "severity": {"enum": ["blocker", "major", "minor"]},
+                        "file": {"type": "string"},
+                        "line": {"type": ["integer", "null"]},
+                        "text": {"type": "string"}
+                      }
+                    }
+                  }
+                }
+              }
+            },
+            "discoveries": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["id", "kind", "where", "blocks_current_ac", "role", "note"],
+                "properties": {
+                  "id": {"$ref": "#/$defs/discovery_id"},
+                  "kind": {"enum": ["bug", "debt", "security", "test-gap", "doc"]},
+                  "where": {"type": "string"},
+                  "blocks_current_ac": {"type": "boolean"},
+                  "role": {"$ref": "#/$defs/name"},
+                  "note": {"type": "string"}
+                }
+              }
+            },
+            "requests": {
+              "type": "array",
+              "description": "Role change requests: recorded only (stages 0–2), with their outcome from stage 3.",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["from_step", "op", "step", "trigger", "note"],
+                "properties": {
+                  "from_step": {"$ref": "#/$defs/name"},
+                  "op": {"enum": ["add", "remove", "skip"]},
+                  "step": {"type": "string"},
+                  "trigger": {"$ref": "#/$defs/trigger"},
+                  "note": {"type": "string"},
+                  "outcome": {"enum": ["applied", "noop", "declined", "deferred-to-plan", "pending", "skipped"], "description": "Stage 3."},
+                  "reason": {"enum": ["already-present", "role-unavailable", "position", "grammar", "limit", "removal", "refused", null], "description": "Stage 3."}
+                }
+              }
+            },
+            "included_fixes": {
+              "type": "array",
+              "description": "Stage 3 (E18): the out-of-scope fixes the engine included; the answer judges each one.",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["id", "from_step", "role", "kind", "where", "note", "handled_by"],
+                "properties": {
+                  "id": {"type": "string", "pattern": "^F[1-9][0-9]*$"},
+                  "from_step": {"$ref": "#/$defs/name"},
+                  "role": {"$ref": "#/$defs/name"},
+                  "kind": {"enum": ["bug", "debt", "security", "test-gap", "doc"]},
+                  "where": {"type": "string"},
+                  "note": {"type": "string"},
+                  "handled_by": {"$ref": "#/$defs/name"}
+                }
+              }
+            },
+            "followup_candidates": {
+              "type": "array",
+              "description": "Stage 3 (E19): open follow-up-labelled Issues, newest update first — the only Issues duplicate_of may name.",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["number", "title", "labels"],
+                "properties": {
+                  "number": {"type": "integer", "minimum": 1},
+                  "title": {"type": "string"},
+                  "labels": {"type": "array", "items": {"type": "string"}}
+                }
+              }
+            },
+            "mutations": {
+              "anyOf": [
+                {"type": "null"},
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["problem", "control_flaky", "rows"],
+                  "properties": {
+                    "problem": {"enum": ["bad-file", "bad-path", "verification-path", "not-unique", "no-change", "unknown-ac", null], "description": "Set when the whole declaration was refused (then rows is empty)."},
+                    "control_flaky": {"type": "boolean", "description": "VW2 E1: `test` without any change was red, then green on the same tree — a killed row then needed two reds that each showed a failure line no unchanged run showed."},
+                    "rows": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": ["id", "acs", "path", "find", "replace", "note", "status", "detail", "log_excerpt", "log_tail"],
+                        "properties": {
+                          "id": {"type": "string", "pattern": "^M[1-9][0-9]*$"},
+                          "acs": {"type": "array", "items": {"type": "integer", "minimum": 1}},
+                          "path": {"type": "string"},
+                          "find": {"type": "string"},
+                          "replace": {"type": "string"},
+                          "note": {"type": "string"},
+                          "status": {"enum": ["killed", "survived", "timed-out", "refused", "not-run"]},
+                          "detail": {"enum": ["bad-file", "bad-path", "verification-path", "not-unique", "no-change", "unknown-ac", null]},
+                          "log_excerpt": {"type": "string", "maxLength": 3100, "description": "VW3 E2: the first failure block of the red run with the lines around it (mutation._excerpt; first line = the rule that found it). \"\" = a green run, no run, or a record of an older engine."},
+                          "log_tail": {"type": "string", "maxLength": 1100, "description": "The END of the same run's log (its last characters; the engine's truncation mark in front when cut). A not-run reason is its last line."}
+                        }
+                      }
+                    }
+                  }
+                }
+              ],
+              "description": "Stage 4 (VB9): what the ENGINE saw at this HEAD when it ran docs/specs/<N>/mutations.json (the declaration is the developer's; status and log_tail are facts). null = nothing declared."
+            },
+            "commits": {
+              "type": "array",
+              "description": "Stage 4 (VB9): the commit messages of merge-base..HEAD, oldest first — claims of the roles, not facts (the leader cannot read .git).",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["sha", "message"],
+                "properties": {"sha": {"type": "string", "pattern": "^[0-9a-f]{40}([0-9a-f]{24})?$"}, "message": {"type": "string"}}
+              }
+            },
+            "deferred_rows": {
+              "type": "array",
+              "description": "Stage 3 (E30): requirement rows a replan deferred (their ACs are not in `acs`).",
+              "items": {"$ref": "#/$defs/deferred_row"}
+            },
+            "verification_paths_changed": {"type": "array", "items": {"type": "string"}},
+            "refused_writes": {"type": "array", "items": {"type": "string"}, "description": "Permission denials recorded in the facts of this Issue's attempts."},
+            "comment_decisions": {
+              "type": "array",
+              "description": "Earlier new-collaborator-comment leader decisions of this Issue.",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["answer", "reason", "step"],
+                "properties": {
+                  "answer": {"$ref": "#/$defs/answer"},
+                  "reason": {"$ref": "#/$defs/leader_reason"},
+                  "step": {"anyOf": [{"$ref": "#/$defs/name"}, {"type": "null"}]}
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "stopped": {
+      "anyOf": [
+        {"type": "null"},
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["step", "kind", "name", "attempts", "on_fail_count", "on_fail_max", "blocked", "format_errors", "session", "run"],
+          "description": "§2.3. Present exactly when situation is blocked / output-format-twice / session-limit / on-fail-exceeded.",
+          "properties": {
+            "step": {"$ref": "#/$defs/name"},
+            "kind": {"enum": ["role", "run", "check", "op"]},
+            "name": {"$ref": "#/$defs/name"},
+            "attempts": {"type": "integer", "minimum": 0},
+            "on_fail_count": {"type": "integer", "minimum": 0},
+            "on_fail_max": {"type": ["integer", "null"], "minimum": 1},
+            "blocked": {
+              "anyOf": [
+                {"type": "null"},
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["kind", "note"],
+                  "properties": {"kind": {"enum": ["missing-input", "ambiguous", "env", "other"]}, "note": {"type": "string"}}
+                }
+              ]
+            },
+            "format_errors": {"type": "array", "items": {"type": "string"}, "description": "output-format-twice: the format errors the engine saw."},
+            "session": {
+              "anyOf": [
+                {"type": "null"},
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["max_budget_usd", "cost_usd"],
+                  "properties": {"max_budget_usd": {"type": ["number", "null"]}, "cost_usd": {"type": ["number", "null"]}}
+                }
+              ]
+            },
+            "run": {
+              "anyOf": [
+                {"type": "null"},
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["exit_code", "rerun_exit_code", "base_exit_code"],
+                  "description": "A failed run's I8 facts.",
+                  "properties": {
+                    "exit_code": {"type": ["integer", "null"]},
+                    "rerun_exit_code": {"type": ["integer", "null"], "description": "Same-tree re-run."},
+                    "base_exit_code": {"type": ["integer", "null"], "description": "Run on the recorded base."}
+                  }
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "budget": {
+      "anyOf": [
+        {"type": "null"},
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["per_step", "remaining_steps", "next_step"],
+          "description": "§2.4. Present exactly when situation = soft-budget.",
+          "properties": {
+            "per_step": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["step", "cost_usd"],
+                "properties": {"step": {"$ref": "#/$defs/name"}, "cost_usd": {"type": "number", "minimum": 0}}
+              }
+            },
+            "remaining_steps": {"type": "array", "items": {"$ref": "#/$defs/name"}},
+            "next_step": {"$ref": "#/$defs/name"}
+          }
+        }
+      ]
+    },
+    "comments": {
+      "anyOf": [
+        {"type": "null"},
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["new", "assumptions", "current_step", "passed_steps"],
+          "description": "§2.5. Present exactly when situation = new-collaborator-comment. issue.md in in/ is re-made for this call.",
+          "properties": {
+            "new": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["id", "author_association", "created_at"],
+                "properties": {
+                  "id": {"type": "integer", "minimum": 1},
+                  "author_association": {"type": "string"},
+                  "created_at": {"type": "string"}
+                }
+              }
+            },
+            "assumptions": {"type": "array", "items": {"type": "string"}, "description": "The assumptions the engine posted publicly."},
+            "current_step": {"$ref": "#/$defs/name"},
+            "passed_steps": {"type": "array", "items": {"$ref": "#/$defs/name"}}
+          }
+        }
+      ]
+    },
+    "defer": {
+      "anyOf": [
+        {"type": "null"},
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["requirement_rows", "deferred"],
+          "description": "Stage 3 (E30): rows `defer` may name. An object exactly when this call renders the defer field.",
+          "properties": {
+            "requirement_rows": {"$ref": "#/$defs/requirement_rows"},
+            "deferred": {"type": "array", "items": {"$ref": "#/$defs/deferred_row"}}
+          }
+        }
+      ]
+    },
+    "removal": {
+      "anyOf": [
+        {"type": "null"},
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["from_step", "requests", "skippable_steps"],
+          "description": "Stage 3 (E13). Present exactly when situation = step-removal-request.",
+          "properties": {
+            "from_step": {"$ref": "#/$defs/name"},
+            "requests": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["op", "step", "trigger", "note"],
+                "properties": {
+                  "op": {"enum": ["remove", "skip"]},
+                  "step": {"$ref": "#/$defs/name"},
+                  "trigger": {"$ref": "#/$defs/trigger"},
+                  "note": {"type": "string"}
+                }
+              }
+            },
+            "skippable_steps": {"type": "array", "uniqueItems": true, "items": {"$ref": "#/$defs/name"}, "description": "catalog.skippable_steps."}
+          }
+        }
+      ]
+    },
+    "add_limit": {
+      "anyOf": [
+        {"type": "null"},
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["from_step", "limit", "used", "requests"],
+          "description": "Stage 3 (E15-5). Present exactly when situation = step-add-limit: the requests over the limit.",
+          "properties": {
+            "from_step": {"$ref": "#/$defs/name"},
+            "limit": {"type": "integer", "minimum": 0},
+            "used": {"type": "integer", "minimum": 0},
+            "requests": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["step", "trigger", "note", "summary"],
+                "properties": {
+                  "step": {"$ref": "#/$defs/name"},
+                  "trigger": {"$ref": "#/$defs/trigger"},
+                  "note": {"type": "string"},
+                  "summary": {"type": "string", "description": "The catalog entry's line."}
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "pr_review": {
+      "anyOf": [
+        {"type": "null"},
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["pr_number", "new", "fast_forward"],
+          "description": "Stage 3 (E31). Present exactly when situation = pr-review; the texts are in in/pr-review.md.",
+          "properties": {
+            "pr_number": {"type": "integer", "minimum": 1},
+            "new": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["id", "author_association", "created_at", "state", "path"],
+                "properties": {
+                  "id": {"type": "string", "pattern": "^(review|review-comment|comment):[1-9][0-9]*$"},
+                  "author_association": {"type": "string"},
+                  "created_at": {"type": "string"},
+                  "state": {"type": ["string", "null"], "description": "A review's GitHub state (CHANGES_REQUESTED, …), else null."},
+                  "path": {"type": ["string", "null"], "description": "A review comment's file, else null."}
+                }
+              }
+            },
+            "fast_forward": {
+              "anyOf": [
+                {"type": "null"},
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["from", "to", "commits"],
+                  "properties": {
+                    "from": {"$ref": "#/$defs/sha"},
+                    "to": {"$ref": "#/$defs/sha"},
+                    "commits": {"type": "integer", "minimum": 1}
+                  }
+                }
+              ],
+              "description": "The human commits the engine fast-forwarded to, or null."
+            }
+          }
+        }
+      ]
+    }
+  },
+  "$defs": {
+    "name": {"type": "string", "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*$", "maxLength": 64},
+    "relpath": {"type": "string", "minLength": 1, "pattern": "^(?!/)(?!.*(^|/)\\.\\.(/|$))[^\\s\\\\]+$"},
+    "status": {"enum": ["pending", "ready", "running", "done", "failed", "skipped", "needs_leader", "needs_human"]},
+    "answer": {"enum": ["plan", "close-as-decided", "escalate", "rerun", "replan", "continue", "approve", "skip"]},
+    "situation": {"enum": ["plan-gate", "blocked", "output-format-twice", "session-limit", "on-fail-exceeded", "soft-budget", "new-collaborator-comment", "done-gate", "step-add-limit", "step-removal-request", "pr-review"]},
+    "narrow_reason": {"enum": ["type-not-feature", "split-proposed", "prerequisite-open", "risk-high", "unattended-no-decision-marker", "plan-rerun-used", "done-rerun-used", "on-fail-rerun-used", "soft-budget-rerun-used", "plan-not-done", "no-rerun-target", "no-template-for-type", "template-unusable", "defer-used", "no-skippable-step", "followup-cap", "developer-started", "close-risk", "bug-without-repro-red"]},
+    "leader_reason": {"enum": ["fits-template", "analysis-gap", "assumption-corrected", "comment-no-effect", "real-defect", "upstream-gap", "transient", "env-problem", "needs-human-decision", "already-decided", "acceptance-met", "high-complexity", "repeated-failure", "other"]},
+    "in_file": {"enum": ["issue.md", "leader-decision.md", "failure-summary.md", "review.diff", "repro-evidence.md", "blocking-discoveries.md", "pr-review.md", "git-history.md"]},
+    "ac_ids": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "integer", "minimum": 1}},
+    "sha": {"type": "string", "pattern": "^[0-9a-f]{40}([0-9a-f]{24})?$"},
+    "trigger": {"enum": ["ui-change", "new-dependency", "schema-change", "security-surface", "no-user-facing-text", "user-facing-text", "performance-risk", "infra-change", "blocking-discovery", "scope-question", "other"]},
+    "deferred_row": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["row", "requirement"],
+      "properties": {"row": {"type": "string", "pattern": "^R[1-9][0-9]*$"}, "requirement": {"type": "string"}}
+    },
+    "discovery_id": {"type": "string", "pattern": "^D[1-9][0-9]*$"},
+    "requirement_rows": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["row", "requirement", "acs"],
+        "properties": {
+          "row": {"type": "string", "pattern": "^R[1-9][0-9]*$"},
+          "requirement": {"type": "string"},
+          "acs": {"type": "array", "items": {"type": "integer", "minimum": 1}}
+        }
+      }
+    }
+  }
+}

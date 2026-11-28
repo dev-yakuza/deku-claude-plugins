@@ -1,0 +1,137 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "gld/catalog",
+  "title": "Plugin step catalog — engine/data/catalog.json (stage 3, scope §2.4 E14)",
+  "description": "The only steps a role request, a plan adjust, a blocking discovery or a mandatory rule may add to a running procedure. Plugin-fixed (like the gate definitions, §7). Paths may use {issue}. The rules beyond this schema are catalog.load's.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "format",
+    "version",
+    "entries"
+  ],
+  "properties": {
+    "format": {
+      "const": 1
+    },
+    "version": {
+      "type": "string",
+      "minLength": 1
+    },
+    "entries": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/entry"
+      }
+    }
+  },
+  "$defs": {
+    "name": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*$",
+      "maxLength": 64
+    },
+    "relpath": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 300,
+      "pattern": "^(?!/)(?!in:)(?!.*\\{path:)(?!.*(^|/)\\.\\.(/|$))[^\\s\\\\]+$",
+      "description": "Worktree-relative path or glob. No leading /, no .. segment, no whitespace (a command string cannot be one)."
+    },
+    "input": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/relpath"
+        },
+        {
+          "type": "string",
+          "pattern": "^in:(issue\\.md|leader-decision\\.md|failure-summary\\.md|review\\.diff|leader-input\\.json|repro-evidence\\.md|blocking-discoveries\\.md|pr-review\\.md)$",
+          "description": "An engine-made input in the attempt's in/ folder (§6.2, §7.12 S7)."
+        }
+      ]
+    },
+    "entry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "role",
+        "class",
+        "inputs",
+        "outputs",
+        "checks",
+        "on_fail",
+        "summary"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/name"
+        },
+        "role": {
+          "$ref": "#/$defs/name"
+        },
+        "class": {
+          "enum": [
+            "design-time",
+            "diff-review",
+            "fix"
+          ],
+          "description": "Fixes the position (catalog.position, E15 / D6)."
+        },
+        "inputs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/input"
+          },
+          "uniqueItems": true
+        },
+        "outputs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/relpath"
+          },
+          "uniqueItems": true
+        },
+        "checks": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/name"
+          },
+          "uniqueItems": true
+        },
+        "on_fail": {
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "back_to",
+                "max"
+              ],
+              "properties": {
+                "back_to": {
+                  "const": "@developer"
+                },
+                "max": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 10
+                }
+              }
+            }
+          ],
+          "description": "null = no on_fail (a failure is needs_leader). @developer = the developer step (E5, D4)."
+        },
+        "summary": {
+          "type": "string",
+          "minLength": 1,
+          "description": "One line for roles, the leader and humans."
+        }
+      }
+    }
+  }
+}

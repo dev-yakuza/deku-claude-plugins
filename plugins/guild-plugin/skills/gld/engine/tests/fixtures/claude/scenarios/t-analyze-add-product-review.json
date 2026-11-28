@@ -1,0 +1,29 @@
+{
+  "format": 1,
+  "description": "Stage 3: the start procedure asks for a step → deferred-to-plan (TC9).",
+  "stream": "../f2/r4.jsonl",
+  "init_from_argv": true,
+  "role": {
+    "example": "result-work-s3",
+    "expect": "done"
+  },
+  "structured_output": {
+    "status": "done",
+    "outputs": [
+      "docs/specs/42/analysis.md"
+    ],
+    "requests": [
+      {
+        "op": "add",
+        "step": "product-review",
+        "trigger": "scope-question",
+        "note": "fixture"
+      }
+    ],
+    "blocked_by": null,
+    "discoveries": [],
+    "irreversible": [],
+    "golden_reasons": [],
+    "note": "fixture"
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "format": 1,
+  "description": "P3-A: the judge returns status blocked (I5-3) → blocked stop.",
+  "stream": "../f2/r4.jsonl",
+  "init_from_argv": true,
+  "structured_output": {
+    "status": "blocked",
+    "outputs": [],
+    "requests": [],
+    "blocked_by": {
+      "kind": "ambiguous",
+      "note": "x"
+    },
+    "discoveries": [],
+    "note": "fixture"
+  },
+  "actions": []
+}

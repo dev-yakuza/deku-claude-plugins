@@ -1,19 +1,16 @@
 # ANALYZE (stage)
 
-> **0.102 (engine)**: `/gld analyze $1` runs the engine's **analyze** stage alone — follow `<<SKILL_DIR>>/commands/dev.md` *Engine driver* with `--only analyze` on step 1. The rest of this file is the 0.101.x reference the roles' atoms cite; it is **not executed**. **Reference (0.102) — removed in the next release.**
-
 **Stage: analyze.** Role: **leader** (embodied by the main session). Runs the **discuss gate**, analyzes requirements, classifies work type, posts the analysis. Invocable directly (`/gld analyze <issue>`) or as the first stage of `/gld dev`.
 
 `$1` = Issue number. Returns a Section D line (`_handoff.md`).
 
 > **Bash**: `<<SKILL_DIR>>/commands/atoms/_bash_rules.md`. State/handoff: `<<SKILL_DIR>>/commands/atoms/_handoff.md`.
-> **Checkout**: never move the human's branch or history — `_checkout.md` (a pull/sync/switch request: show the commands and which commits change hash, then ask).
 > **Output language**: all human-readable output in `config.language` (`_handoff.md` Section K); sub-agent prompts carry that instruction.
 
 ---
 
 ## Step 0 — Preflight
-Follow `<<SKILL_DIR>>/commands/atoms/_preflight.md` **Light tier** (per its Section A table: items **1 + 2 + 3 + 6 + 8** — config + role defs, conventions + standards, commit style, ⑥ knowledge retrieval, ④ working-memory read; not just 1–3). If `.claude/guild/config.json` is absent → `FAIL: Guild not initialized (run /gld init)`.
+**First, the engine guard** — `_preflight.md` **Section 0** with `<N>` = $1: an Issue the engine works on is refused there (`/gld resume $1`) before anything else is read or written. Follow `<<SKILL_DIR>>/commands/atoms/_preflight.md` **Light tier** (per its Section A table: items **1 + 2 + 3 + 6 + 8** — config + role defs, conventions + standards, commit style, ⑥ knowledge retrieval, ④ working-memory read; not just 1–3). If `.claude/guild/harness.json` is absent → `FAIL: Guild not initialized (run /gld init)`.
 
 Validate `$1` is an Issue (not a PR):
 ```bash
@@ -28,7 +25,7 @@ gh issue view $1 --json labels --jq '[.labels[].name] | map(select(startswith("g
 **Split-parent guard** (right here, before any other work): if that read contains `guild:children`, refuse — a parent at `guild:children` is in an *orchestration* state, not a stage (`_handoff.md` Section A: a parent never carries both `guild:children` and a stage label at once), so the "non-empty → proceed anyway" branch below must never swallow it: Step 5's transition would remove `guild:children` and destroy the link `dev.md` Phase 2b uses to drive the children.
 ```
 >>> RESULT <<<
-FAIL: #$1 is a split parent (guild:children) — its work is its children's, not its own. Run `/gld dev $1` (or `/gld resume $1`) to drive the children.
+FAIL: #$1 is a split parent (guild:children) — its work is its children's, not its own. Epics are not supported yet — develop its children one by one (`/gld dev <child>`).
 ```
 (`guild:child` is **not** this case — a child legitimately carries `guild:child` + its stage label and proceeds normally.)
 

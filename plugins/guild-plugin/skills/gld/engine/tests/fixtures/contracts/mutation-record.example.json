@@ -1,0 +1,52 @@
+{
+  "format": 1,
+  "issue": 42,
+  "head": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "blob": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "problem": null,
+  "control": {
+    "exit_code": 0,
+    "timed_out": false,
+    "log_file": "control.log",
+    "again": null,
+    "flaky": false
+  },
+  "rows": [
+    {
+      "id": "M1",
+      "acs": [
+        2
+      ],
+      "path": "lib/a.dart",
+      "find": "  if (_probed) return;\n",
+      "replace": "",
+      "note": "the probe flag",
+      "status": "killed",
+      "detail": null,
+      "run": {
+        "exit_code": 1,
+        "timed_out": false,
+        "log_file": "m1.log"
+      },
+      "again": null,
+      "log_tail": "1 failed",
+      "log_excerpt": "[gld engine] m1.log, lines 1-3 of 3: the first block of 2+ failure-mark lines the green control run did not print\n1| FAIL test/a_test.dart\n2| Expected: <1>\n3| 1 failed"
+    },
+    {
+      "id": "M2",
+      "acs": [
+        3
+      ],
+      "path": "test/a_test.dart",
+      "find": "x",
+      "replace": "y",
+      "note": "",
+      "status": "refused",
+      "detail": "verification-path",
+      "run": null,
+      "again": null,
+      "log_tail": ""
+    }
+  ],
+  "at": "2026-11-25T01:02:03Z"
+}

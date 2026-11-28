@@ -1,7 +1,5 @@
 # QA (stage)
 
-> **0.102 (engine)**: `/gld qa $1` runs the engine's **qa** stage alone — follow `<<SKILL_DIR>>/commands/dev.md` *Engine driver* with `--only qa` on step 1. The rest of this file is the 0.101.x reference the roles' atoms cite; it is **not executed**. **Reference (0.102) — removed in the next release.**
-
 **Stage: QA — holistic quality.** Role: **qa** (leader judges), plus a conditional **UI/UX review gate** (designer) when the change has a UI surface (Step 1.5). Runs **after `test`** (automated correctness) and before `done`. QA covers what automated tests don't: exploratory testing, E2E user flows, usability, real-app robustness — from the **user's black-box perspective**. Depth is **risk-based** (a tiny fix gets a light QA judgment; a UI feature gets exploratory + E2E planning). Invocable directly (`/gld qa <issue>`) or via `/gld dev`.
 
 `$1` = Issue number. Returns a Section D line (`_handoff.md`).
@@ -9,14 +7,13 @@
 > **Test vs QA (distinct)**: `test` = tester, automated correctness proof (white-box, AC-driven, verify gate). **QA** = qa role, holistic quality (black-box, user flows, exploratory, E2E, usability). QA builds on test's coverage; it does not repeat it.
 
 > **Bash**: `<<SKILL_DIR>>/commands/atoms/_bash_rules.md`. State/handoff: `<<SKILL_DIR>>/commands/atoms/_handoff.md`.
-> **Checkout**: never move the human's branch or history — `_checkout.md` (a pull/sync/switch request: show the commands and which commits change hash, then ask).
 > **Output language**: all human-readable output in `config.language` (`_handoff.md` Section K); sub-agent prompts carry that instruction.
 
 ---
 
 ## Step 0 — Preflight
 
-As the leader, follow `_preflight.md` **Medium tier**. If `.claude/guild/config.json` is absent → `FAIL: Guild not initialized (run /gld init)`. Load: `<!-- guild:test:output -->` (verify result + AC coverage + the tester's risk-based E2E judgment), the PR, the design/UX artifacts this judgment needs from `docs/specs/$1/`, and the hotspot list. ⚠ For the `docs/specs/$1/` part, **read the artifact(s) you act on, not the directory** (`_preflight.md` Item 4 — the `ls` step was removed there, it cost more than it saved) — the exhaustive pass over every artifact belongs to **Step 2.6**, which the carve-out exempts. Load `docs/standards/quality-bar.md` + `verification.md`.
+**First, the engine guard** — `_preflight.md` **Section 0** with `<N>` = $1: an Issue the engine works on is refused there (`/gld resume $1`) before anything else is read or written. As the leader, follow `_preflight.md` **Medium tier**. If `.claude/guild/harness.json` is absent → `FAIL: Guild not initialized (run /gld init)`. Load: `<!-- guild:test:output -->` (verify result + AC coverage + the tester's risk-based E2E judgment), the PR, the design/UX artifacts this judgment needs from `docs/specs/$1/`, and the hotspot list. ⚠ For the `docs/specs/$1/` part, **read the artifact(s) you act on, not the directory** (`_preflight.md` Item 4 — the `ls` step was removed there, it cost more than it saved) — the exhaustive pass over every artifact belongs to **Step 2.6**, which the carve-out exempts. Load `docs/standards/quality-bar.md` + `verification.md`.
 
 Validate `$1` is an Issue. **Read current labels first** (its own Bash call): `gh issue view $1 --json labels --jq '[.labels[].name] | map(select(startswith("guild:")))'`.
 
@@ -25,7 +22,7 @@ Validate `$1` is an Issue. **Read current labels first** (its own Bash call): `g
 **Split-parent guard** (right here, before any other work): if that read contains `guild:children`, refuse — a parent at `guild:children` is in an *orchestration* state, not a stage (`_handoff.md` Section A: a parent never carries both `guild:children` and a stage label at once), so letting this stage run would transition the parent onto a stage label and destroy the link `dev.md` Phase 2b uses to drive its children:
 ```
 >>> RESULT <<<
-FAIL: #$1 is a split parent (guild:children) — its work is its children's, not its own. Run `/gld dev $1` (or `/gld resume $1`) to drive the children.
+FAIL: #$1 is a split parent (guild:children) — its work is its children's, not its own. Epics are not supported yet — develop its children one by one (`/gld dev <child>`).
 ```
 (`guild:child` is **not** this case — a child legitimately carries `guild:child` + its stage label and proceeds normally.)
 

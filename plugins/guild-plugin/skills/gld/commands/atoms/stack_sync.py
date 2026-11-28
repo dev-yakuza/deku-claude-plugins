@@ -70,8 +70,8 @@ STACK_MARKER = "<!-- guild:sprint:stack -->"
 TRAILER = "Guild-Sync"
 BASE_TRAILER = "Guild-Sync-Base"
 
-# init.md:163's ban list — the same character class render_supervisor.py enforces before the
-# supervisor `eval`s a config command (tests/stack_sync_test.sh asserts the two are identical).
+# init.md:163's contract for a stored command: no substitution, chaining, redirection or newline
+# (tests/stack_sync_test.sh pins this character class).
 _METACHAR = re.compile(r"\$\(|`|&&|\|\||[|;<>&\n]")
 _ROW = re.compile(r"^\|[^|]*\|\s*#(\d+)[^|]*\|([^|]*)\|", re.M)
 
@@ -205,9 +205,8 @@ def pick_dep_pr(top, merged, m_head):
     return sorted(anc or merged, key=lambda p: p.get("mergedAt") or "")[-1]
 
 
-DONE_JQ = ('{state, stateReason, labels: [.labels[].name], decided: ([.comments[].body | '
-           'select(contains("<!-- guild:closed-as-decided -->"))] | length), '
-           'integrated: ([.comments[].body | select(contains("<!-- guild:integration:output -->"))] | length)}')
+DECIDED_JQ = ('{state, labels: [.labels[].name], decided: ([.comments[].body | '
+              'select(contains("<!-- guild:closed-as-decided -->"))] | length)}')
 
 
 def done_members(ctx, members, prs):
@@ -224,22 +223,12 @@ def done_members(ctx, members, prs):
     closing PR sets `COMPLETED`; so does a human closing it as done by hand — and then the human
     has said it is done, which is what the `Done` column means.
 
-    0.98.7 Z6 — the second way a member lands: **closed as decided** (analyze Step 1 item 0b). No
-    PR is attributed to it in ANY state, and one read tells the rest: `CLOSED` · `guild:done` · a
-    `<!-- guild:closed-as-decided -->` comment → Done, whatever the `stateReason` (a decision not
-    to do the work is closed `not planned` and still finished). The marker is what tells it from a
-    split parent — this script does not know S. ⚠ One JSON from `issue view --json comments`: a
-    `gh api --paginate --jq` count prints one number PER PAGE and `gh_json` would fail on it.
-
-    0.99.2 A5 — the third way: **a split parent that landed** — no PR of its own, `CLOSED` ·
-    `COMPLETED` · `guild:done` · at least one `<!-- guild:integration:output -->` comment.
-    `guild:done` is put on a split parent only after `dev.md` Phase 2c judged it clean, and
-    `CLOSED`/`COMPLETED` is the human closing it; a parent that passed 2c while its children's
-    PRs are still open (`guild:done` · `OPEN`) still belongs in In review. Measured #161: Done
-    by hand, `Needs human` left on the card, and no `done-cards` line ever named it. The same
-    one read (`DONE_JQ` — it holds both verdicts) carries `stateReason` and the integration
-    count. `retro.md` Phase 2's jq copy is the closed-as-decided half only — retro counts
-    decided closes, not landed parents."""
+    0.98.7 Z6 — the second way a member lands: **closed as decided** (the engine's answer). No
+    PR is attributed to it in ANY state, and one read tells the rest: `CLOSED` · a
+    `<!-- guild:closed-as-decided -->` comment — and the engine's own state says so too (it writes no
+    `guild:done` label) → Done, whatever the `stateReason` (a decision not to do the work is closed
+    `not planned` and still finished). ⚠ One JSON from `issue view --json comments`: a
+    `gh api --paginate --jq` count prints one number PER PAGE and `gh_json` would fail on it."""
     out = []
     for n in members:
         if not prs.get(n):
@@ -248,20 +237,18 @@ def done_members(ctx, members, prs):
             # skipped (not Done), the rest are still judged.
             try:
                 got = gh_json(["issue", "view", str(n), "-R", ctx["repo"], "--json",
-                               "state,stateReason,labels,comments", "--jq", DONE_JQ]) or {}
+                               "state,labels,comments", "--jq", DECIDED_JQ]) or {}
             except EnvError as exc:
                 print("stack_sync: #%d closed-as-decided read failed — skipped: %s" % (n, exc),
                       file=sys.stderr)
                 continue
             if not isinstance(got, dict):
                 continue
-            closed_done = (str(got.get("state", "")).upper() == "CLOSED"
-                           and "guild:done" in (got.get("labels") or []))
-            if closed_done and isinstance(got.get("decided"), int) and got["decided"] >= 1:
-                out.append(n)
-            elif (closed_done and str(got.get("stateReason") or "").upper() == "COMPLETED"
-                    and isinstance(got.get("integrated"), int) and got["integrated"] >= 1):
-                out.append(n)
+            if (str(got.get("state", "")).upper() == "CLOSED"
+                    and isinstance(got.get("decided"), int) and got["decided"] >= 1):
+                rep = engine_status(ctx, n)
+                if engine_done(rep) and rep.get("closed"):
+                    out.append(n)
             continue
         if not any(p["state"] == "MERGED" for p in prs.get(n, [])):
             continue
@@ -285,6 +272,42 @@ def report_done(ctx, members, prs):
     return 0
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# The engine's facts about a member (its state.json, on this machine)
+# ─────────────────────────────────────────────────────────────────────────────
+
+ENGINE = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+                      "engine", "engine.py")
+
+
+def engine_status(ctx, issue):
+    """`engine.py status --json` of one member, or None when it cannot be read. Its exit code is the
+    member's own (10, 11 = stopped), so only the JSON counts."""
+    cache = ctx.setdefault("engine", {})
+    if issue not in cache:
+        p = run([sys.executable, "-I", "-B", ENGINE, "status", "--repo", ctx["repo"], "--issue", str(issue), "--json"])
+        try:
+            rep = json.loads(p.stdout)
+        except ValueError:
+            rep = None
+        cache[issue] = rep if isinstance(rep, dict) else None
+    return cache[issue]
+
+
+def engine_done(rep):
+    """No stop, no running engine, every step done (or skipped). No state on this machine → False."""
+    if not rep or not rep.get("state") or rep.get("stop") or rep.get("running") or not rep.get("steps"):
+        return False
+    return all(s.get("status") in ("done", "skipped") for s in rep["steps"])
+
+
+def own_worktree(rep, path):
+    """`path` is the engine's kept worktree of this member. It is never touched here: the sync pushes to
+    the remote and leaves the local branch; `resume --pr-review` fast-forwards it later."""
+    own = ((rep or {}).get("state") or {}).get("worktree")
+    return bool(own) and os.path.realpath(own) == os.path.realpath(path)
+
+
 def merge_oid(pr):
     return (pr.get("mergeCommit") or {}).get("oid") or ""
 
@@ -297,7 +320,7 @@ def load_verify_cmds(top):
     no verification command could not run `sync` at all — not even where nothing needs a merge
     (a merge-commit repo, or no stack) and the only job left was `--done-cards`. The refusal
     now lands where it matters: a member whose sync would push a merge (`member_outcome`)."""
-    path = os.path.join(top, ".claude", "guild", "config.json")
+    path = os.path.join(top, ".claude", "guild", "harness.json")
     try:
         with open(path, encoding="utf-8") as fh:
             cmds = (json.load(fh) or {}).get("commands") or {}
@@ -736,10 +759,11 @@ def member_outcome(ctx, check, issue, dep, m_pr, merged):
         # Same gates in --check: `daily` must not send the human to a sync that will refuse.
         labels = gh_json(["issue", "view", str(issue), "-R", ctx["repo"], "--json", "labels"])
         names = [l["name"] for l in (labels or {}).get("labels") or []]
-        if "guild:done" not in names or "guild:needs-human" in names:
+        rep = engine_status(ctx, issue)
+        if not engine_done(rep) or not rep.get("pr") or "guild:needs-human" in names:
             return "skipped", "not-done"
         holder = checked_out_branches(top).get(branch)
-        if holder:
+        if holder and not own_worktree(rep, holder):
             return "skipped", "branch-checked-out " + holder
         if m_head != m_pr.get("headRefOid"):
             return "skipped", "head-moved"

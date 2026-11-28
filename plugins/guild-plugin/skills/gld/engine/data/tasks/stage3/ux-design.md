@@ -1,0 +1,5 @@
+The engine added this step from the plugin step catalog because the change touches the user interface. Specify the interface change and write it to `docs/specs/<issue>/ux.md`, before the developer builds it: read `issue.md`, `analysis.md` and the screens and components the Issue touches (the code, the existing golden/screenshot tests, `docs/standards/` design rules when present).
+
+Write it so that the later UX review can decide conformance item by item: per screen or component, the states (empty, loading, error, success, disabled), the layout and the text it shows, the interaction and focus order, and accessibility (labels a screen reader announces, contrast, touch targets). Tie each item to the acceptance criterion it serves (`AC #2`, plain, without brackets). Reuse the repository's existing components and tokens; a new visual pattern needs a one-line reason.
+
+You design; you do not change code, tests or images. Write prose in the language of the Issue, follow the repository's document rules (its markdown lint), and never use square brackets for a tag or a reference. Write only that one file.

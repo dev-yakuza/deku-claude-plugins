@@ -17,7 +17,7 @@ A self-evolving **agent organization** for Claude Code. Guild builds an operatin
 
 ```bash
 claude /plugin marketplace add dev-yakuza/deku-claude-plugins
-claude /plugin install guild-plugin@deku-claude-plugins
+claude /plugin install deku-claude-plugins@guild-plugin
 ```
 
 ## Quick Start
@@ -41,6 +41,8 @@ claude /plugin install guild-plugin@deku-claude-plugins
 **On-demand & observe** — `rollback <target>` (non-destructive undo) · `ask <question>` (cited Q&A over standards + ⑥) · `monitoring [--html]` (state snapshot)
 
 **Iteration** — `sprint plan` (one goal, filled to `capacity` — goal picks first, then other ready work; attended, it asks one-answer decision questions that turn waiting issues into ready ones (`--no-ask` skips them); it never shrinks capacity from past sprints — choose this sprint's issues, order them by dependency (goal work first on ties), open a tracking Issue — reserving one slot for an evidence-backed refactor of the code the sprint touches — with a safety net of characterization tests (and visual cases where VRT runs) added first, green on the unchanged code, where that code is under-tested; or, when no refactor qualifies, a safety-net-only slot for an under-tested hotspot; left empty with a recorded reason when nothing qualifies. Lint rules stay with `evolve`) · `sprint run` (develop them unattended into dependency-ordered **PR stacks**, one git worktree per issue, rate-limit resilient: a reset within 4h is waited out, a longer one blocks that member for the re-run to pick up — you review and merge concurrently) · `sprint daily` (what to merge and in what order, what's waiting on you, what broke) · `sprint sync` (on a squash-only repo, after you merge a lower PR: merges the default branch into the stacked PRs above it, verifies, pushes and readies them — a dependency that changed in review is left to you) · `sprint board` (mirror the sprint onto a GitHub Projects kanban — `Issues → Backlog → Ready → In progress → Blocked → In review → Done` — set up once, written by `plan` and `run` thereafter) · `sprint retro` (metrics → capacity calibration → evolve → close the sprint)
+
+**Continuing a sprint that Guild 0.98.7 planned.** The engine reads its tracking Issue (the member table and plan hash are the same format) but does not take over what 0.98.7 did: a member counts as finished only from this machine's engine record or from its Issue being closed as completed — 0.98.7 labels, branches and PRs are not read. Review and merge or close the 0.98.7 member PRs **before** `sprint run`: a member an open PR already closes is refused (`open-closing-pr`), never developed a second time. Close a merged member's Issue if a stacked merge left it open, take `guild:done` off a member you want redeveloped, make sure the 0.98.7 supervisor is not running, and give the window with `--window` — `sprint run` shows this checklist. After the engine has run the tracker, `sprint daily` and `sprint retro` do not read the 0.98.7 `.sprint-logs/<tracker>/failures.jsonl`: those events are from before the engine.
 
 ## Safety (the invariants)
 
@@ -73,8 +75,9 @@ VRT, Guild uses them as review evidence: for a UI Issue the tester writes *visua
 baselines, the test stage runs `commands.vrt`, the designer opens the images at QA, and the PR
 gets a **visual changes** section that points the reviewer at GitHub's image diff. Rewriting an
 existing baseline changes the expected value, so it must carry a reason in the PR, and the
-commit gate **warns** (never blocks) on it — configured by `visual.baselines` in
-`config.json`. Files under `visual.tests` count as tests: deleting or skipping one blocks, and a
+commit gate **warns** (never blocks) on it — configured by `visual.baselines`, a `visual` block that this
+edition does not write (neither `harness.json` nor the engine's settings has one); the engine
+knows golden images from its own path rules and lists every rewritten image in the PR body. Files under `visual.tests` count as tests: deleting or skipping one blocks, and a
 net drop of screenshot/golden matcher calls warns (that one in every repo). Guild does not install a visual test tool; `audit` reports the gap for a UI repo.
 
 ## Reference
@@ -103,7 +106,8 @@ CLAUDE.md                      # advisory: repo map + verification commands + kn
 .claude/settings.json          # permission allowlist + PreToolUse commit-gate hook
 .claude/agents/                # role agents (the Guild)
 .claude/guild/
-  config.json                  # Guild settings (managed by /gld config)
+  harness.json                 # settings of the Guild commands (managed by /gld config)
+  config.json                  # engine settings — made by /gld init (P2.9); never edit by hand, never put harness.json keys here
   knowledge/                   # ⑥ codebase facts: index.md (always loaded) + facts/ (retrieved relevant-only). init seeds a baseline; evolve grows it
   memory/                      # ④ episodic working tier (gitignored → local per-clone, low-trust): ground-truth.jsonl (captured signals, read at runtime by pre-flight Item 8) + consolidated.jsonl (archive of entries evolve grew into ③/⑥) + gate-firings.jsonl (gate firing log feeding the evolve rule scorecard) + review-nudge-state.json (review's evolve-nudge cooldown, a single repo-global {count, runs} at the last nudge, so the 충분 state doesn't nudge every review — deliberately NOT keyed by PR: since the common workflow is one PR per issue, a per-PR key made nearly every review "first time" and nudged anyway; the global key accepts a rare, self-healing race between two PRs reviewed close together instead)
   gates/                       # 강제층 (enforcement layer): scripts/gate_precommit.py — the commit gate, run three ways (.git/hooks/pre-commit = authoritative · PreToolUse(Bash) = early warning · PreToolUse(Edit|Write) --guard-config = asks before its own off-switch/rules are edited) + rules/secrets.md, rules/verification.md (the human-readable declaration of what the gate enforces — the checks themselves are hardcoded, since they are universal and non-hallucinated) + rules/boundaries.md (the one data-driven rule file: `- forbid:` lines, frontmatter status: draft → WARN-only until confirmed — INV6) + dismissed.md (accepted-risk registry) + findings.json (open violations)
@@ -120,9 +124,8 @@ docs/adr/ , docs/specs/
 |---|---|
 | Development state (stages, outputs) | GitHub Issues/PRs + `guild:*` labels |
 | Role agents (habits) | `.claude/agents/*.md` |
-| Codebase facts (⑥, retrieved relevant-only) | `.claude/guild/knowledge/` |
+| Codebase facts (⑥, retrieved relevant-only) | `.claude/guild/knowledge/` (shared by both channels — K2) |
 | Raw episodic memory | `.claude/guild/memory/` (gitignored) |
-| Local-developer job log (opt-in) | `.claude/guild/memory/local-dev/` (gitignored) |
 | Evolution ledger + gates + config | `.claude/guild/` |
 | Curated standards (charter, architecture, …) | `docs/standards/` |
 

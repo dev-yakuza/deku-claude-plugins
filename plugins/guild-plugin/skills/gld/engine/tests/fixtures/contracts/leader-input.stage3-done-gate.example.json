@@ -1,0 +1,189 @@
+{
+  "format": 1,
+  "issue": 42,
+  "stage": 3,
+  "situation": "done-gate",
+  "call": {
+    "kind": "check",
+    "step": "design",
+    "attempt": 1,
+    "format_retry": 0,
+    "errors": []
+  },
+  "mode": "unattended",
+  "allowed": {
+    "answers": [
+      "approve",
+      "rerun",
+      "escalate"
+    ],
+    "rerun_steps": [
+      "analyze"
+    ],
+    "human_answers": [
+      "approve",
+      "rerun",
+      "escalate"
+    ],
+    "human_rerun_steps": [
+      "analyze"
+    ],
+    "narrowed": [
+      {
+        "reason": "followup-cap",
+        "removed": [],
+        "field": "followup"
+      }
+    ],
+    "models": [
+      "opus",
+      "sonnet",
+      "haiku"
+    ],
+    "efforts": [
+      "low",
+      "medium",
+      "high",
+      "xhigh"
+    ]
+  },
+  "docs": [
+    "docs/specs/42/analysis.md"
+  ],
+  "in_files": [
+    "issue.md",
+    "leader-decision.md"
+  ],
+  "steps": [
+    {
+      "id": "analyze",
+      "kind": "role",
+      "name": "requirements-engineer",
+      "status": "done",
+      "attempts": 1,
+      "on_fail_count": 0,
+      "on_fail_max": null
+    },
+    {
+      "id": "ac-format",
+      "kind": "run",
+      "name": "ac-format",
+      "status": "done",
+      "attempts": 1,
+      "on_fail_count": 0,
+      "on_fail_max": 2
+    },
+    {
+      "id": "plan",
+      "kind": "check",
+      "name": "plan-gate",
+      "status": "running",
+      "attempts": 1,
+      "on_fail_count": 0,
+      "on_fail_max": null
+    },
+    {
+      "id": "design",
+      "kind": "role",
+      "name": "tech-lead",
+      "status": "done",
+      "attempts": 1,
+      "on_fail_count": 0,
+      "on_fail_max": null
+    }
+  ],
+  "counters": {
+    "leader_calls": 0,
+    "leader_calls_max": 5,
+    "plan_rerun": 0,
+    "plan_rerun_max": 2,
+    "done_rerun": 0,
+    "done_rerun_max": 2,
+    "on_fail_rerun_used": false,
+    "soft_budget_rerun_used": false,
+    "catalog_adds": 0,
+    "catalog_adds_max": 3,
+    "followups": 0,
+    "followups_max": 5
+  },
+  "cost": {
+    "issue_usd": 1.84,
+    "soft_usd": 18.44,
+    "absolute_usd": 36.88
+  },
+  "plan_gate": null,
+  "done_gate": {
+    "acs": [
+      1
+    ],
+    "requirement_rows": [
+      {
+        "row": "R1",
+        "requirement": "Review question types can be chosen in Settings",
+        "acs": [
+          1
+        ]
+      }
+    ],
+    "runs": [],
+    "not_checked_locally": [],
+    "reviews": [],
+    "discoveries": [
+      {
+        "id": "D1",
+        "kind": "debt",
+        "where": "src/a.py",
+        "blocks_current_ac": false,
+        "role": "auditor",
+        "note": "dup"
+      }
+    ],
+    "requests": [
+      {
+        "from_step": "design",
+        "op": "add",
+        "step": "ux-review",
+        "trigger": "user-facing-text",
+        "note": "",
+        "outcome": "declined",
+        "reason": "position"
+      }
+    ],
+    "included_fixes": [
+      {
+        "id": "F1",
+        "from_step": "review-audit",
+        "role": "auditor",
+        "kind": "bug",
+        "where": "src/a.py",
+        "note": "x",
+        "handled_by": "fix-discovery"
+      }
+    ],
+    "followup_candidates": [
+      {
+        "number": 77,
+        "title": "Old debt",
+        "labels": [
+          "guild:followup"
+        ]
+      }
+    ],
+    "deferred_rows": [
+      {
+        "row": "R2",
+        "requirement": "The choice is kept after a restart"
+      }
+    ],
+    "verification_paths_changed": [],
+    "refused_writes": [],
+    "comment_decisions": []
+  },
+  "stopped": null,
+  "budget": null,
+  "comments": null,
+  "defer": null,
+  "removal": null,
+  "add_limit": null,
+  "pr_review": null
+}

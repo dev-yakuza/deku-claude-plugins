@@ -1,0 +1,37 @@
+{
+  "description": "Stage 3: the follow-up Issue cannot be created (TF10 — infra op-failed, the PR stays).",
+  "rules": [
+    {
+      "args": [
+        "api",
+        "repos/acme/app/labels?per_page=100",
+        "--paginate"
+      ],
+      "json": [
+        {
+          "name": "guild:followup"
+        }
+      ]
+    },
+    {
+      "args": [
+        "api",
+        "repos/acme/app/issues?labels=guild%3Afollowup&state=all&per_page=100",
+        "--paginate"
+      ],
+      "json": []
+    },
+    {
+      "args": [
+        "api",
+        "-X",
+        "POST",
+        "repos/acme/app/issues",
+        "--input",
+        "-"
+      ],
+      "stderr": "HTTP 502: Bad Gateway\n",
+      "exit_code": 1
+    }
+  ]
+}

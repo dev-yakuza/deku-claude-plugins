@@ -1,0 +1,21 @@
+{
+  "format": 1,
+  "description": "P3-A: the usage limit is hit mid-session — a rejected rate_limit_event, then an error result (infra quota with resetsAt, §5.1). The rejected event's shape is an ASSUMPTION (F1/F2 recorded only status=allowed). The init event is the F2 r4 init (builtins of CLI 2.1.323); tools/cwd/model come from argv.",
+  "init_from_argv": true,
+  "events": [
+    {"type": "system", "subtype": "init", "cwd": "/tmp/gx-exp/f2/repo", "session_id": "00000000-0000-4000-8000-000000000001",
+     "tools": [], "mcp_servers": [], "model": "claude-sonnet-5-5", "permissionMode": "default", "slash_commands": [],
+     "apiKeySource": "none", "claude_code_version": "2.1.323", "output_style": "default",
+     "agents": ["claude", "Explore", "general-purpose", "Plan", "statusline-setup"], "skills": [],
+     "plugins": [{"name": "cc-plugin-agents-md", "path": "builtin", "source": "cc-plugin-agents-md@builtin"},
+                 {"name": "cc-plugin-privacy", "path": "builtin", "source": "cc-plugin-privacy@builtin"},
+                 {"name": "cc-plugin-plugin-authoring", "path": "builtin", "source": "cc-plugin-plugin-authoring@builtin"}],
+     "additional_directories": []},
+    {"type": "rate_limit_event", "rate_limit_info": {"status": "rejected", "resetsAt": 1795407000, "rateLimitType": "five_hour"}},
+    {"type": "result", "subtype": "error_during_execution", "is_error": true, "total_cost_usd": 0.01,
+     "usage": {"cache_read_input_tokens": 0, "cache_creation_input_tokens": 0}, "num_turns": 1,
+     "permission_denials": [], "terminal_reason": "error", "result": "API Error: 429",
+     "session_id": "00000000-0000-4000-8000-000000000001"}
+  ],
+  "exit_code": 1
+}

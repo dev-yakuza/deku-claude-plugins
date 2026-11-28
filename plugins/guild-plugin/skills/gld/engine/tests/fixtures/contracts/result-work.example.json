@@ -1,0 +1,24 @@
+{
+  "status": "done",
+  "outputs": [
+    "docs/specs/42/design.md"
+  ],
+  "requests": [
+    {
+      "op": "add",
+      "step": "designer-review",
+      "trigger": "ui-change",
+      "note": "new screen"
+    }
+  ],
+  "blocked_by": null,
+  "discoveries": [
+    {
+      "kind": "debt",
+      "where": "src/a.py",
+      "note": "dup code",
+      "blocks_current_ac": false
+    }
+  ],
+  "note": ""
+}

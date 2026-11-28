@@ -1,0 +1,37 @@
+{
+  "format": 1,
+  "description": "developer commits .claude/agents/x.md (C1 — security-boundary stop).",
+  "stream": "../f2/r4.jsonl",
+  "init_from_argv": true,
+  "structured_output": {
+    "status": "done",
+    "outputs": [],
+    "requests": [],
+    "blocked_by": null,
+    "discoveries": [],
+    "note": "fixture"
+  },
+  "actions": [
+    {
+      "op": "write",
+      "path": ".claude/agents/x.md",
+      "content": "tampered\n"
+    },
+    {
+      "op": "git",
+      "args": [
+        "add",
+        "-A"
+      ]
+    },
+    {
+      "op": "git",
+      "args": [
+        "commit",
+        "-q",
+        "-m",
+        "change role file"
+      ]
+    }
+  ]
+}

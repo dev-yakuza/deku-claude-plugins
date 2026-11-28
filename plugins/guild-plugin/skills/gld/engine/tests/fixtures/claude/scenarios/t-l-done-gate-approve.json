@@ -1,0 +1,55 @@
+{
+  "format": 1,
+  "description": "Stage 3: leader, done-gate: F1 kept, D1 a follow-up, D2 a duplicate (TF4, TF6).",
+  "stream": "../leader/real-2.1.323/done-gate-rerun.jsonl",
+  "init_from_argv": true,
+  "leader": {
+    "example": "leader-answer-done-gate-s3",
+    "expect": "accepted"
+  },
+  "structured_output": {
+    "answer": "approve",
+    "reason": "acceptance-met",
+    "step": null,
+    "note": "Both ACs are proven.",
+    "recommendation": null,
+    "ac_verdicts": [
+      {
+        "ac": 1,
+        "status": "met",
+        "evidence": "test/settings_test.dart",
+        "why_not_automated": null
+      },
+      {
+        "ac": 2,
+        "status": "manual",
+        "evidence": "manual-test-checklist.md item 1",
+        "why_not_automated": "The setting is a colour on the device screen; the design documents proposed no automated check for it."
+      }
+    ],
+    "discoveries": [
+      {
+        "id": "D1",
+        "disposition": "followup",
+        "title": "Duplicate parsing code in src/a.py",
+        "duplicate_of": null
+      },
+      {
+        "id": "D2",
+        "disposition": "duplicate",
+        "title": null,
+        "duplicate_of": 77
+      }
+    ],
+    "included_fixes": [
+      {
+        "id": "F1",
+        "verdict": "keep"
+      }
+    ],
+    "summary": [
+      "src/settings.ts adds the quiz-type row to the settings sheet.",
+      "test/settings_test.dart covers the new row."
+    ]
+  }
+}

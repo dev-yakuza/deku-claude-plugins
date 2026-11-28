@@ -1,6 +1,0 @@
-- AC #1: lib/helpers/languages/ko.dart·ja.dart·en.dart 3파일 모두에 'Error loading kanji data' 키와 그에 대응하는 Hanzi 계열 키가 있고, 각각 해당 언어 번역 값을 가진다. [must]
-- AC #2: lib/helpers/kanji.dart 의 _hanziKeyByJapaneseKey 에 'Error loading kanji data' → Hanzi 계열 키 매핑이 추가되어, 중국어 모드에서 kanjiDetailL10n 이 Hanzi 계열 키를 돌려준다. [must]
-- AC #3: kanji_detail_modal.dart 의 로드 오류 분기가 영어 하드코딩 대신 kanjiDetailL10n('Error loading kanji data') 번역 결과를 표시한다. [must]
-- AC #4: 실제 모달 경로의 오류 상태 위젯 테스트가 ko/ja/en 각 로케일과 일본어/중국어 모드에서 표시되는 리터럴 번역 값을 단언한다(kanji_detail_modal_chinese_test.dart 의 기존 영어 단언 갱신 포함). [must]
-- AC #5: test/helpers/hanzi_languages_test.dart 의 _expected 표에 새 Hanzi 키의 ko/ja/en 리터럴이 추가되어 통과한다. [must]
-- AC #6: kanji_detail_modal_test.dart 에서 FutureBuilder 를 복제해 영어 문구를 단언하던 낡은 테스트(와 그 골든)를 실제 위젯 검증으로 바꾸거나 정리하여, 'Error loading kanji data' 영어 리터럴 단언이 남지 않는다. [should]

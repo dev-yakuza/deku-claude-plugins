@@ -1,0 +1,47 @@
+{
+  "format": 1,
+  "description": "P3-A C4: developer creates nested CLAUDE.md / AGENTS.md / CLAUDE.local.md and commits.",
+  "stream": "../f2/r4.jsonl",
+  "init_from_argv": true,
+  "structured_output": {
+    "status": "done",
+    "outputs": [],
+    "requests": [],
+    "blocked_by": null,
+    "discoveries": [],
+    "note": "fixture"
+  },
+  "actions": [
+    {
+      "op": "write",
+      "path": "pkg/CLAUDE.md",
+      "content": "x\n"
+    },
+    {
+      "op": "write",
+      "path": "pkg/AGENTS.md",
+      "content": "x\n"
+    },
+    {
+      "op": "write",
+      "path": "pkg/sub/CLAUDE.local.md",
+      "content": "x\n"
+    },
+    {
+      "op": "git",
+      "args": [
+        "add",
+        "-A"
+      ]
+    },
+    {
+      "op": "git",
+      "args": [
+        "commit",
+        "-q",
+        "-m",
+        "work"
+      ]
+    }
+  ]
+}

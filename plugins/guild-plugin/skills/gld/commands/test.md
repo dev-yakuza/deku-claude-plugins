@@ -1,22 +1,19 @@
 # TEST (stage)
 
-> **0.102 (engine)**: `/gld test $1` runs the engine's **test** stage alone — follow `<<SKILL_DIR>>/commands/dev.md` *Engine driver* with `--only test` on step 1. The rest of this file is the 0.101.x reference the roles' atoms cite; it is **not executed**. **Reference (0.102) — removed in the next release.**
-
 **Stage: test.** Role: **tester** (leader judges completion). Runs the tests, enforces the **verify gate** (raw evidence, not self-report); the leader judges automated-correctness completion and **advances to the QA stage** (test no longer marks `done` — QA does). Invocable directly (`/gld test <issue>`) or via `/gld dev`.
 
 `$1` = Issue number. Returns a Section D line.
 
 > **Bash**: `_bash_rules.md`. State/handoff: `_handoff.md`.
-> **Checkout**: never move the human's branch or history — `_checkout.md` (a pull/sync/switch request: show the commands and which commits change hash, then ask).
 > **Output language**: all human-readable output in `config.language` (`_handoff.md` Section K); sub-agent prompts carry that instruction.
 
 ---
 
 ## Step 0 — Preflight
 
-As the leader, follow `_preflight.md` **Medium tier**. If `.claude/guild/config.json` is absent → `FAIL: Guild not initialized (run /gld init)`. Load the test cases (`docs/specs/$1/test-cases.md`), the design output, and any execute-stage evidence (`<!-- guild:test-evidence:step-1 -->`). Load `docs/standards/verification.md` for the verify rules + DoD.
+**First, the engine guard** — `_preflight.md` **Section 0** with `<N>` = $1: an Issue the engine works on is refused there (`/gld resume $1`) before anything else is read or written. As the leader, follow `_preflight.md` **Medium tier**. If `.claude/guild/harness.json` is absent → `FAIL: Guild not initialized (run /gld init)`. Load the test cases (`docs/specs/$1/test-cases.md`), the design output, and any execute-stage evidence (`<!-- guild:test-evidence:step-1 -->`). Load `docs/standards/verification.md` for the verify rules + DoD.
 
-**Visual decision (no extra call — from what this step already loaded plus `config.json`; `_handoff.md` Section L):** `VISUAL_CASES = yes` when `test-cases.md` carries a `<!-- guild:visual-cases -->` section — coverage (L.2) is then checked whatever runs them. `VISUAL_RUN = yes` when `visual.runnable` is `true`, `commands.vrt` is non-null, **and** either `VISUAL_CASES = yes` or the execute ledger's first line reads `run: yes` (the branch touched a visual package — a refactor or debug fix can break a picture no visual case names) — the separate visual command runs. (Visual tests that `commands.test` already runs — `vrt` null — are covered by the normal run.) Hold the `<!-- guild:visual-baselines -->` block from the execute evidence, when present, for Step 2.
+**Visual decision (no extra call — from what this step already loaded plus `harness.json`; `_handoff.md` Section L):** `VISUAL_CASES = yes` when `test-cases.md` carries a `<!-- guild:visual-cases -->` section — coverage (L.2) is then checked whatever runs them. `VISUAL_RUN = yes` when `visual.runnable` is `true`, `commands.vrt` is non-null, **and** either `VISUAL_CASES = yes` or the execute ledger's first line reads `run: yes` (the branch touched a visual package — a refactor or debug fix can break a picture no visual case names) — the separate visual command runs. (Visual tests that `commands.test` already runs — `vrt` null — are covered by the normal run.) Hold the `<!-- guild:visual-baselines -->` block from the execute evidence, when present, for Step 2.
 
 Validate `$1` is an Issue. **Read current labels first** (its own Bash call): `gh issue view $1 --json labels --jq '[.labels[].name] | map(select(startswith("guild:")))'`.
 
@@ -25,7 +22,7 @@ Validate `$1` is an Issue. **Read current labels first** (its own Bash call): `g
 **Split-parent guard** (right here, before any other work): if that read contains `guild:children`, refuse — a parent at `guild:children` is in an *orchestration* state, not a stage (`_handoff.md` Section A: a parent never carries both `guild:children` and a stage label at once), so Step 3's transition would destroy the link `dev.md` Phase 2b uses to drive the children:
 ```
 >>> RESULT <<<
-FAIL: #$1 is a split parent (guild:children) — its work is its children's, not its own. Run `/gld dev $1` (or `/gld resume $1`) to drive the children.
+FAIL: #$1 is a split parent (guild:children) — its work is its children's, not its own. Epics are not supported yet — develop its children one by one (`/gld dev <child>`).
 ```
 (`guild:child` is **not** this case — a child legitimately carries `guild:child` + its stage label and proceeds normally.)
 

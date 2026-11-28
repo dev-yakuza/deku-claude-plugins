@@ -1,0 +1,59 @@
+{
+ "situation": "blocked",
+ "kind": "leader",
+ "step": "design",
+ "allowed": {
+  "answers": [
+   "rerun",
+   "replan",
+   "escalate"
+  ],
+  "rerun_steps": [
+   "analyze",
+   "ac-format",
+   "design"
+  ],
+  "human_answers": [
+   "rerun",
+   "replan",
+   "escalate"
+  ],
+  "human_rerun_steps": [
+   "analyze",
+   "ac-format",
+   "design"
+  ],
+  "narrowed": []
+ },
+ "ids": {},
+ "checklist_acs": null,
+ "engine": {
+  "answer": "escalate",
+  "step": null,
+  "reason": "needs-human-decision",
+  "failed": null,
+  "stop": null,
+  "cost_usd": 0.003188
+ },
+ "argv_flags": [
+  "--output-format",
+  "--verbose",
+  "--setting-sources",
+  "--disable-slash-commands",
+  "--strict-mcp-config",
+  "--mcp-config",
+  "--permission-mode",
+  "--permission-prompts",
+  "--settings",
+  "--tools",
+  "--model",
+  "--effort",
+  "--max-budget-usd",
+  "--json-schema",
+  "--append-system-prompt"
+ ],
+ "model_effort": [
+  "haiku",
+  "low"
+ ]
+}

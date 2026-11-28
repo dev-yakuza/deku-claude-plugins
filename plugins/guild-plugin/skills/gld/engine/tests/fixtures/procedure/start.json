@@ -1,0 +1,11 @@
+{
+  "format": 1,
+  "template": "start",
+  "version": "fixture-1",
+  "description": "TEST FIXTURE: the plugin start procedure shape (design 3.1); the real one is U15's.",
+  "steps": [
+    {"id": "analyze", "role": "requirements-engineer", "inputs": ["in:issue.md"], "outputs": ["docs/specs/{issue}/analysis.md"]},
+    {"id": "ac-format", "run": "ac-format", "inputs": ["docs/specs/{issue}/analysis.md"], "on_fail": {"back_to": "analyze", "max": 2}},
+    {"id": "plan", "check": "plan-gate", "inputs": ["docs/specs/{issue}/analysis.md", "in:issue.md"]}
+  ]
+}

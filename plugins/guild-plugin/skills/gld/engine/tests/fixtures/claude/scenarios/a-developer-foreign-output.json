@@ -1,0 +1,37 @@
+{
+  "format": 1,
+  "description": "P3-A O1: developer rewrites docs/specs/42/analysis.md (owned by analyze) → foreign-output.",
+  "stream": "../f2/r4.jsonl",
+  "init_from_argv": true,
+  "structured_output": {
+    "status": "done",
+    "outputs": [],
+    "requests": [],
+    "blocked_by": null,
+    "discoveries": [],
+    "note": "fixture"
+  },
+  "actions": [
+    {
+      "op": "write",
+      "path": "docs/specs/42/analysis.md",
+      "content": "# rewritten\n"
+    },
+    {
+      "op": "git",
+      "args": [
+        "add",
+        "-A"
+      ]
+    },
+    {
+      "op": "git",
+      "args": [
+        "commit",
+        "-q",
+        "-m",
+        "work"
+      ]
+    }
+  ]
+}

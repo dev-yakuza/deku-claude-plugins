@@ -10,7 +10,6 @@ created. Upstream of `sprint run`.
 > temp file + `--body-file`, never inline multi-line. Owner/repo · labels · `gh` write failures:
 > `_handoff.md` Sections A/F. Membership · edges · `sprint_dag.py`: `_sprint_dag.md`.
 > Readiness dimensions: `_readiness.md`. Roles: product-owner + tech-lead personas.
-> **Checkout**: never move the human's branch or history — `_checkout.md` (a pull/sync/switch request: show the commands and which commits change hash, then ask).
 > **Output language**: `config.language` (`_handoff.md` Section K); machine tokens stay ASCII.
 > Every role prompt below (product-owner, tech-lead, the slot re-spawn) ends with Section K's
 > language line, written out — not left to the persona.
@@ -21,7 +20,7 @@ created. Upstream of `sprint run`.
 
 Each its own Bash call.
 
-1. **Guild initialized?** `ls .claude/guild/config.json` — absent → `FAIL: Guild not initialized (run /gld init first)`. This command needs `config.language`, `config.commands`, `config.sprint` and the product-owner/tech-lead role definitions.
+1. **Guild initialized?** `ls .claude/guild/harness.json` — absent → `FAIL: Guild not initialized (run /gld init first)`. This command needs `config.language`, `config.commands`, `config.sprint` and the product-owner/tech-lead role definitions.
 2. **Does the `guild:sprint` label exist?**
    ```bash
    gh label list --limit 200 --json name --jq '[.[].name]'
@@ -44,14 +43,15 @@ Each its own Bash call.
    ⚠ **Then check whether a supervisor is actually RUNNING** — read the open tracker's
    `<!-- guild:sprint:run -->` marker (`gh api repos/<owner>/<repo>/issues/<tracker>/comments
    --paginate --jq '.[].body'`, **oldest** block wins — the supervisor PATCHES one comment in
-   place and picks `min(id)`). `state:` of `running` / `installing-deps` /
-   `rate-limited-*` / `waiting-for-window-<HHMM>` means a run may be in flight. Branch on the
+   place and picks `min(id)`). `state:` of `running` / `starting` / `checking-base` /
+   `waiting-for-window` / `waiting-for-quota` (the engine's), or `installing-deps` /
+   `rate-limited-*` / `waiting-for-window-<HHMM>` (an older tracker's) means a run may be in flight. Branch on the
    heartbeat, **not on the host**:
 
    ⚠ **`waiting-for-window-*` is a LIVE run.** It is the state a windowed run spends most of its
    life in — up to twelve hours at a stretch, for days — and the refusal message has to say so
    or the human reads *"refused, nothing is happening"* as a bug: *"#<tracker> 의 감독자가 창
-   밖이라 대기 중입니다 — 남은 멤버 <n> · 다음 창 <HH:MM>. 중단하시려면 `kill <pid>` 후 다시
+   밖이라 대기 중입니다 — 남은 멤버 <n> · 다음 창 <HH:MM>. 중단하시려면 `engine.py sprint stop` 후 다시
    불러 주십시오 — 멤버 작업 중이면 그 멤버가 끝난 뒤에 멈춥니다."* Omit the token and this
    state falls into `proceed`, which does the damage this section already names below —
    *"seeds members a live supervisor is developing, resetting their cards to `Ready`"*.
@@ -71,7 +71,7 @@ Each its own Bash call.
    none*, which is the legitimate first-sprint case and stays `proceed`.
 
    ⚠ **Do NOT gate this on `host` matching.** The supervisor refreshes its heartbeat at least
-   every 10 minutes, *including inside a rate-limit wait* (`run.md` Phase 3 step 3), so a fresh
+   every 10 minutes, *including inside a wait* (`run.md` Phase 3), so a fresh
    heartbeat is proof of life on any machine. Keying on the host lets a run on someone else's
    checkout — or in a container — pass straight through.
 
@@ -114,31 +114,6 @@ Each its own Bash call.
      — only these two forms. Only `deleteBranchOnMerge` missing → only that half reads
      `브랜치 자동삭제 ?`.
 
-6. **Is the checkout the default branch, and level on `config.json`?** (0.99.2 — before anything
-   is read and judged: Phases 2–5 judge capacity and the refactor slot from this checkout's
-   `.claude/guild/config.json`; measured plan #1889 on `feature/#1769-…`: the feature branch's
-   `config.json` lacked retro #1839's history entry — an unpushed commit on local main only — and
-   the slot was judged without the previous slot #1836. The leader saw the branch only at Phase 6
-   step 3.) Each its own Bash call:
-   `gh repo view <owner>/<repo> --json defaultBranchRef --jq .defaultBranchRef.name` → `<d>` (Phase 2's `DEFAULT BRANCH` and Phase 6 step 3 reuse this value — the same read is not made twice; the repo is positional);
-   `git branch --show-current` → `<b>` (empty = detached).
-   - `GLD_UNATTENDED=1` → no question (the run ends at Phase 5 anyway): one line `체크아웃 <b> — 실제 구성은 <d> 에서 하십시오`, then go on — the two questions below are attended only.
-   - (attended) `<b>` ≠ `<d>` → **ask before anything is read and judged** — these two options and no other:
-     `체크아웃이 기본 브랜치 <d> 가 아닙니다(<b|detached>). plan 은 이 브랜치의 .claude/guild/config.json(용량 이력·리팩토링 슬롯 이력)으로 구성하고, 구성 기록은 <d> 에서만 커밋됩니다. ① 중단 — 직접 <d> 로 옮기신 뒤(git switch <d>) /gld sprint plan 을 다시 실행(권장 · 아직 아무것도 쓰지 않았습니다) ② 이대로 진행 — 이 브랜치의 설정으로 구성하고 기록은 커밋하지 않음`
-     ① → Return `OK: plan not started — checkout <b> is not <d>`. ② → go on; Phase 5 prints, right
-     under its first lines, the fixed line `⚠ 체크아웃 <b> 의 config.json 으로 구성 — 용량 이력·슬롯 이력이 <d> 와 다를 수 있습니다`,
-     and Phase 6 step 3 stops as it does now (the record is not committed).
-   - (attended) `<b>` = `<d>` → `git fetch origin <d>:refs/remotes/origin/<d>` (a remote-tracking fetch —
-     outside `_checkout.md`'s three principles). It fails → one line `원격 확인 불가 — 로컬 config.json 으로 구성합니다`
-     and go on. Otherwise `git rev-list --left-right --count <d>...origin/<d>` → `<ahead> <behind>`;
-     `behind > 0` **and** `git diff --quiet HEAD...origin/<d> -- .claude/guild/config.json` exits 1
-     (three dots: only what changed on **origin's** side since the merge base — two dots would also
-     fire on a local unpushed `config.json` change, where "the newer history is on origin" is false)
-     → the same two-option question, worded
-     `로컬 <d> 가 origin 보다 <behind> 커밋 뒤이고 config.json 이 다릅니다 — 최신 용량 이력이 origin 에 있습니다. ① 중단 — 직접 최신화(git pull --ff-only, 로컬 커밋이 있으면 git pull --no-rebase)하신 뒤 다시 실행(권장) ② 이대로 진행`.
-     `config.json` the same → no question (Phase 6 step 5 checks the branch again before the push).
-   - **Never an option that moves or updates the branch for the human** ("제가 옮기겠습니다" and the like — `_checkout.md`).
-
 ## Phase 1 — Collect candidates
 
 ```bash
@@ -167,9 +142,17 @@ of 60 open Issues, 36–38 (depending on the moment) carried `guild:child`, 57% 
 needs no second `--jq 'length'` invocation (`count` in Phase 1b is that line). An added turn
 re-bills the whole prefix, and a check that costs a turn is a check that gets skipped.
 
-Exclude: `guild:done` · `guild:sprint` (trackers) · `guild:child` (they arrive through a parent) · any Issue already a member of an open sprint (`_sprint_dag.md` Section A). ⚠ Do **not** exclude a `guild:children` parent (an **epic** — already split into children): taken, `run` continues it — it re-invokes `/gld dev <parent>`, which drives the remaining children in order to the end (`run.md` Phase 3, *`guild:children` is not terminal* — it is not handed to the human), so the epic is one candidate like any other (below).
+⚠ **The engine develops these and nothing else (H3, readiness T1 P7).** `run` is the engine: an Issue whose type has no procedure template (`type:docs`, `type:chore`), an epic (`guild:children`), a child of an epic (`guild:child`), an Issue an open pull request already closes, an Issue whose engine branch `gld/<N>` is left on the remote, and an Issue with a stable-edition stage label are **never picked** as members — say so in one line each. This overrides the epic rules below until epics come to the engine; picked anyway, the engine blocks or refuses them (`unsupported-epic`, `open-closing-pr`, `remote-branch-exists`, a plan-gate stop, a refusal) and `engine.py sprint check` (Phase 6 step 4) names them.
 
-**Epics (`guild:children` candidates) — one more call**, after the one above:
+Exclude: `guild:done` · `guild:sprint` (trackers) · `guild:children` (an **epic** — epics are not supported yet: `/gld dev` refuses it, so it is never a member; Phase 5 `제외: #e (에픽 — 아직 지원 전, 자식을 하나씩 /gld dev)`) · `guild:child` (a child of an epic — not a sprint member while epics are not supported; Phase 5 `제외: #c (에픽 #e 의 자식 — /gld dev <자식> 으로 하나씩)`) · any Issue already a member of an open sprint (`_sprint_dag.md` Section A) · **the taken Issues** (below).
+
+**Taken Issues — one more call** (readiness T1 P7), after the one above — read only:
+```bash
+python3 -I <<SKILL_DIR>>/engine/engine.py taken --repo OWNER/REPO --json
+```
+`closing_prs` names every Issue an open pull request on **any** branch already closes (GitHub's closing reference or a closing keyword — a 0.98.7 `feature/#N-…` PR, a human's, a lost run's): leave it out, Phase 5 `제외: #n (열린 PR #p 가 이미 닫음 — 리뷰 후 머지하거나 닫은 뒤 다음 plan)`. `engine_branches` names every Issue whose `gld/<N>` is left on the remote: leave it out, Phase 5 `제외: #n (원격 엔진 브랜치 gld/n 남음 — /gld status n 확인)`. **Exit 4** (GitHub did not answer) → the taken Issues cannot be told: stop the plan here and report the line — never fill a sprint without this read (run would refuse those members one by one).
+
+**Epics (`guild:children` candidates) — one more call**, after the one above. ⚠ **Skipped in this edition** (readiness T1 P7): epics and their children are excluded above, so this call and the epic rules that read it (`remaining`, `k`, the extended dependency floor, `epic ×<k>`) do not run — they stay for the epic support of a later edition:
 ```bash
 gh issue list --label guild:child --state all --limit 500 --json number,body,labels,state --jq 'length, (.[] | {number, state, labels: [.labels[].name], parent: ((.body // "") | (match("Parent Issue: #([0-9]+)").captures[0].string | tonumber)? // null), depends_text: [(.body // "") | match("Depends on:?[^\n]*"; "g").string | split(". ")[0]]})'
 ```
@@ -394,9 +377,7 @@ lists* below — a removed `refactor-slot` candidate turns it `off`) — the tec
 against it (the "Refactor slot" section below). Its name: `gh repo view --json defaultBranchRef
 --jq .defaultBranchRef.name`; then `git fetch origin <d>:refs/remotes/origin/<d>` — the refspec
 form, because a bare `git fetch origin <d>` does not update `origin/<d>` in a single-branch
-clone (`_execute_spine.md` says the same). Each its own Bash call. **Phase 0 step 6 already
-fetched it → skip this fetch** (and reuse its `<d>`); otherwise (step 6 went on with ②, or its
-fetch failed) as here.
+clone (`_execute_spine.md` says the same). Each its own Bash call.
 ⚠ The fetch is the leader's, not the sub-agent's: the tech-lead runs `scan_git.md`, whose rule is *local &
 read-only — no git mutations*, and that stays true. Fetch fails (offline, an SSH remote with no
 agent while `gh` still works over HTTPS) → say so once, and pass `DEFAULT BRANCH: unavailable`
@@ -404,7 +385,7 @@ and `PAST SLOTS: unverifiable — <the entries, verbatim>` — **keep the entrie
 they cannot be checked, not that they are gone. What the tech-lead does with these values is
 in the "Refactor slot" section, which is the only part of this file it reads.
 
-**Base CI — once, before the spawn** (0.98.7, measured #630: the base was red on one test that member #618 fixed, and six other members paused in qa on the same red): run `python3 <<SKILL_DIR>>/commands/atoms/base_ci.py --repo <owner>/<repo>` (the same call as `run` Phase 0 — one Bash call; its docstring holds the rule) and pass its lines (one or two) to the tech-lead as the line `BASE CI: <green(<checks…>)|red(<checks…>) (근거 …)|ci-blocked(<checks…>)|없음|unavailable>`, plus its `ci-blocked: <checks…>` second line when it printed one (the names let the tech-lead tell a test check from a non-code one).
+**Base CI — once, before the spawn** (0.98.7, measured #630: the base was red on one test that member #618 fixed, and six other members paused in qa on the same red): read the *Base CI* paragraph of `<<SKILL_DIR>>/commands/sprint/run.md` Phase 0 (that section only, not the whole file) and run its check — the same calls and the same result rule, each its own Bash call — and pass the result to the tech-lead as one line `BASE CI: <green(<checks…>)|red(<checks…>) (근거 …)|ci-blocked(<checks…>)|없음|unavailable>` (the names let the tech-lead tell a test check from a non-code one).
 
 **Precondition**: `docs/specs/sprint-draft/triage.md` was written in this run (Phase 1b) — if it was not, go back to
 Phase 1b — **and the Phase 2 spawn message itself opens with the report**: the text before the PO/TL Agent calls is the 1b report, verbatim from `triage.md` (header `Phase 1b 판정 보고입니다(docs/specs/sprint-draft/triage.md 에 기록)` + the report part) — unless that text was already printed as its own message after the file was last written. The draft directory and the cleared verdicts are Phase 1b's first two calls. Phase 6 step 6 moves the
@@ -445,7 +426,7 @@ Phase 5 states each removed candidate's reason itself, in the wording it already
 
 As the leader, spawn BOTH role sub-agents in one message (independent, concurrent). Reuse the prompt *shape* of `plan.md` Phase 1, but the job is **selection, not decomposition**.
 
-⚠ **BODIES 는 명령으로만 넘긴다 — 본문을 파일로 저장해 넘기지 마라(공유 /tmp·저장소 안 모두).** Put the Phase 1 command itself in each prompt's BODIES and let the role run it. Measured: a leader saved the bodies to `/tmp/gld_candidates_tl.txt` and `/tmp/gld_sprint_candidates.jsonl` — a fixed name in a shared directory any other process can read or replace — and `docs/specs/sprint-draft/` is no alternative: it is not gitignored (Phase 5's sweep handles the case where it was swept into a human's commit). 도구 출력이 파일로 넘어가는 것은 도구의 동작이며 Read 의 offset/limit 으로 끝까지 읽는다. 역할에게는 bodies-contract(`_handoff.md` Section C — 각 프롬프트의 `guild:bodies-contract` 펜스)가 같은 말을 한다.
+⚠ **BODIES 는 명령으로만 넘긴다 — 본문을 파일로 저장해 넘기지 마라(공유 /tmp·저장소 안 모두).** Put the Phase 1 command itself in each prompt's BODIES and let the role run it. Measured: a leader saved the bodies to `/tmp/gld-candidates-tl.txt` and `/tmp/gld-sprint-candidates.jsonl` — a fixed name in a shared directory any other process can read or replace — and `docs/specs/sprint-draft/` is no alternative: it is not gitignored (Phase 5's sweep handles the case where it was swept into a human's commit). 도구 출력이 파일로 넘어가는 것은 도구의 동작이며 Read 의 offset/limit 으로 끝까지 읽는다. 역할에게는 bodies-contract(`_handoff.md` Section C — 각 프롬프트의 `guild:bodies-contract` 펜스)가 같은 말을 한다.
 
 **Product Owner** (value):
 - `subagent_type`: `general-purpose`, `model`: the role file's `model:` frontmatter (`_model_tiering.md` Section 0 — `sonnet` when absent), `description`: `product-owner sprint select`
@@ -467,7 +448,7 @@ As the leader, spawn BOTH role sub-agents in one message (independent, concurren
   > <!-- guild:bodies-contract -->
   > **Issue bodies stay in tool output.** Never save bodies — or anything cut from them — to a file you name (your own artifact, written as the prompt says, is not such a file): no `>`/`>>`/`tee` on a read, no `/tmp/…`, nothing under the repo (a fixed name in a shared directory can be read or replaced by any process). Run a read command you are given **exactly as given** — add no `--jq` slice, `.[0:N]`, `head`, `cut` or filter; when the tool moves a long output to a file, that file is the tool's: Read it to the end with `offset`/`limit`. Edit your own artifact with the Edit or Write tool, never `sed -i` (macOS `sed -i` takes the next word as a backup suffix — measured: an edit that silently did nothing).
   > <!-- /guild:bodies-contract -->
-  > CANDIDATES (tech-lead): <the product-owner's entry format, for **every** candidate — those left out of the product-owner's list included, each with `slot: ineligible`>. BODIES: <same as above>. REFACTOR SLOT: <`on` | `off`>. DEFAULT BRANCH: <the repo's default branch name — the leader has already fetched `origin/<it>` — or `unavailable`>. PAST SLOTS: <the `refactor` field of every `config.sprint.history` entry that has one, or `none`>. VISUAL: <available or not per `_handoff.md` Section L.1 — `available` with `visual.packages` and `visual.tests`, or `unavailable`> (the gap check's visual half needs it; you are not reading config.json yourself). BASE CI: <the Base CI line above>. <`_handoff.md` Section K's language line, rendered in `config.language` — the same line as the product-owner's> Write output in `config.language`.
+  > CANDIDATES (tech-lead): <the product-owner's entry format, for **every** candidate — those left out of the product-owner's list included, each with `slot: ineligible`>. BODIES: <same as above>. REFACTOR SLOT: <`on` | `off`>. DEFAULT BRANCH: <the repo's default branch name — the leader has already fetched `origin/<it>` — or `unavailable`>. PAST SLOTS: <the `refactor` field of every `config.sprint.history` entry that has one, or `none`>. VISUAL: <available or not per `_handoff.md` Section L.1 — `available` with `visual.packages` and `visual.tests`, or `unavailable`> (the gap check's visual half needs it; you are not reading harness.json yourself). BASE CI: <the Base CI line above>. <`_handoff.md` Section K's language line, rendered in `config.language` — the same line as the product-owner's> Write output in `config.language`.
 
 ### Refactor slot — one per sprint, reserved, never forced
 
@@ -829,8 +810,6 @@ delete `triage.md`). A second partial read → attended: stop and ask the human
 *"⚠ <역할> 가 본문을 끝까지 읽지 못했습니다 — 후보를 줄여(라벨·--limit) 다시 실행하거나, 이대로 진행(읽지 못한 후보는 담지 않음)"*;
 `--no-ask` → `FAIL: <role> partial read twice`.
 
-**Every candidate gets a product-owner verdict** (0.99.2 — measured plan #1889: 1b-ready #1878 was in none of the ranking, `## not-ranked` or the questions, and the leader marked it `PO 판정 누락` on its own in Phase 5): right after the product-owner's RESULT, before Phase 3, its own Bash call `grep -nE '^(## |[-*0-9.]* *#[0-9]+)' docs/specs/sprint-draft/po.md` — every section heading and every line that opens with `#<n>`; compare the numbers of the entry lines inside those three sections (an entry's leading `#<n>` only — a `prerequisite: #d`, `(needs #d)` or `decide-in: #c` inside a line is not a verdict) with the numbers of CANDIDATES (product-owner). A number missing → **one** SendMessage to the same product-owner agent (its context is kept): `po.md 에 #<n…> 의 판정이 없습니다 — 각 번호를 goal-picks / other-ranked / not-ranked 중 하나로 po.md 에 추가하고 같은 RESULT 줄을 다시 보내세요(본문 규칙 그대로)`, then check again. Still missing — or SendMessage is unavailable (the agent was already released) → straight to the Phase 5 fixed line `PO 판정 누락: #<n…> — 이번 채우기에서 빠졌습니다(넣으려면 "추가 #n")`; such a number is not a seat candidate — the leader never ranks a candidate the product-owner did not judge. This line is not `제외: #n (PO: <사유>)`: that one is a candidate the product-owner put under `## not-ranked`; this one it never mentioned.
-
 ⚠ **A `⚠ likely to split` candidate is excluded by strong default** (the Phase 3 fill keeps this gate as it is). A split that happens *during* the run is handed back to the human (`run.md`), so the sprint stops on that issue. Include one only if the human overrides after being told this.
 **Except at `guild:execute` or later**: design does not run on it again, so it cannot split — the tech-lead's ⚠ is ignored and it counts as ✅ (the same stage exemption as a `depends:` size, Phase 3; the slot's size bar applies it too).
 **`⚠ depends: …` is read as `depends:`** (an ordinary candidate or a child): the tech-lead's judgment that a decision settles the size is the substance, and the ⚠ in front only repeats "⚠ until it is decided". **Mixed** is only a verdict with a **split rationale written between the ⚠ and the `depends:`** (measured #503: *"⚠ (감시 틱+정지 / 이력 모델 / …) depends: …"*) — ⚠ whatever the decision — and it counts as ⚠ (the strong default above, an ordinary candidate's too).
@@ -854,8 +833,8 @@ child that stops).
 
 | Input | Source |
 |---|---|
-| capacity `C` | `config.json` → `sprint.capacity` (written by `retro`) |
-| past sizes (shown, never used to shrink `C`) | `config.json` → `sprint.history[].planned` |
+| capacity `C` | `harness.json` → `sprint.capacity` (written by `retro`) |
+| past sizes (shown, never used to shrink `C`) | `harness.json` → `sprint.history[].planned` |
 | size per candidate | tech-lead |
 | dependency chain depth | `sprint_dag.py --mode depth` (Phase 4) |
 | readiness + decision drafts | the product-owner's `## readiness` and `## questions` |
@@ -1300,7 +1279,7 @@ Phase 3 fill; the draft placeholder is `slot`). `--mode order` breaks a tie by k
 (`goal`/`slot` before `other`) and then by issue number, so where dependencies leave a choice the
 goal's work runs first. `linearize` ignores `kind` — which issue becomes a fan-in's base is
 unchanged, and an `other` member can still end up as a `goal` member's base (a known limit).
-`run` rebuilds the same file from the table's `구분` column (`run.md` Phase 1 step 5) so the
+The engine computes the same order from the table's `구분` column (`engine.py sprint check`) so the
 order it runs is the order the human approved.
 
 **When Phase 2 accepted a slot** (the next three paragraphs; with no slot — `skip`, `off`, or
@@ -1319,7 +1298,7 @@ rebase that would resolve it; one stacked under the other is only an order.
   and present it as `#(신규)`. ⚠ **Not `0`, and not any small number.** The script breaks ties
   by issue number (in `linearize`, and in `order` after `kind` — the slot's kind is the same
   for the placeholder and the real number), and `run` recomputes the order from the
-  table with the real number (`run.md` Phase 1 step 5). A new Issue always gets a number above every
+  table with the real number (the engine, at its start). A new Issue always gets a number above every
   existing member, so a placeholder above them too breaks every tie the same way the real
   number will; `0` breaks them the opposite way, and the stack and order the human approves
   would not be the ones that run. Phase 6 step 0 swaps the real number in.
@@ -1367,7 +1346,6 @@ The first line, `후보 N개 중 M개`: M = the members taken (a new slot draft 
 candidates judged (1b's `<후보 수>`) — a new slot draft is not among the N, so M can exceed N.
 Right under it, one fixed line: `1b: 착수 가능 <a> · 구체화 필요 <b> · 막힘 <c> (위 보고 · triage.md)`. **Self-check**: if
 Phase 1b's report was not printed in this run, print it first (from `triage.md`), then go on with Phase 5. Printed = an assistant text in this run containing the report's first line `판정 <n>개 · …` — the `1b:` line itself and a Read do not count.
-When Phase 0 step 6 went on with ②, the fixed line `⚠ 체크아웃 <b> 의 config.json 으로 구성 — 용량 이력·슬롯 이력이 <d> 와 다를 수 있습니다` comes right under the `1b:` line.
 
 ```
 후보 12개 중 8개를 이번 스프린트로 제안합니다.
@@ -1406,7 +1384,7 @@ When Phase 0 step 6 went on with ②, the fixed line `⚠ 체크아웃 <b> 의 c
   (담음이 용량과 같을 때만, 용량 > 실측 최대이면: ⚠ 용량 10 은 아직 실측된 적 없는 크기입니다(실측 최대 9) — 줄이려면 "크기 N" 으로 말해 주세요)
   최대 스택 깊이: 3 (상한 3 — 경계)
   머지 전략: merge commit 허용 ✅ · 브랜치 자동삭제 ✅
-  기록: 만들면 판정 원문(docs/specs/sprint-<트래커 번호>/)과 config.json 을 main 에 커밋하고 push 합니다
+  기록: 만들면 판정 원문(docs/specs/sprint-<트래커 번호>/)과 harness.json 을 main 에 커밋하고 push 합니다
 
 이대로 만들까요? (드롭 / 추가 / 크기 N / 의존 유지 #d / 쌓기 #b ← #a / 목표 <문장> / 재범위 / 재정렬 [/ 스택 없음] 요청 가능)
 ```
@@ -1478,7 +1456,6 @@ the brackets — the line then ends `재정렬 / 스택 없음 요청 가능)`; 
 - `본문 일부만 읽고 뺀 후보 <k>개` — the product-owner's `(partial-read)` not-ranked candidates, numbers folded away;
   this one line is their reason — they get no `제외: #n (PO: …)` line each.
 - `제외: #n (PO: <사유>)` — a candidate in the product-owner's `## not-ranked`, with its line.
-- `PO 판정 누락: #<n…> — 이번 채우기에서 빠졌습니다(넣으려면 "추가 #n")` — a candidate `po.md` never mentions after the one re-request (Phase 2, *Every candidate gets a product-owner verdict*); not a seat candidate.
   An ordinary candidate gets it as ④ of its order of reasons (Phase 3, *Phase 5 order of
   reasons — ordinary candidates*: one line, the first that applies); an epic (whose order ⓪–⑤
   has no not-ranked — measured #161) **only when no other line already gives it a reason** (`사람 작업 필요`, `선행 대기`, a Phase 3
@@ -1538,7 +1515,7 @@ the brackets — the line then ends `재정렬 / 스택 없음 요청 가능)`; 
   `같은 파일 <file>(#a·#b[·#c])` (measured one-man-company
   sprint-563: `schedule_engine.dart` shared by #503 #504 #555 #562, the tech-lead's advice to
   merge them in series never reached Phase 5). **A warning, not a gate**; `run` does not read the
-  비고 (`run.md` Phase 1 step 5 reads `base 의존` and `구분` only).
+  비고 (the engine reads `이슈`, `base 의존` and `구분` only).
 - `의견: #a 먼저 → #b (tech-lead: <note>)` — the tech-lead's `soft: #b after #a — <note>`, shown
   only when **both** are members and the pair is not already connected (the exclusion above).
   Display only — no edge; `쌓기 #b ← #a` makes it one.
@@ -1690,8 +1667,13 @@ Handle edits and re-present until the human approves. **Create nothing** without
    - <Goal|Constraint|Success>: <question> → <answer> (<YYYY-MM-DD>, sprint plan)
    <!-- /guild:plan-decision -->
    ```
-   The dimension keys stay ASCII; the question and answer are in `config.language`. **A decision to close the Issue without a code change** is written on its `Goal` line as an answer that **starts with** the ASCII close form `close: completed` (the goal is already met) or `close: not_planned` (decided not to do it), then ` — <why>` — the engine closes an Issue only from that form; any other answer (one that mentions closing a dialog, cancelling, or not doing something) is a requirement, never a close. Read → splice → full rewrite, **with the truncation check** (`_sprint_dag.md` Section A), the splice — by the Write/Edit tool (never a `python3 -c`/`sed`/heredoc carrying the text: `_bash_rules.md`, #1774). **Do the slot member first.** Before it, when the slot gains a net, post the approved net as a tracker **comment** under `<!-- guild:sprint:slot-net -->` … `<!-- /guild:sprint:slot-net -->` — a `slot: #<n>` line, then the three parts to splice (the Safety net section, the lines to add to Success-criteria, and a known-gaps/findings part: gaps cut by the 5-line cap and rule-4 "untestable here" findings — an existing Issue has no Why section to hold them) — a comment, not the tracker body, which `plan-hash` seals. A death before the splice leaves that comment as the only record of the net the human approved; Phase 0 step 4 applies it on the next run. **For an existing or resumed slot that gained a Safety net** (approved in Phase 5), splice it into the same rewrite: the Safety net section (heading + `<!-- guild:safety-net -->` + lines + rules), the same lines added to its Success-criteria (or a new Success-criteria section), and the known-gaps/findings part (gaps cut by the cap, untestable-here findings) — skipped when the body already holds `<!-- guild:safety-net -->`, which is what makes a re-run after a mid-create death append nothing twice. One member per Bash call; a failure mid-way is resumable because step 4's idempotency check re-derives what exists.
+   The dimension keys stay ASCII; the question and answer are in `config.language`. Read → splice → full rewrite, **with the truncation check** (`_sprint_dag.md` Section A), the splice — by the Write/Edit tool (never a `python3 -c`/`sed`/heredoc carrying the text: `_bash_rules.md`, #1774). **Do the slot member first.** Before it, when the slot gains a net, post the approved net as a tracker **comment** under `<!-- guild:sprint:slot-net -->` … `<!-- /guild:sprint:slot-net -->` — a `slot: #<n>` line, then the three parts to splice (the Safety net section, the lines to add to Success-criteria, and a known-gaps/findings part: gaps cut by the 5-line cap and rule-4 "untestable here" findings — an existing Issue has no Why section to hold them) — a comment, not the tracker body, which `plan-hash` seals. A death before the splice leaves that comment as the only record of the net the human approved; Phase 0 step 4 applies it on the next run. **For an existing or resumed slot that gained a Safety net** (approved in Phase 5), splice it into the same rewrite: the Safety net section (heading + `<!-- guild:safety-net -->` + lines + rules), the same lines added to its Success-criteria (or a new Success-criteria section), and the known-gaps/findings part (gaps cut by the cap, untestable-here findings) — skipped when the body already holds `<!-- guild:safety-net -->`, which is what makes a re-run after a mid-create death append nothing twice. One member per Bash call; a failure mid-way is resumable because step 4's idempotency check re-derives what exists.
 4. **Compute and store `plan-hash`** — `sprint_dag.py --mode hash` over the finished body, then write it into the `plan-hash:` line. Do this **last**, after the body is final. ⚠ This rewrites the **tracking Issue's** body, which holds the member table — the canonical dependency source for the whole sprint. It carries the **same mandatory truncation check** as a member body (`_sprint_dag.md` Section A): if the read comes back as a preview, read the persisted full output, and if that is unavailable do **not** write. A truncated rewrite here destroys the sprint unrecoverably, which is worse than any member body. (`--mode hash` *removes* the `plan-hash:` line before hashing, so writing the value back does not change it.)
+   **Then let the engine read it back** — the table, the hash and the order exactly as `run` will (no write):
+   ```bash
+   python3 -I <<SKILL_DIR>>/engine/engine.py sprint check --repo OWNER/REPO --tracker T
+   ```
+   Exit 4 → the tracker is not runnable: show the line and fix the body now (never leave it for `run`); exit 0 → its order must be the one the human approved in Phase 5.
 
 5. **Project onto the board** — only when `config.sprint.board` is set. One Bash call:
 
@@ -1814,14 +1796,14 @@ projection of each member.
    human this commit and push would happen; Phase 6 only runs after their approval.
    ⚠ **Not on `run.md`'s ad-hoc path** (its Phase 1 step 2 runs this Phase 6): there was no
    Phase 2, and `run` leaves the human's checkout alone — skip this step there, and when step 5
-   wrote `last_projected`, say once that `config.json` is left uncommitted.
+   wrote `last_projected`, say once that `harness.json` is left uncommitted.
    Each command its own Bash call. Any check below that stops → **commit nothing**, say why, and
    print the retry line at the end of this step.
    **The record** is: the verdict files **this run's** Phase 2 RESULT lines named in
    `docs/specs/sprint-draft/` — `po.md`, `deps.md`, and `deps-slot.md` only when this run
-   re-spawned — plus Phase 1b's `triage.md`, plus `.claude/guild/config.json`. Never the directory: anything else in it
+   re-spawned — plus Phase 1b's `triage.md`, plus `.claude/guild/harness.json`. Never the directory: anything else in it
    (a file a sub-agent or a leader left there) is not this sprint's record.
-   1. **What is there to record?** `git status --porcelain -uall -- .claude/guild/config.json docs/specs/sprint-draft/`.
+   1. **What is there to record?** `git status --porcelain -uall -- .claude/guild/harness.json docs/specs/sprint-draft/`.
       Keep only the record's paths from what it prints — plus any ` D` line for one of the four
       fixed names under `sprint-draft/`: Phase 1b's `rm -f` deleted a draft that had been committed,
       and that deletion goes into the record too. None → skip the rest of this step silently.
@@ -1844,8 +1826,8 @@ projection of each member.
       holds anything, and that is the end of it (a file that is not this run's record is never
       removed — *Never the directory*, above). **Whether it fails or is denied, ignore it and go
       on** — it never stops this step.
-   3. **On the default branch?** (Phase 0 step 6 already asked — this catches a switch since.) `git branch --show-current` must equal the default branch
-      (Phase 0 step 6's `<d>` — Phase 2's `DEFAULT BRANCH`; when that was `unavailable` or never resolved — the refactor
+   3. **On the default branch?** `git branch --show-current` must equal the default branch
+      (Phase 2's `DEFAULT BRANCH`; when that was `unavailable` or never resolved — the refactor
       slot was off — `gh repo view <owner>/<repo>
       --json defaultBranchRef --jq .defaultBranchRef.name` — the repo is positional, there is no
       `--repo` flag). A feature branch, or empty output (detached HEAD) → stop: a sprint record
@@ -1865,15 +1847,13 @@ projection of each member.
       - `git fetch <remote>` — it fails → stop: a stale `@{u}` cannot prove the branch is level.
       - `git rev-list --count HEAD..@{u}` must print `0` (it fails — the upstream branch is gone
         or not fetched → stop). Behind → stop: the push would be
-        rejected and leave the branch diverged; Guild never pulls on its own — on a human request,
-        `_checkout.md`'s request form (Guild runs only `git pull --ff-only <remote> <merge>`, or
-        `git pull --no-rebase <remote> <merge>` when the branch has local commits, after a yes — `--no-rebase` only on a clean tree, `_checkout.md` (i): here the record files and `config.json` are still uncommitted, so it is shown, not run).
+        rejected and leave the branch diverged; the human pulls first.
       - `git rev-list --count @{u}..HEAD` — `0` → go on. Not `0` → the branch already has the
         human's unpushed commits, usually `retro`'s evolve commit (evolve commits on this branch
         and deliberately never pushes). `git log --oneline @{u}..HEAD` and ask: (a) push them
         together with the record, (b) commit the record but push nothing, (c) commit nothing.
         An unanswered or ambiguous reply is (b). (a) → go on to sub-step 6.
-   6. **Is `config.json` only Guild's?** `git diff HEAD -- .claude/guild/config.json` — against
+   6. **Is `harness.json` only Guild's?** `git diff HEAD -- .claude/guild/harness.json` — against
       `HEAD`, not the index, because the commit takes the working-tree file. Guild's own lines:
       the whole `sprint.board` block (`sprint board` setup writes it, and its status writes
       `column_by_verified`; step 5 writes `last_projected`) and `sprint.capacity` /
@@ -1881,7 +1861,7 @@ projection of each member.
       A hand edit inside `sprint.board` (a column rename the board step tells the human to make)
       is committed without asking — it is still the board's config.
       Any other changed line is the human's edit: ask — (a) commit it together, (b) leave
-      `config.json` out, (c) commit nothing. An unanswered or ambiguous reply is (c). After (b),
+      `harness.json` out, (c) commit nothing. An unanswered or ambiguous reply is (c). After (b),
       if nothing is left in the record, stop.
    7. **Commit — only the record's paths, never an empty list.**
       `git add -- <record paths>`, then `git commit -m "<message>" -- <record paths>`, each with
@@ -1890,7 +1870,7 @@ projection of each member.
       ⚠ **Both commands need at least one path after `--`.** `git commit -m <m> --` with nothing
       after it exits 0 and commits the whole index. Never `git add .`, never `-a`. Message, in
       `config.language`: `docs(guild): 스프린트 #<tracker> 구성 판정 원문을 남긴다`, or
-      `docs(guild): 스프린트 #<tracker> 구성 판정 원문과 Guild 설정을 남긴다` when `config.json`
+      `docs(guild): 스프린트 #<tracker> 구성 판정 원문과 Guild 설정을 남긴다` when `harness.json`
       is in the record (`… Guild 설정을 남긴다` alone when it is the only path).
       Either command fails (a pre-commit refusal, an ignored path) → `git restore --staged --
       <path>` for each record path, one call each (one call for the list errors on the first
@@ -1909,16 +1889,14 @@ projection of each member.
       published history is rewritten (INV3) — and `git restore --staged -- <path>` per record
       path. The files stay in the working tree as they are (under `sprint-<tracker>`). Report
       the stderr line and *"push 가 실패해 커밋을 되돌렸습니다 — 파일은 그대로 있습니다. 보호
-      브랜치라면 PR 로 올려 주세요"*. **Never `--force`; never pull or rebase on its own — on a
-      request, `_checkout.md`** (measured #1889: `pull --rebase` recommended, two unpushed hashes changed).
+      브랜치라면 PR 로 올려 주세요"*. **Never `--force`, never pull or rebase on the human's
+      behalf.**
    **Retry by hand** — this step does not re-run by itself: a second `plan --create` meets
    Phase 0 step 4's open sprint and only records again if the human adds issues. Whenever it
    stopped, say where the files are now and print the commands for the record as it stands
-   (without `config.json` after sub-step 6 (b)): `git add -- <record paths>` ·
+   (without `harness.json` after sub-step 6 (b)): `git add -- <record paths>` ·
    `git commit -m "<message>" -- <record paths>` · `git push <remote> HEAD:<merge>` (or the PR
-   their branch rules require). Stopped behind at sub-step 5 → put `git pull --ff-only <remote> <merge>` first
-   (`git pull --no-rebase <remote> <merge>` when the branch has local commits — a rebase changes
-   their hashes). Stopped at sub-step 3 → put `git switch <default branch>` first,
+   their branch rules require). Stopped at sub-step 3 → put `git switch <default branch>` first,
    and name `<remote>`/`<merge>` as that branch's (`git config branch.<default>.remote`/`.merge`) —
    run as printed on the feature branch, they would commit there.
 
@@ -1988,8 +1966,7 @@ gh issue list --state open --limit 200 --search '"guild:sprint:plan" in:body' --
 there was nothing to record) · `OK: proposed <N> members (dry-run)` ·
 `OK: unattended — sprint proposal requires a human` ·
 `OK: open sprint #<t> — run /gld sprint retro first` (Phase 0 step 4, the human chose "retro
-first" — nothing was proposed or written) · `OK: plan not started — checkout <b> is not <d>`
-(Phase 0 step 6 ① — nothing was read or written) · `NEEDS_HUMAN: <one-line>` · `FAIL: <reason>`
+first" — nothing was proposed or written) · `NEEDS_HUMAN: <one-line>` · `FAIL: <reason>`
 
 On creation, say what to do next: *"`/gld sprint run`으로 무인 실행하세요. 상태는 `/gld sprint daily`."*
 
@@ -2005,7 +1982,7 @@ On creation, say what to do next: *"`/gld sprint run`으로 무인 실행하세�
 - **The refactor slot is reserved, never forced.** It passes the size gate every member passes and a stricter readiness gate (all three `clear`), shares the capacity (a filled slot takes one seat; a seat it gives back is refilled), never costs a feature member its place in the stack, must prepare at least one selected member, and an empty slot is recorded with its reason token.
 - **Members get no new `guild:*` label** (`_sprint_dag.md` Section A).
 - **The member table is written once.** After creation it is immutable and guarded by `plan-hash`; changing membership means running `sprint plan` again.
-- **The plan commit holds this run's verdict files and `config.json` — nothing else** (bar the
+- **The plan commit holds this run's verdict files and `harness.json` — nothing else** (bar the
   deletion of a committed `sprint-draft/` source it moved). At least
   one path after `--` on `git commit`, default branch only, nothing else staged, not behind the
   upstream, the human's own unpushed commits pushed only on their word, push by name, a failed

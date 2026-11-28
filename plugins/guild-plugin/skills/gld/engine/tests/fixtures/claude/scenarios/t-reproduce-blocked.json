@@ -1,0 +1,23 @@
+{
+  "format": 1,
+  "description": "Stage 3: the bug cannot be reproduced (TB5).",
+  "stream": "../f2/r4.jsonl",
+  "init_from_argv": true,
+  "role": {
+    "example": "result-work-s3",
+    "expect": "blocked"
+  },
+  "structured_output": {
+    "status": "blocked",
+    "outputs": [],
+    "requests": [],
+    "blocked_by": {
+      "kind": "other",
+      "note": "needs a real device"
+    },
+    "discoveries": [],
+    "irreversible": [],
+    "golden_reasons": [],
+    "note": "fixture"
+  }
+}

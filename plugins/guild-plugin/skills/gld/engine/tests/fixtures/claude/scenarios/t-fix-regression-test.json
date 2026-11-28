@@ -1,0 +1,43 @@
+{
+  "format": 1,
+  "description": "Stage 3: the fix touches the regression test (TB4).",
+  "stream": "../f2/r4.jsonl",
+  "init_from_argv": true,
+  "role": {
+    "example": "result-work-s3",
+    "expect": "foreign-output"
+  },
+  "structured_output": {
+    "status": "done",
+    "outputs": [],
+    "requests": [],
+    "blocked_by": null,
+    "discoveries": [],
+    "irreversible": [],
+    "golden_reasons": [],
+    "note": "fixture"
+  },
+  "actions": [
+    {
+      "op": "write",
+      "path": "test/a_test.dart",
+      "content": "weaker\n"
+    },
+    {
+      "op": "git",
+      "args": [
+        "add",
+        "-A"
+      ]
+    },
+    {
+      "op": "git",
+      "args": [
+        "commit",
+        "-q",
+        "-m",
+        "work"
+      ]
+    }
+  ]
+}

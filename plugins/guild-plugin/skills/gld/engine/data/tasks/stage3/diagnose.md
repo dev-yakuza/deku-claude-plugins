@@ -1,0 +1,8 @@
+Diagnose the bug and write `docs/specs/<issue>/diagnosis.md`, before anyone writes a test or a fix: read `analysis.md`, `test-cases.md` (the regression cases are tagged `(regression)`) and the code the Issue touches — follow the failing path through the code, do not guess from names.
+
+Write three sections, each as checkable items:
+- **Reproduction** — the smallest automated way to make the bug visible with the repository's own test runner: which test file (an existing one to extend, or a new one), which setup, which input, which assertion fails today and what it reports. The developer writes that test next and the engine checks that it fails on the unchanged code — twice — and that the base is otherwise green, so name a reproduction a unit or widget test can reach. If only a real device, a manual check or an image comparison can show the bug, say so plainly: the next step will then stop for a decision instead of pretending.
+- **Root cause** — the hypothesis: which code does what wrong, and why that produces the symptom. Separate the cause from the symptom; when there are several candidates, rank them and say what would tell them apart.
+- **Blast radius** — what else calls or depends on that code, which other behaviour a fix there could change, and which existing tests guard it.
+
+The review later checks the fix against this document (`root-cause-addressed`): a fix that only hides the symptom is sent back. You diagnose; you do not change code or tests. Write prose in the language of the Issue, follow the repository's document rules (its markdown lint), and never use square brackets for a tag or a reference. Write only that one file.

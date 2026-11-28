@@ -1,0 +1,18 @@
+{
+  "format": 1,
+  "description": "Stage 2 leader, plan-gate: rerun analyze — R2 is not really covered and one Issue requirement has no row (L4).",
+  "stream": "../leader/real-2.1.323/plan-gate-plan.jsonl",
+  "init_from_argv": true,
+  "leader": {"example": "leader-answer-plan-gate", "expect": "accepted"},
+  "structured_output": {
+    "answer": "rerun",
+    "reason": "analysis-gap",
+    "step": "analyze",
+    "note": "R2's AC does not check the restart case; the Issue also asks for a reset button that has no row.",
+    "recommendation": null,
+    "requirements": [{"row": "R1", "covered": true}, {"row": "R2", "covered": false}],
+    "missing_requirements": ["A reset button restores the default review types"],
+    "plan": null,
+    "close": null
+  }
+}

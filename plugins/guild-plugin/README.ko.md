@@ -17,7 +17,7 @@ Claude Code를 위한 **자기진화 에이전트 조직**. Guild는 레포에 �
 
 ```bash
 claude /plugin marketplace add dev-yakuza/deku-claude-plugins
-claude /plugin install guild-plugin@deku-claude-plugins
+claude /plugin install deku-claude-plugins@guild-plugin
 ```
 
 ## 빠른 시작
@@ -41,6 +41,8 @@ claude /plugin install guild-plugin@deku-claude-plugins
 **온디맨드·관찰** — `rollback <target>`(비파괴 되돌림) · `ask <question>`(standards+⑥ 기반 인용 Q&A) · `monitoring [--html]`(상태 스냅샷)
 
 **반복 구간** — `sprint plan`(목표 하나를 정하고 용량까지 채운다 — 목표 이슈 먼저, 남는 자리는 목표 외 착수 가능 이슈로; 사람이 있으면 답 하나로 풀리는 결정 질문을 던져 대기 중인 이슈를 착수 가능하게 만든다(`--no-ask` 로 끔); 지난 스프린트 실적으로 용량을 줄이지 않는다 — 이번 스프린트에 담을 이슈 선별 + 의존성 순서 + 추적 이슈 생성 — 스프린트가 건드릴 코드의 리팩토링 한 자리를 근거와 함께 예약하고 — 그 코드에 테스트가 부족하면 특성화 테스트(VRT 가 돌면 시각 케이스도)를 먼저, 바뀌기 전 코드에서 green 으로 깔며, 리팩토링감이 없으면 테스트가 부족한 핫스팟의 안전망만 까는 자리로 쓰고 — 마땅한 것이 없으면 이유를 남기고 비운다. 린트 룰은 `evolve` 가 맡는다) · `sprint run`(의존성 순서대로 무인 개발 → **PR 스택**, 이슈별 git 워크트리 격리, rate limit 은 리셋이 4시간 이내면 기다려 재개하고, 더 멀면 그 멤버만 차단해 재실행이 이어받는다 — 사장님은 그 사이에 리뷰·머지) · `sprint daily`(무엇을 어떤 순서로 머지할지 · 사람 대기 · 실패) · `sprint sync`(squash 전용 레포에서 하단 PR을 머지한 뒤: 그 위에 쌓인 PR에 기본 브랜치를 머지·검증·push하고 ready로 바꾼다 — 리뷰로 바뀐 의존은 사람이 따라잡는다) · `sprint board`(스프린트를 GitHub Projects 칸반에 비춘다 — `Issues → Backlog → Ready → In progress → Blocked → In review → Done` — 처음 한 번만 설정하면 이후 `plan`·`run` 이 자동으로 갱신) · `sprint retro`(지표 → 용량 보정 → evolve → 스프린트 종료)
+
+**Guild 0.98.7 이 계획한 스프린트 이어가기.** 엔진은 그 추적 Issue 를 읽지만(멤버 표·plan 해시 형식이 같음) 0.98.7 이 한 일을 이어받지는 않습니다. 멤버 완료는 이 기계의 엔진 기록이나 '완료'로 닫힌 Issue 로만 인정하고, 0.98.7 라벨·브랜치·PR 은 읽지 않습니다. `sprint run` **전에** 0.98.7 멤버 PR 을 리뷰해 머지하거나 닫으세요. 열린 PR 이 이미 닫는 멤버는 엔진이 거부하고(`open-closing-pr`) 두 번째로 개발하지 않습니다. 스택 머지로 열려 남은 Issue 는 직접 닫고, 다시 개발할 멤버는 `guild:done` 을 떼고, 0.98.7 감독이 돌고 있지 않은지 확인하고, 시간 창은 `--window` 로 주세요 — `sprint run` 이 이 체크리스트를 보여 줍니다. 엔진이 그 트래커를 돌린 뒤에는 `sprint daily`·`sprint retro` 가 0.98.7 의 `.sprint-logs/<tracker>/failures.jsonl` 을 읽지 않습니다(엔진 이전 기록).
 
 ## 안전 (불변식)
 
@@ -71,7 +73,8 @@ git이 인덱스가 확정된 뒤 실행하므로, 한 줄짜리 복합 `생성+
 developer가 기준 이미지로 만들고, test 단계가 `commands.vrt`를 실행하고, designer가 QA에서 이미지를 직접
 열어 보고, PR에는 GitHub 이미지 비교로 안내하는 **시각 변경** 섹션이 붙습니다. 기존 기준 이미지를 다시
 쓰는 것은 기대값을 바꾸는 일이라 PR에 근거를 남겨야 하고, 커밋 게이트는 이를 **경고**합니다(차단하지
-않음 — `config.json`의 `visual.baselines`로 설정). `visual.tests`의 파일은 테스트로 취급되어 삭제·skip은
+않음 — `visual` 블록의 `visual.baselines` 로 설정하는데, 이 판은 그 블록을 쓰지 않습니다(`harness.json`·엔진 설정 어디에도
+없음). 엔진은 자기 경로 규칙으로 기준 이미지를 알고, 다시 쓴 이미지를 PR 본문에 모두 적습니다). `visual.tests`의 파일은 테스트로 취급되어 삭제·skip은
 차단되고, 스크린샷/golden 매처 호출이 순감소하면 경고합니다(이 경고는 모든 레포에서). Guild가 시각 테스트 도구를 설치하지는 않으며, UI
 레포에 없으면 `audit`이 지적합니다.
 
@@ -103,7 +106,8 @@ CLAUDE.md                      # 권고: 레포 지도 + 검증 명령 + 지식 
 .claude/settings.json          # 퍼미션 허용목록 + PreToolUse 커밋 게이트 훅
 .claude/agents/                # 역할 에이전트 (= Guild)
 .claude/guild/
-  config.json                  # Guild 설정 (/gld config 가 관리)
+  harness.json                 # Guild 명령 설정 (/gld config 가 관리)
+  config.json                  # 엔진 설정 — /gld init(P2.9)이 만든다. 손으로 고치지 말고 harness.json 키를 넣지 말 것
   knowledge/                   # ⑥ 코드베이스 사실: index.md(항상 로드) + facts/(관련된 것만 검색해 로드). init 이 기준선을 심고 evolve 가 키운다
   memory/                      # ④ 일화적 작업 계층 (gitignore → 클론마다 로컬, 저신뢰): ground-truth.jsonl(포착된 신호, 프리플라이트 Item 8 이 런타임에 읽음) + consolidated.jsonl(evolve 가 ③/⑥ 으로 키운 항목의 보관소) + gate-firings.jsonl(evolve 규칙 스코어카드에 들어가는 게이트 발화 로그) + review-nudge-state.json(review 의 evolve 유도 쿨다운. 마지막 유도 시점의 저장소 전역 {count, runs} 하나만 둔다 — 충분 상태가 매 review 마다 유도하지 않도록 일부러 PR 별 키를 쓰지 않는다. 이슈 하나에 PR 하나가 통상 흐름이라 PR 별 키로는 거의 모든 review 가 "처음"이 되어 결국 유도했다. 대신 가까운 시점에 검토된 두 PR 사이의 드문 경합을 받아들인다. 스스로 복구된다)
   gates/                       # 강제층: scripts/gate_precommit.py — 커밋 게이트. 세 경로로 실행된다(.git/hooks/pre-commit = 정본 · PreToolUse(Bash) = 조기 경고 · PreToolUse(Edit|Write) --guard-config = 게이트 자신의 오프 스위치·규칙 편집 전에 확인을 요구). + rules/secrets.md, rules/verification.md(게이트가 무엇을 강제하는지에 대한 사람이 읽는 선언 — 검사 자체는 하드코딩이다. 보편적이고 환각되지 않아야 하므로) + rules/boundaries.md(유일한 데이터 주도 규칙 파일: `- forbid:` 줄들. 프런트매터 status: draft → 사람이 확인하기 전까지 WARN 전용 — INV6) + dismissed.md(수용된 위험 등록부) + findings.json(미해결 위반)
@@ -120,9 +124,8 @@ docs/adr/ , docs/specs/
 |---|---|
 | 개발 상태(스테이지·산출물) | GitHub 이슈/PR + `guild:*` 라벨 |
 | 역할 에이전트(습관) | `.claude/agents/*.md` |
-| 코드베이스 사실(⑥, 관련분만 검색) | `.claude/guild/knowledge/` |
+| 코드베이스 사실(⑥, 관련분만 검색) | `.claude/guild/knowledge/` (shared by both channels — K2) |
 | 날것 경험 기억 | `.claude/guild/memory/`(gitignore) |
-| 로컬 developer 작업 로그 (옵트인) | `.claude/guild/memory/local-dev/`(gitignore) |
 | 진화 원장 + 게이트 + 설정 | `.claude/guild/` |
 | 큐레이션 표준(charter·architecture…) | `docs/standards/` |
 

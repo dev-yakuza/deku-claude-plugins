@@ -1,17 +1,18 @@
 # UPDATE (adopt central Guild improvements — preserve local evolution)
 
+> **guild-plugin (U0 note → U15):** this command still writes `.claude/agents/*.md` (a stable-Guild path). The experimental edition must only READ role files until stage 6. Behaviour is unchanged here; replacement is left to U15. See `RENAME_EXCEPTIONS.md`.
+
 **Upgrade the repo's harness to the installed plugin version, keeping local evolution intact (중앙→repo 전파).** The counterpart to `init`: **init builds** the harness once; **update** adopts newer **central-owned** structure (gate scripts · settings hooks · `CLAUDE.md` block · label set · config schema · **role persona frontmatter and the persona marker region**) while **preserving local-owned** evolution (specialized agents **except `name`, and `description` plus the `persona:start`~`end` region when `config.language == "ko"`** · ⑥ knowledge · standards · overlay). Never clobbers what the repo grew **outside those keys and that region** — inside the marker region central text wins, including over a hand edit.
 
 `$1` (optional): `--check` (show the version gap + what's available, change nothing) · `--migrate-personas` (draw the central/local boundary in existing persona files so the normal update can refresh them — see the section at the end) · default = interactive update.
 
 > **Bash**: `_bash_rules.md`. Handoff + owner/repo: `_handoff.md`.
-> **Checkout**: never move the human's branch or history — `_checkout.md` (a pull/sync/switch request: show the commands and which commits change hash, then ask).
 > **Output language**: all human-readable output in `config.language` (`_handoff.md` Section K).
 
 ---
 
 ## Process
-**0. Preflight** — read `.claude/guild/config.json` `version` (the repo harness version, stamped at init/last-update) and the **installed plugin version** (`<<SKILL_DIR>>/../../.claude-plugin/plugin.json`, or the marketplace-installed manifest). Guild not initialized → "run `/gld init` first".
+**0. Preflight** — read `.claude/guild/harness.json` `version` (the repo harness version, stamped at init/last-update) and the **installed plugin version** (`<<SKILL_DIR>>/../../.claude-plugin/plugin.json`, or the marketplace-installed manifest). Guild not initialized → "run `/gld init` first".
 
 **0b. Mode dispatch** — branch on `$1` **before** step 1.
 - `--migrate-personas` → go straight to the `--migrate-personas` section at the end of this file;
@@ -26,7 +27,7 @@
 
 **1. Version gap**
 Compare the two versions **semver-numerically** (major.minor.patch, each component as a number — e.g. `0.9.0 < 0.10.0`, not a lexicographic string compare where "0.9.0" would wrongly sort above "0.10.0"):
-- `config.version` ≥ plugin → **check the git hook before reporting anything** (its own Bash
+- `harness.json` `version` ≥ plugin → **check the git hook before reporting anything** (its own Bash
   call; `git rev-parse --git-path hooks/pre-commit` resolves correctly in a worktree, where
   `.git` is a file and the literal path does not exist):
   ```bash
@@ -36,11 +37,11 @@ Compare the two versions **semver-numerically** (major.minor.patch, each compone
   not mean is fine.** `.git/hooks/` is not tracked, so a clone has every harness file and no
   hook: the authoritative gate layer is absent while the version says current. Reinstall it (step
   2's **Gate script**/**git hook** bullets), report that you did, and continue to the counters.
-  ⚠ Do not read the Hard rule "never downgrade → `config.version` ≥ plugin is a no-op" as
+  ⚠ Do not read the Hard rule "never downgrade → `harness.json` `version` ≥ plugin is a no-op" as
   covering this: that rule is about **not rewriting repo content backwards**, and reinstalling an
   absent hook writes nothing the repo owns. `_invariants.md`, `help.md` and `audit_readiness.md`
   all promise `/gld update` restores it after a clone — this bullet is where that promise is kept.
-  Then report the persona-skip counters (below), then "최신입니다 (v<config.version>)." Stop.
+  Then report the persona-skip counters (below), then "최신입니다 (v<harness.json version>)." Stop.
 - **Persona skip counters — reported on the version-parity branch above AND the version-gap
   branch below, even when the versions match.** Count by reason: non-`ko` · `local-only` ·
   migration pending · marker anomaly · mis-placed anchor · pre-run dirty · broken fence
@@ -102,21 +103,9 @@ Compare the two versions **semver-numerically** (major.minor.patch, each compone
     specialization heading. **pre-run dirty** → commit or stash those files and re-run.
     **broken fence (pre-existing)** → a human repairs the YAML frontmatter. **non-`ko`** and
     **`local-only`** need no action — they are steady states, not backlog.
-- `config.version` < plugin → show the gap and what an update brings (new/changed **commands** are already available plugin-side; the **repo-side** update refreshes gate scripts, the git pre-commit hook, settings hooks, the CLAUDE.md guild block, the label set, the config schema, and **role persona frontmatter + the persona marker region**). `--check` → stop here (nudge only). **`--check` reports the missing hook the parity branch above acts on, and stops** — `--check` changes nothing by definition, so it names the gap instead of closing it.
+- `harness.json` `version` < plugin → show the gap and what an update brings (new/changed **commands** are already available plugin-side; the **repo-side** update refreshes gate scripts, the git pre-commit hook, settings hooks, the CLAUDE.md guild block, the label set, the config schema, and **role persona frontmatter + the persona marker region**). `--check` → stop here (nudge only). **`--check` reports the missing hook the parity branch above acts on, and stops** — `--check` changes nothing by definition, so it names the gap instead of closing it.
 
 **2. Adopt central-owned repo artifacts (each shown + confirmed — INV1)**
-
-**0.102 ordering — the gate FIRST** (engine release, K3 user decision 3). When the installed plugin is 0.102 or later and `config.version` is below 0.102, adopt the **gate script** bullet below (with its two universal rule files and the commit-gate wiring) **before every other artifact**, then stop and tell the human, in `config.language`:
-1. commit those gate files and merge that commit into the default branch **before** running the engine on any Issue (`/gld dev`, `/gld sprint run`, `/gld batch`) — the engine's role commits run the gate **from `<base>`** with `GUILD_GATE_CONFIG` pointing at base's config, and only a base gate of 0.102 honours it;
-2. until base has it, a branch that changes `.claude/guild/config.json` `gates` still cannot ship: the engine stops before push (`developer wrote outside its scope — … gates`) — safe, but a person's stop each time.
-Then continue with the rest of step 2. If the gate-script update is skipped (a local extension pending migration), say plainly that the engine stays on that pre-push stop for every gates-touching branch.
-
-**0.102 config and habits** (additive, each confirmed):
-- **`engine`** → add the `config.engine` block with its defaults (`answer_associations`, `attended_confirm_interpretation: false`, `first_sprint_mode: "auto"`, `budget_usd_per_issue: 35.0`, `handoff_judge: "default"`, `dual_judge_rate: 0.10` (the §9.4-7 dual judgment — on from the first sprint; 10 % of the decision-group judge CALLS, each re-judged on another tier — sonnet→opus, opus→sonnet, haiku→sonnet — so the cost share is above 10 % where the second tier is opus), `effective.copy_ignored: []` — the engine's `guildcore/config.py` `ENGINE_DEFAULTS` is the list); keep every key already present. **`commands.test_one`** → absent: leave it absent and say the engine uses each runner's built-in single-test command (set it only for a runner the engine does not know).
-- **`sprint.stage_groups`** → **keep it** (a downgrade to 0.101.3 reads it — deleting it would make a rolled-back sprint ungrouped); say once that 0.102 ignores it (the engine has no leader session).
-- **Leader habits → judgment-group tags** (design §8.1, one time): list every habit line of `.claude/agents/leader.md` in a table — (a) the judgment group it belongs to, written as the prefix `- [J:<GROUP>] …` (KICKOFF · STAKES · EX-ARB · SPLIT · INTEGRATE · TEST · QA · HANDOFF …), (b) a habit that is now code or a config key → "config proposal" (name the key), (c) a retirement candidate — and apply **only the rows the human approves**. Never edit leader.md's template region. Until approved, an untagged habit reaches only KICKOFF and ESCALATE.
-- **Rollback reminder** → print one line: `rollback = the whole plugin version — first python3 <<SKILL_DIR>>/engine/gld_engine.py dev valve halt --all --now (runbook: <<SKILL_DIR>>/docs/engine-rollback.md)`.
-
 Before touching any persona, snapshot the pre-run dirty set once — its own Bash call:
 ```bash
 git status --porcelain -- .claude/agents/
@@ -153,7 +142,7 @@ Preserving local content throughout:
 - **Role persona frontmatter** (`.claude/agents/*.md`) → refresh the central keys
   `name` and `description` from the role's template; leave `model` and any other key
   untouched (they are LOCAL). Everything below the frontmatter is untouched here.
-  1. **Scope**: only roles that are BOTH in `config.json`'s `roles` AND have a central
+  1. **Scope**: only roles that are BOTH in `harness.json`'s `roles` AND have a central
      template under `<<SKILL_DIR>>/templates/agents/`. Report the rest as "local-only" (rendered in
      `config.language`) and skip. That is `n/a` for this repo,
      not a partial update: it does not block the `version` bump.
@@ -187,7 +176,7 @@ Preserving local content throughout:
   0. **Only when `config.language == "ko"`.** Otherwise the central region is Korean and
      re-translating it drifts unchanged lines — report the N-line gap and stop. That is
      `n/a` for this repo, not a partial update: it does not block the `version` bump.
-  1. **Scope**: only roles that are BOTH in `config.json`'s `roles` AND have a central
+  1. **Scope**: only roles that are BOTH in `harness.json`'s `roles` AND have a central
      template under `<<SKILL_DIR>>/templates/agents/`. Report the rest as "local-only" (rendered in
      `config.language`) and skip. That is `n/a` for this repo, not a partial update:
      it does not block the `version` bump.
@@ -312,8 +301,9 @@ Preserving local content throughout:
   ```
   ⚠ **`gh label list --json name` returns a FLAT array of `{"name": …}` objects** — not an object with a `.labels` field. Indexing it as `.labels[]` (the shape `gh issue view` uses, which is easy to reach for here) errors with `jq: error … Cannot index array with string` and exit 5, producing **no output at all** — which then reads as "no labels exist". Same gotcha as `atoms/audit_readiness.md` Group 4, which documents it against the real binary.
   Create only the names genuinely absent from that list, idempotently with `--force`. **The canonical set is `init.md` P2 §7's `gh label create` block** — read it rather than an enumeration held here, so a label added centrally (e.g. `guild:sprint`) reaches an existing repo through this step without a second edit. **Report the actual count** — "N개 중 M개 누락" from the read, never "전부 누락" inferred from an empty or failed query. Observed: an update run reported every `guild:*` label missing on a repo whose Issues were actively carrying `guild:done`/`guild:child`; a bad query is indistinguishable from an empty repo unless you look.
-- **Config** → add any **new** config keys with defaults, **preserving existing local values** (language, roles, commands, gate/automation dials). Bump `version` to the plugin version **only if every central-owned artifact above was actually adopted**.
-  - **`commands.vrt` / `visual` absent, or `visual` missing any key of `_handoff.md` Section L.0 (repo initialized before 0.88.0, or by an early 0.88.x that wrote a partial block)** — keep every key already present and detect only for the missing ones; a `null`/`[]` default would leave an existing visual test suite invisible to the test stage and the commit gate, so detect instead of defaulting: run `atoms/scan_repo.md` **Section 2 step 3b only** (visual regression detection — not the whole scan), show the human the detected command and the whole `visual` block (`_handoff.md` Section L.0 — with `runnable` and `env` spelled out), and write them **on confirm**. Declined, or nothing detected → write `"vrt": null` and `"visual": {"baselines": [], "tests": [], "matchers": [], "packages": [], "run_file": null, "config_files": [], "runnable": false, "env": null, "create": null}` so the keys exist and the next update does not ask again. On a confirmed detection, also **offer** (one confirm, additive — INV4) to append the one-line visual setup to `.claude/agents/tester.md` and `designer.md` "프로젝트 특화" (`{{VISUAL_TEST_SETUP}}`'s content) and the visual row to `docs/standards/verification.md`: those regions are local, so an update never writes them on its own, and without them a pre-0.88 repo's roles only see the setup through the stage prompts. A key that is already present — even `null` — is a local value: never re-detect over it. (Writing `visual` makes the gate's config guard ask once — expected: it is the setting that decides what the gate reports.)
+- **Config** → `.claude/guild/harness.json` **only** (`init.md` P1 schema). ⚠ Never write `config.json`: it is the engine's settings file, whose schema refuses every `harness.json` key (H13) — one such key stops the engine on every Issue. The engine's settings are brought up to date by a human through `init propose --compare` (`init.md` P2.9 step 0), never by this step (readiness T3 P9). Add any **new** `harness.json` keys with defaults, **preserving existing local values** (language, roles, commands, automation and sprint dials). Bump `version` to the plugin version **only if every central-owned artifact above was actually adopted**.
+  - **`commands.vrt` absent (repo initialized before 0.88.0)** — detect instead of defaulting: run `atoms/scan_repo.md` **Section 2 step 3b only** (visual regression detection — not the whole scan), show the human the detected command, and write `commands.vrt` **on confirm**. Declined, or nothing detected → write `"vrt": null` so the key exists and the next update does not ask again. A key that is already present — even `null` — is a local value: never re-detect over it. On a confirmed command, also **offer** (one confirm, additive — INV4) to append the one-line visual setup to `.claude/agents/tester.md` and `designer.md` "프로젝트 특화" (`{{VISUAL_TEST_SETUP}}`'s content) and the visual row to `docs/standards/verification.md`: those regions are local, so an update never writes them on its own.
+  - ⚠ **Write no `visual` block anywhere.** guild-plugin has none (`init.md` P1, D7): not in `harness.json`, and the engine's settings refuse the key. Step 3b's other findings (baselines, visual tests, matchers, comparison files) are shown to the human only — the engine already knows golden images and comparison files from its own path rules (`init.md` P2.9), and the PR body lists every rewritten image (시각 변경). A rule missing there is added by a human through `init propose --compare`.
   ⚠ **Persona skips are a separate counter, not a partial update.** Whatever the reason — non-`ko`
   (rule 0) · `local-only` (rule 1) · migration pending (rule 2) · **hired (rule 2's carve-out)** ·
   marker anomaly (rule 3b) ·
@@ -322,10 +312,10 @@ Preserving local content throughout:
   Report the counts and bump. Two exceptions are real failures that DO block it: a frontmatter
   break *this run caused*, and a post-write marker check that fails in step 4. Each gets its own
   counter.
-  ⚠ **A partial update must NOT bump `version`.** `config.version` is a single scalar standing for the whole harness, so stamping it after skipping a component (most often the gate script, when a local extension could not be migrated) makes the gap **invisible**: the next `/gld update` compares versions, reports "최신입니다", and stops — the deferred work is never revisited, and the repo reads as current while running an old enforcement layer. Leave `version` at its old value, state plainly which component is behind and why, and say that re-running `update` will re-offer it. Re-offering the already-adopted parts is idempotent and harmless; losing track of the skipped one is not.
+  ⚠ **A partial update must NOT bump `version`.** `harness.json` `version` is a single scalar standing for the whole harness, so stamping it after skipping a component (most often the gate script, when a local extension could not be migrated) makes the gap **invisible**: the next `/gld update` compares versions, reports "최신입니다", and stops — the deferred work is never revisited, and the repo reads as current while running an old enforcement layer. Leave `version` at its old value, state plainly which component is behind and why, and say that re-running `update` will re-offer it. Re-offering the already-adopted parts is idempotent and harmless; losing track of the skipped one is not.
 - **Linter scope** → re-run `init` step 0b's check. `update` **rewrites `gate_precommit.py`**, so a plugin release that adds a new secret or skip pattern adds new vocabulary to a file the repo's spell checker may lint — and the human then discovers it as a failed commit, not as an update result. If Guild-managed paths are still not excluded from a linter that would see them, propose the exclusion and confirm (INV1). This is a check every update must repeat, not a one-time `init` concern.
 
-**3. PRESERVE — never touched** (local evolution, INV4): `.claude/agents/*` **except `name`, `description` when `config.language == "ko"`, and the `persona:start`~`end` region when `config.language == "ko"`** · `.claude/guild/knowledge/*` (⑥) · `docs/standards/*` (②) · `.claude/guild/overlay/*` (flow overrides) · `.claude/guild/evolution-log.md` + `.claude/guild/evolution-log.archive.md` (⑤) · `.claude/guild/gates/rules/boundaries.md` (locally grown by `/gld evolve` — `- forbid:` rules, `status: draft`/`confirmed`) · `.claude/guild/gates/dismissed.md` (human-curated accepted-risk registry) · `.claude/guild/gates/scripts/local/*` (**repo-local gate extensions** — the supported place for a check the central script doesn't have; central never writes there) · `.claude/guild/gates/rules/*.md` other than `secrets.md`/`verification.md` (a rule file the central script doesn't read belongs to a local extension) · `.claude/guild/gates/findings.json` and `.claude/guild/memory/*` (**runtime state, not structure** — the gate rewrites `findings.json` on its next run and the memory tier is gitignored episodic data; update neither refreshes nor deletes them).
+**3. PRESERVE — never touched** (local evolution, INV4): `.claude/agents/*` **except `name`, `description` when `config.language == "ko"`, and the `persona:start`~`end` region when `config.language == "ko"`** · `.claude/guild/knowledge/*` (⑥) · `docs/standards/*` (②) · `.claude/guild/overlay/*` (flow overrides) · `.claude/guild/evolution-log.md` + `.claude/guild/evolution-log.archive.md` (⑤) · `.claude/guild/gates/rules/boundaries.md` (locally grown by `/gld evolve` — `- forbid:` rules, `status: draft`/`confirmed`) · `.claude/guild/gates/dismissed.md` (human-curated accepted-risk registry) · `.claude/guild/gates/scripts/local/*` (**repo-local gate extensions** — the supported place for a check the central script doesn't have; central never writes there) · `.claude/guild/gates/rules/*.md` other than `secrets.md`/`verification.md` (a rule file the central script doesn't read belongs to a local extension) · `.claude/guild/gates/findings.json` and `.claude/guild/memory/*` (**runtime state, not structure** — the gate rewrites `findings.json` on its next run and the memory tier is gitignored episodic data; update neither refreshes nor deletes them). <!-- promote: self; rename-exception: K2 shared knowledge (the path is a global literal of tools/promote) -->
 
 **4. Verify it actually landed — before reporting anything** (its own Bash calls; do not skip, and do not report from what you *intended* to write):
 
@@ -333,12 +323,12 @@ Preserving local content throughout:
 git status --short
 ```
 ```bash
-jq -r .version .claude/guild/config.json
+jq -r .version .claude/guild/harness.json
 ```
 
-- **Working tree unchanged AND `config.version` still the old value** → **nothing was applied.** Say exactly that and why (the human declined at the confirm gate · the run was cancelled · every artifact was already current). Do **not** report success. Then state what to run to actually apply it.
-- **`config.version` still the old value but files did change** → a partial apply: name which artifacts landed and which did not, and that the version was deliberately not bumped. This is a state to surface, not to smooth over.
-- **`config.version` == plugin version and the tree shows the expected changes** → applied; report normally.
+- **Working tree unchanged AND `harness.json` `version` still the old value** → **nothing was applied.** Say exactly that and why (the human declined at the confirm gate · the run was cancelled · every artifact was already current). Do **not** report success. Then state what to run to actually apply it.
+- **`harness.json` `version` still the old value but files did change** → a partial apply: name which artifacts landed and which did not, and that the version was deliberately not bumped. This is a state to surface, not to smooth over.
+- **`harness.json` `version` == plugin version and the tree shows the expected changes** → applied; report normally.
 
 **Persona marker check — only for files whose marker region this run replaced.** The decisive
 one: the first `^## ` after `persona:end` must still be the project-specialization heading. That
@@ -422,10 +412,10 @@ On the **managed** path, also confirm the gate is registered in the manager's co
 ## Hard rules
 - **Preserve local evolution** (INV4 additive/merge) — agents (**except `name`, and `description`/the marker region when `config.language == "ko"`**) · knowledge · standards · overlay · ledger are LOCAL-owned and never overwritten. Only central-owned *structure* is refreshed.
 - **Confirm structural changes** before applying (INV1); leave them uncommitted for the human to review + commit (reversible, INV3).
-- **Never downgrade** (`config.version` ≥ plugin → no-op **for repo content**). ⚠ Reinstalling an
+- **Never downgrade** (`harness.json` `version` ≥ plugin → no-op **for repo content**). ⚠ Reinstalling an
   absent git hook is not a downgrade and is not content: `.git/hooks/` is untracked, so a fresh
   clone is current *and* ungated. Step 1's parity branch handles it.
-- **Never claim an update that did not happen.** Report from step 4's verification of the working tree and `config.version`, never from intent. A declined or cancelled confirm gate is a normal outcome — say so plainly; an unchanged repo reported as "적용됐다" is worse than an obvious failure, because the human then believes the enforcement layer is current when it is still the old one.
+- **Never claim an update that did not happen.** Report from step 4's verification of the working tree and `harness.json` `version`, never from intent. A declined or cancelled confirm gate is a normal outcome — say so plainly; an unchanged repo reported as "적용됐다" is worse than an obvious failure, because the human then believes the enforcement layer is current when it is still the old one.
 
 ---
 
@@ -456,7 +446,7 @@ line was left inside the region. Both are what the checks below are for.
 
 ### 1. Classify each role — T1 (mechanical) or T2 (needs a human)
 
-**Scope first**: only roles in `config.json`'s `roles` that also have a central template under
+**Scope first**: only roles in `harness.json`'s `roles` that also have a central template under
 `<<SKILL_DIR>>/templates/agents/`. Report the rest as `local-only` and skip — a file `evolve`
 file with no central template has no central region to mark off, and wrapping it in one would tell
 the next `update` to overwrite local prose. ⚠ The test is **template existence**, not "did `evolve`
@@ -636,7 +626,7 @@ to a human.
 ### 5. Leave it uncommitted
 
 Report per role: classification, what moved (T2), check results. The human reviews and commits —
-per role is fine, and **preferred for T2**. Do **not** bump `config.version`; this mode changes no
+per role is fine, and **preferred for T2**. Do **not** bump `harness.json` `version`; this mode changes no
 central-owned artifact.
 
 ⚠ `evolve` refuses to run against a dirty tree, so migration output sitting in the working tree

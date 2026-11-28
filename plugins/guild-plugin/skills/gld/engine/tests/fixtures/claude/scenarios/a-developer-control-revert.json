@@ -1,0 +1,65 @@
+{
+  "format": 1,
+  "description": "P3-A C6: developer changes CLAUDE.md in one commit and restores the base content in the next (cumulative → pass).",
+  "stream": "../f2/r4.jsonl",
+  "init_from_argv": true,
+  "structured_output": {
+    "status": "done",
+    "outputs": [],
+    "requests": [],
+    "blocked_by": null,
+    "discoveries": [],
+    "note": "fixture"
+  },
+  "actions": [
+    {
+      "op": "write",
+      "path": "CLAUDE.md",
+      "content": "# changed\n"
+    },
+    {
+      "op": "git",
+      "args": [
+        "commit",
+        "-q",
+        "-am",
+        "change"
+      ]
+    },
+    {
+      "op": "write",
+      "path": "CLAUDE.md",
+      "content": "# repo rules\n"
+    },
+    {
+      "op": "git",
+      "args": [
+        "commit",
+        "-q",
+        "-am",
+        "restore"
+      ]
+    },
+    {
+      "op": "write",
+      "path": "src/a.py",
+      "content": "x = 3\n"
+    },
+    {
+      "op": "git",
+      "args": [
+        "add",
+        "-A"
+      ]
+    },
+    {
+      "op": "git",
+      "args": [
+        "commit",
+        "-q",
+        "-m",
+        "work"
+      ]
+    }
+  ]
+}

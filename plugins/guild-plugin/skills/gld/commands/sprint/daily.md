@@ -10,14 +10,56 @@ subcommand routes to.
 > **Bash**: `<<SKILL_DIR>>/commands/atoms/_bash_rules.md`. Stage derivation: `_handoff.md`
 > Section A (**list form**). Membership · order · base: `_sprint_dag.md`. Render conventions
 > reused from `monitoring.md` (actionable-first).
-> **Checkout**: never move the human's branch or history — `_checkout.md` (a pull/sync/switch request: show the commands and which commits change hash, then ask).
 > **Output language**: `config.language`; counts, paths, `#N` and machine tokens stay ASCII.
+
+> ⚠ **Experimental engine (stage 4) — read this before the process below.** The sections below were
+> written for the 0.98.7 generated bash supervisor. In this edition `sprint run` is the engine's
+> supervisor (`commands/engine/sprint.md`), and where this box and the text below disagree, **this box wins**:
+> - **Facts first**: `python3 -I <<SKILL_DIR>>/engine/engine.py sprint status --repo OWNER/REPO --tracker T --json`
+>   is the original (`sprint.json` + each member's `state.json`); the `<!-- guild:sprint:run -->` marker is its copy.
+>   The marker's keys are `host` `pid` `state` `started` `heartbeat` `window` `completion` `run` `allow_red_base`
+>   `members` — no `board_*` key, no per-issue retries, no ledger, no `.sprint-logs/`.
+> - **`state` tokens** (`codes.SprintState`): `starting` · `checking-base` · `running` · `waiting-for-window` ·
+>   `waiting-for-quota` · `finished` · `halted:<halt>` with `<halt>` ∈ `base-red` · `boundary` · `marker-unwritable` ·
+>   `plan-hash-mismatch` · `other-host` · `signal` · `engine-error`. The 0.98.7 shapes listed below
+>   (`rate-limited-*`, `installing-deps`, `waiting-for-window-<HHMM>`, `halted:sigTERM` …) are never written.
+> - **Is it alive?** `sprint status … --json` → `running` (the sprint lock: pid + process start time). Do not use the
+>   `ps … .gld-sprint-` table below for an engine run: its pid is a `python3 … engine.py sprint run` process, so the
+>   table would say *"pid 재사용"* for a live supervisor.
+> - **How to stop it**: `python3 -I <<SKILL_DIR>>/engine/engine.py sprint stop --repo OWNER/REPO --tracker T` (TERM —
+>   a running member is finished first).
+> - **Done** is the engine's fact, not the `guild:done` label (the engine never writes it): a member is done when its
+>   `state.json` has no stop, every step done and a PR. `completion` is `{outcome: [issue …]}` in the marker, and
+>   `engine.py sprint report --repo OWNER/REPO --tracker T --json` has costs, stops and kept worktrees.
+> - **The board**: the engine's supervisor projects nothing (U5); render the board line as *"보드 투영 없음 (실험판 엔진)"*.
+> - **▎엔진 결함 의심 — the only place engine incidents are shown** (readiness R1). The same `sprint status … --json`
+>   output has `incidents` (a list) and `incidents_problem` (null or a text). **Render the list as it is — daily judges
+>   nothing**: no reordering, no merging, no guess at a cause, and never open the folder it names (it holds copied session
+>   transcripts — for the human, not this conversation). The engine made one entry per incident signature:
+>   - `[]` → no section at all. `incidents_problem` set → one line `▎엔진 결함 의심 — 목록을 읽지 못했습니다(<incidents_problem>)`.
+>   - Otherwise a header `▎엔진 결함 의심 <N>건 (결함 <kind=defect 수> · 의심 <kind=suspect 수>)`, then per entry two lines:
+>     `  [결함|의심] <signature> — <count>회 · 최근 <last.repo>#<last.issue> <last.step> (<last.at 의 MM-DD>)<표시>` and
+>     `         <path>`. No `last.issue` (a supervisor error) → `<last.repo> 스프린트 #<last.tracker>`.
+>     `<표시>` from `fix_status`: `unfixed` → nothing · `fixed` → ` · 고쳐짐(<fixes 를 , 로>) — 다음 retro 가 정리` ·
+>     `recurred` → ` · ⚠ 재발(<fixes> 수정 뒤)`.
+>   - An entry with `problem` (an unreadable incident file) → `  [?] <slug> — 읽을 수 없음: <problem>` and its `path`.
+>   - `defect` = the stop code itself is engine-caused (A13); `suspect` = a leader escalate with `env-problem` or a leader
+>     that could not answer — say *"의심"* exactly, never *"결함"*, for those. Place the section just above **▎진행**.
+>     Nothing here asks the human to act; removal is `/gld sprint retro`'s (fixed ones) — say nothing else about it.
+> - **`failures.jsonl` is never this engine's** (readiness T3 P8). The engine writes no `.sprint-logs/`. When
+>   `sprint status … --json` has a `sprint` (not `null` — the engine ran this tracker here), **skip step 4**: a
+>   `.sprint-logs/<tracker>/failures.jsonl` beside it was written by the 0.98.7 supervisor before the engine took the
+>   tracker over (a sprint continued from 0.98.7, `run.md` Phase 1 step 3b), and its events are not this sprint's
+>   failures or blocks — never render, count or quote them. One line instead, only when the file exists (`ls` it):
+>   *"0.98.7 감독 기록(.sprint-logs/<tracker>/failures.jsonl)은 엔진 실행 전의 것이라 보지 않았습니다"*. Why a member
+>   failed or waits is its `engine.stop` in the same output (`sprint report` has the detail). `sprint` is `null` →
+>   step 4 as written (a tracker only 0.98.7 ran).
 
 ---
 
 ## Process
 
-**0. Preflight** (each its own Bash call) — read `config.json` (`language`, `sprint.*`); resolve
+**0. Preflight** (each its own Bash call) — read `.claude/guild/harness.json` (`language`, `sprint.*`); resolve
 `{owner}/{repo}` (`_handoff.md` Section F).
 
 **1. Find the sprint.**
@@ -185,9 +227,10 @@ Each line annotates that member's PR row: `needs-sync` → *"⚠ 하단 머지�
 `ambiguous` → under 의존성 차단 with the reason; `skipped <reason>` → that reason (`not-done`: sync after the spine finishes); `error <message>` → the message, verbatim. No output →
 nothing to add. A non-zero exit → one line *"스택 동기화 상태 확인 불가 — <stderr>"*, never a guess.
 
-**4. Failure reasons come from `failures.jsonl`, not from the console.**
+**4. Failure reasons come from `failures.jsonl`, not from the console.** ⚠ **Not for a tracker the
+engine ran** — the box at the top: skip this step, the file is 0.98.7's (readiness T3 P8).
 `<repo>/.claude/guild/.sprint-logs/<tracker>/failures.jsonl` — one JSON object per line:
-`{at, tracker, run, issue, class, detail}` (+ `class_exact` — see below). Read it with its own Bash call:
+`{at, tracker, run, issue, class, detail}`. Read it with its own Bash call:
 ```bash
 tail -50 .claude/guild/.sprint-logs/<tracker>/failures.jsonl
 ```
@@ -199,16 +242,6 @@ The classes the supervisor writes — **this list is the code's, verbatim**:
 | `dependency-blocked` · `base-unresolved` · `branch-ambiguous` · `account-rate-limited` | **차단** — 의존이 아직 랜딩되지 않았거나, 후보 브랜치가 둘 이상이거나, 계정 한도의 리셋이 4시간 넘게 남았다. 실패로 렌더하지 말 것 — **재실행이 큐를 이어받는다** |
 | `branch-assumed` | **정보** — 실패도 차단도 아니다. 이슈 번호가 맞는 브랜치가 하나뿐이어서 그것으로 재개했다는 기록. 소유를 증명한 것은 아니므로 사람이 확인할 수 있게 남긴다 |
 | `split-stalled` | **미완**(실패로 집계) — 분할 부모의 자식 오케스트레이션이 전진을 멈췄다 |
-| `create-settle-wait` · `create-unsettled` | **대기 / 차단**(0.102) — 엔진의 이슈 생성 착지가 불명(종료 75, `reason: create-settle` — rate limit 아님). `create-settle-wait` 는 settle 시각까지의 제자리 대기 기록(자체 한도 6회), `create-unsettled` 는 6회가 지나도 불명이라 needs-human 으로 남김. 실패로 렌더하지 말 것, `account-rate-limited` 로도 렌더하지 말 것 — **재실행이 이어받는다** |
-| `gh-service-wait` · `gh-unavailable` | **대기 / 차단**(0.102) — GitHub 장애로 엔진이 `env: service` pause 조차 쓰지 못함(종료 75, `reason: gh-service`). 자체 한도 6회 대기 후 `gh-unavailable` 로 남김. 실패가 아니다(하류 차단 없음) — **재실행이 이어받는다** |
-| `busy` · `busy-skipped` | **미처리**(0.102) — 다른 엔진 실행이 그 이슈를 잡고 있었다(종료 4). `busy` 는 제자리 대기 기록, `busy-skipped` 는 두 번 기다려도 잡혀 있어 이번 실행에서 건너뜀. 실패도 차단도 아니다 — **재실행이 이어받는다** |
-
-⚠ **`class_exact` 가 있으면 그것이 class 다**(0.102, K6 사용자 결정 2): 0.102 감독기는 0.101.3 이 모르는 class 를 0.101.3 이 아는
-가장 가까운 class 로 접어 `class` 에 쓰고(`create-settle-wait`·`gh-service-wait` → `busy`, `create-unsettled`·`gh-unavailable` →
-`busy-skipped`) 정확한 class 를 `class_exact` 에 남긴다 — 롤백한 0.101.3 도 실패로 오독하지 않게. 렌더는 `class_exact` 로.
-
-이 목록 밖의 class 두 개는 더 새 Guild(0.102+)의 감독기가 쓴다 — 버전을 내린 레포의 로그에 남아 있을 수 있다:
-`busy`·`busy-skipped` = **미처리**(그 이슈를 다른 실행이 잡고 있어 건너뜀). 실패로 렌더하지 말 것 — 다음 실행에서 이어진다.
 
 ⚠ `base-decision-failed`와 `base-unresolved`는 **다른 일**이다. 앞은 base 결정 자체가 실패한
 것(입력이 깨졌거나 출력을 파싱할 수 없다 — 의존에 대해 아는 것이 없으므로 하류가 추측 위에
@@ -396,6 +429,12 @@ Sprint #99 — 결제 흐름 안정화      (시작 3일 전 · state: rate-limi
   issue-105  미추적 문서만 있음 (tech-writer ADR) — 알려진 갭.
              커밋하거나 버린 뒤 `git worktree remove` 하십시오
 
+▎엔진 결함 의심 2건 (결함 1 · 의심 1)        ← 엔진 실행만 (`sprint status --json` 의 `incidents`)
+  [결함] engine-error @ mutation._control — 1회 · 최근 acme/app#106 done-gate (11-26)
+         ~/.gld/incidents/engine-error-mutation._control-3f1c2a9b
+  [의심] escalate:env-problem @ done-gate — 2회 · 최근 acme/app#103 done-gate (11-26) · 고쳐짐(E1, E2) — 다음 retro 가 정리
+         ~/.gld/incidents/escalate-env-problem-done-gate-8d2e41c0
+
 ▎진행
   완료 3 / 7 · 지금 #105 (test) · 재시도 #105=1
   run 종료: 아직 (큐 2)   ·   스프린트 종료: 아직 (미결 PR 3)
@@ -442,24 +481,14 @@ Sprint #99 — 결제 흐름 안정화      (시작 3일 전 · state: rate-limi
   as a dead run. ⚠ Render the `state` token as the supervisor writes it and translate for the
   human beside it — the shapes are `running` · `installing-deps` ·
   `rate-limited-until-<epoch-seconds>` · `rate-limited-remaining-<n>s` ·
-  `create-settle-until-<epoch-seconds>` · `create-settle-remaining-<n>s` (0.102 — an Issue create's landing is
-  unknown and the engine re-checks it after its settle time; **not** a rate limit — say *"이슈 생성 확인 대기 — 예상 재개 14:20"*) ·
-  `gh-service-until-<epoch-seconds>` · `gh-service-remaining-<n>s` (0.102 — GitHub unavailable; say *"GitHub 장애 대기 — 예상 재개 14:20"*) ·
   **`waiting-for-window-<HHMM>`** · `finished` · `halted:<reason>` (ASCII, `_handoff.md`
   Section K). `rate-limited-until-1790000000` becomes *"rate-limited — 예상 재개 14:20"*;
   `waiting-for-window-2200` becomes *"창 밖 대기 중 — 22:00에 재개"* (the `HHMM` in the token
   **is** the next window opening); do **not** invent a shape the supervisor never writes.
   ⚠ **`halted:<reason>`**: `interrupted` · `window-invalid` · `marker-unwritable` ·
-  `container-lost` · `sigTERM` · `sigHUP` · `plan-hash-mismatch` · (0.102, the engine) `engine-kill-switch` ·
-  `plugin-version-changed` · `engine-gh-auth` · `engine-env-<reason>` · `engine-env-missing`. `halted:marker-unwritable`
+  `container-lost` · `sigTERM` · `sigHUP` · `plan-hash-mismatch`. `halted:marker-unwritable`
   is the one whose reason may exist **only** in `.sprint-logs/<tracker>/dag/ledger.json` —
   the marker write is what failed.
-  ⚠ **0.101.3 folds (K6 user decision 2)**: a 0.102 supervisor writes `state` in a form 0.101.3 documents and the
-  precise token beside it — `halt_reason` (+ `halt_note`, the action) for a halted state (`engine-gh-auth` →
-  `halted:marker-unwritable`; `engine-env-<reason>` is never folded — 0.101.3 has a wildcard row for it — but carries
-  `halt_note` too),
-  `wait_reason` (`create-settle` / `gh-service`) for a `rate-limited-until-<epoch>` / `-remaining-<n>s` state. Read
-  those keys first: `halted:<halt_reason>` and the `create-settle` / `gh-service` wording above are what to render.
 - **How to stop it.** ⚠ For any live state, print the marker's `pid` with the command:
   *"중단: `kill <pid>` — 대기 중이면 최대 60초, 멤버 작업 중이면 그 멤버가 끝난 뒤에 멈춥니다.
   (`kill -9` 는 쓰지 마십시오 — 카드가 `In progress` 에 남습니다)"*. Ctrl-C cannot work: the

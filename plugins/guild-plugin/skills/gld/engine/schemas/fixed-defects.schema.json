@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "gld/fixed-defects",
+  "title": "The engine defects this engine has fixed (readiness R1)",
+  "description": "engine/data/fixed-defects.json, shipped with the engine code it describes. Retro (`incidents prune`) removes an incident whose every occurrence happened on an engine that did not have one of its signature's entries yet. Every entry needs a reproduction test that declares it (@fixes_defect, tests/test_fixed_defects.py); several entries may share one signature.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["format", "defects"],
+  "properties": {
+    "format": {"const": 1},
+    "defects": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "signature", "kind", "fixed_in", "summary", "appeared_as"],
+        "properties": {
+          "id": {"type": "string", "pattern": "^[A-Z][A-Z0-9]*[0-9]+$"},
+          "signature": {"type": "string", "pattern": "^[a-z0-9][a-z0-9:-]* @ [A-Za-z0-9_.][A-Za-z0-9_./-]*$"},
+          "kind": {"enum": ["defect", "suspect", "silent"], "description": "silent = it never stopped anything, so no incident can have its signature (kept for completeness)."},
+          "fixed_in": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["version", "commit"],
+            "properties": {
+              "version": {"type": "string", "minLength": 1},
+              "commit": {"anyOf": [{"type": "null"}, {"type": "string", "pattern": "^[0-9a-f]{7,40}( [0-9a-f]{7,40})*$"}], "description": "The fixing commit(s) when known — a commit cannot name itself, so it is filled later."}
+            }
+          },
+          "summary": {"type": "string", "minLength": 1, "maxLength": 300},
+          "appeared_as": {"type": "string", "minLength": 1, "maxLength": 500, "description": "The stop (or its absence) it showed as."}
+        }
+      }
+    }
+  }
+}

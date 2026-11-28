@@ -1,0 +1,93 @@
+{
+  "fill": {
+    "{answers}": [
+      "plan",
+      "rerun",
+      "close-as-decided",
+      "escalate"
+    ],
+    "{rerun_steps}": [
+      "analyze"
+    ],
+    "{human_answers}": [
+      "plan",
+      "rerun",
+      "close-as-decided",
+      "escalate"
+    ],
+    "{human_rerun_steps}": [
+      "analyze"
+    ],
+    "{requirement_rows}": [
+      "R1",
+      "R2"
+    ],
+    "{templates}": [
+      "bug"
+    ],
+    "{catalog_steps}": [
+      "ux-review",
+      "security-review",
+      "i18n-review"
+    ],
+    "{plan_role_steps}": [
+      "test-cases",
+      "diagnose",
+      "reproduce",
+      "fix",
+      "review-design",
+      "review-tests",
+      "review-audit",
+      "qa"
+    ],
+    "{models}": [
+      "opus",
+      "sonnet",
+      "haiku"
+    ],
+    "{efforts}": [
+      "low",
+      "medium",
+      "high",
+      "xhigh"
+    ]
+  },
+  "answer": {
+    "answer": "plan",
+    "reason": "fits-template",
+    "step": null,
+    "note": "A bug with a widget-test reproduction.",
+    "recommendation": null,
+    "requirements": [
+      {
+        "row": "R1",
+        "covered": true
+      },
+      {
+        "row": "R2",
+        "covered": true
+      }
+    ],
+    "missing_requirements": [],
+    "plan": {
+      "template": "bug",
+      "adjust": [
+        {
+          "op": "add",
+          "step": "i18n-review",
+          "trigger": "user-facing-text",
+          "note": "three languages"
+        }
+      ],
+      "models": [
+        {
+          "step": "fix",
+          "model": "opus",
+          "effort": "high"
+        }
+      ],
+      "new_template_candidate": false
+    },
+    "close": null
+  }
+}

@@ -12,7 +12,6 @@ no close, no cleanup) · `--cleanup <tracker>` (Phase 7 alone, for a sprint alre
 > `--body-file`. Membership · order · base: `_sprint_dag.md`. Stage derivation: `_handoff.md`
 > Section A (**list form**). Termination axes: `sprint/daily.md` step 6 — **the same two**, do not
 > invent a third. Growth loop: `commands/evolve.md`.
-> **Checkout**: never move the human's branch or history — `_checkout.md` (a pull/sync/switch request: show the commands and which commits change hash, then ask).
 > **Output language**: `config.language` (`_handoff.md` Section K); counts, paths, `#N` and
 > machine tokens stay ASCII.
 
@@ -48,38 +47,36 @@ Each its own Bash call.
      exists because Phase 7 runs after the close, so a cleanup that was declined, interrupted or
      refused by a permission prompt has no other way back.
    ⚠ **This is step 0 for the same reason `_execute_spine.md` Step 0 detects the mode first: the
-   branches below depend on it.** Here those branches are *writing `config.json`*, *running an
+   branches below depend on it.** Here those branches are *writing `harness.json`*, *running an
    evolve that commits*, *closing the Issue*, and *deleting worktrees and branches*. Reading this
    file top-to-bottom and meeting the `--dry-run` rule only at the end — after all four — is how
    a dry run stops being dry. Every
    phase from 4 on names DRY explicitly; if you reach one of them without having done step 0,
    go back and do it.
-1. **Guild initialized?** `ls .claude/guild/config.json` — absent → `FAIL: Guild not initialized (run /gld init first)`. This command needs `config.language` and writes `config.sprint`.
+1. **Guild initialized?** `ls .claude/guild/harness.json` — absent → `FAIL: Guild not initialized (run /gld init first)`. This command needs `config.language` and writes `config.sprint`.
 2. **Find the sprint.**
    ```bash
-   gh issue list --label guild:sprint --state open --limit 20 --json number,title,body,createdAt --jq '{count: length, sprints: [.[] | {number, title}], body: (if length == 1 then .[0].body else null end), createdAt: (if length == 1 then .[0].createdAt else null end)}'
+   gh issue list --label guild:sprint --state open --limit 20 --json number,title,body --jq '{count: length, sprints: [.[] | {number, title}], body: (if length == 1 then .[0].body else null end)}'
    ```
    ⚠ **The body comes back only when there is exactly one open sprint** — which is the normal
    case, and then nothing extra is needed. With two or more, `body` is `null` on purpose: you
    have to ask which one anyway, and pulling every candidate's member table to discard all but
    one is the same waste Phase 1 was making. Fetch the chosen tracker's body **after** the human
-   picks — that call was going to happen regardless, so this adds no turn in either branch
-   (`gh issue view <tracker> --json body,createdAt` — `createdAt` is Phase 2's line between this
-   sprint's children and an earlier one's).
+   picks — that call was going to happen regardless, so this adds no turn in either branch.
    - None → `OK: no open sprint`. ⚠ Suggest `/gld sprint plan` (and `--cleanup <tracker>` for
      a closed sprint whose worktrees, branches or leftover labels are still around — it also cleans the labels of members that merged, Phase 6 step 0), and say that a **closed** tracker is a finished sprint — a retro is not re-runnable **once it finishes**, because Phase 6 step 3 closes the Issue and `<!-- guild:sprint:retro -->` is append-only (`_handoff.md` Section B). ⚠ A retro that died **partway** is a different case and IS re-runnable: Phase 4 replaces its own `history` entry rather than appending, and Phase 6 step 2 checks for its own comment before adding one. (v10 said "step 5", which this file has never had.)
    - Two or more → list them and ask which. Never retro one speculatively.
 3. **Resolve `{owner}/{repo}`** once (`_handoff.md` Section F); hold the literal value.
 4. **Is a run still in flight?** From the `<!-- guild:sprint:run -->` comment: `state` and `heartbeat`.
-   - `state` is `running` / `installing-deps` / `rate-limited-*` / `waiting-for-window-*` **and** the heartbeat is under ~15 minutes old → **stop**: *"`sprint run`이 아직 진행 중입니다(하트비트 <n>분 전). 끝난 뒤 회고하세요 — 상태는 `/gld sprint daily`."* Return `FAIL: run still in flight`.
-     - ⚠ **`waiting-for-window-<HHMM>` is a live run**, not a stalled one, and it can stay that way for **days**. Say why and for how long: *"#<tracker> 의 감독자가 창 밖이라 대기 중입니다 — 다음 창 <HH:MM>. 중단하시려면 `kill <pid>` 후 다시 부르십시오."* Refusing here is correct; refusing without the reason looks like a bug.
+   - `state` is `running` / `starting` / `checking-base` / `waiting-for-quota` / `waiting-for-window` / `installing-deps` / `rate-limited-*` / `waiting-for-window-*` (the last three: an older tracker's) **and** the heartbeat is under ~15 minutes old → **stop**: *"`sprint run`이 아직 진행 중입니다(하트비트 <n>분 전). 끝난 뒤 회고하세요 — 상태는 `/gld sprint daily`."* Return `FAIL: run still in flight`.
+     - ⚠ **`waiting-for-window-<HHMM>` is a live run** (the engine writes `waiting-for-window`), not a stalled one, and it can stay that way for **days**. Say why and for how long: *"#<tracker> 의 감독자가 창 밖이라 대기 중입니다 — 다음 창 <HH:MM>. 중단하시려면 `engine.py sprint stop` 후 다시 부르십시오."* Refusing here is correct; refusing without the reason looks like a bug.
    - Same states but the heartbeat is **stale** → say so plainly (*"마지막 하트비트가 <n>분 전입니다 — run이 중단된 것으로 보입니다"*) and ask whether to retro anyway. Do not decide this alone: a stale heartbeat and a dead process look identical from here, and retro'ing a live run would close the container out from under it.
    - `finished` / `halted:*` / no marker at all → proceed.
 5. **Is the checkout the default branch?** (0.98.7 — before anything is written; **CLEANUP skips this step**.) Each its own Bash call:
    `gh repo view <owner>/<repo> --json defaultBranchRef --jq .defaultBranchRef.name` → `<d>` (Phase 4 step 6 reuses this value — the same read is not made twice; the repo is positional);
    `git branch --show-current` → `<b>` (empty = detached).
    `<b>` ≠ `<d>` → **stop before writing anything and ask** — these two options and no other:
-   `체크아웃이 기본 브랜치 <d> 가 아닙니다(<b|detached>). 회고 기록(config.json)은 <d> 에서만 커밋되고, 성장 단계(evolve)는 지금 브랜치를 분석해 거기에 커밋하게 됩니다. ① 중단 — 직접 <d> 로 옮기신 뒤(git switch <d>) /gld sprint retro 를 다시 실행(권장 · 아직 아무것도 쓰지 않았습니다) ② 이대로 진행 — 측정·기록·종료는 하고 config.json 은 커밋하지 않으며 성장 단계는 보류`
+   `체크아웃이 기본 브랜치 <d> 가 아닙니다(<b|detached>). 회고 기록(harness.json)은 <d> 에서만 커밋되고, 성장 단계(evolve)는 지금 브랜치를 분석해 거기에 커밋하게 됩니다. ① 중단 — 직접 <d> 로 옮기신 뒤(git switch <d>) /gld sprint retro 를 다시 실행(권장 · 아직 아무것도 쓰지 않았습니다) ② 이대로 진행 — 측정·기록·종료는 하고 harness.json 은 커밋하지 않으며 성장 단계는 보류`
    **Never an option that moves the branch for the human** ("제가 옮기겠습니다" and the like — measured #1839: `main 으로 이동 후 진행 (Recommended)` became `git checkout main` + `git merge --ff-only`; the Hard rules below).
    - ① → Return `OK: retro not started — checkout <b> is not <d>` — nothing was written, so the re-run is safe (the same ground as step 2's "partway").
    - ② → mark **HELD-EVOLVE** and go on: Phase 4 step 6 commits nothing, Phase 5 is held.
@@ -122,7 +119,7 @@ gh issue list --state all --search '"Parent Issue: #<m>" in:body' --limit 200 --
 ```
 and add what it finds. ⚠ **That search fails or its first line equals 200 → stop**, as for a
 PR list whose 완전성 판정 fails: `FAIL: could not find every child of #<m> — the metrics would be wrong and
-Phase 4 would write them into config.json` (CLEANUP: Phase 0 step 0 instead).
+Phase 4 would write them into harness.json` (CLEANUP: Phase 0 step 0 instead).
 
 **Then the PRs** — filtered to the members **and** the children of S (`$m` and the branch
 pattern both hold all of those numbers) and to closing references **in this repo**, stream form:
@@ -152,7 +149,7 @@ Measured on `dev-yakuza/one-man-company`: **70 of 200 PRs (35%) carry no closing
 all**, and several of them are member work — e.g. `#398 fix/153-assignment-header-semantics`,
 MERGED, for member #153. A reference-only filter found **3** of that sprint's member PRs; adding
 the branch test found **4**. The missing one reads as *"#153 never merged"*, 약속 이행률 drops,
-and **Phase 4 writes that number into `config.json`** — the exact failure this phase spends a
+and **Phase 4 writes that number into `harness.json`** — the exact failure this phase spends a
 paragraph warning about, arriving through the filter instead of through the limit.
 
 ⚠ **`// ""` on `headRefName` is not decoration either** — a null there makes `jq` exit with
@@ -169,7 +166,7 @@ the PR lines and name it rather than reporting it as not-merged.
 
 ⚠ **`--limit 200` with a client-side filter can silently miss members, and six of the nine
 metrics come from that PR list.** This matters more here than anywhere else in the sprint,
-because these numbers do not just get rendered — Phase 4 writes them into `config.json` and the
+because these numbers do not just get rendered — Phase 4 writes them into `harness.json` and the
 next `plan` reads them. **A truncated list does not produce an error or a zero; it produces a
 plausible smaller number, which then becomes configuration.**
 
@@ -194,7 +191,7 @@ step that gets skipped.
   complete; first line == the limit and **second line < the smallest number among the members
   and the children of S → complete, do not re-read** (at 200 too); otherwise re-read with
   `--limit 500` and apply the same test. The 완전성 판정 still fails → **stop**: `FAIL: could not read the sprint's PRs in full — the metrics would be
-  understated and Phase 4 would write them into config.json`. ⚠ **No per-Issue fallback on this
+  understated and Phase 4 would write them into harness.json`. ⚠ **No per-Issue fallback on this
   path**: a `"Closes #<m>" in:body` search misses every PR linked only by its branch (measured:
   71 such PRs, member work among them), so it would turn merged work into "no PR" — a plausible
   smaller number again. A repo past 500 PRs **can** be measured now: it fails only when the
@@ -235,6 +232,19 @@ into a dependency branch does not close its Issue, because GitHub's closing keyw
 on a default-branch merge. Judge by label and PR state — except a closed-as-decided member (Phase 2 — the marker is the evidence).
 
 ## Phase 2 — Metrics (compute; do not judge yet)
+
+**The engine's report first** — one read-only call, on the machine that ran the sprint:
+```bash
+python3 -I <<SKILL_DIR>>/engine/engine.py sprint report --repo OWNER/REPO --tracker T --json
+```
+It has, per member, the outcome, block and root cause, the stop (`reason`, `detail`, and `stop_cause`
+= `engine` / `issue` / `label`), the cost, the leader's decisions, and the paths of its procedure, log
+and facts files — for the **last** run; earlier runs of the same sprint are in the sprint log it names
+(`log`). Where it exists it wins over the sources below that an engine run does not write: `done` is the
+member's outcome there (an engine member never carries `guild:done`), a human wait is a member that was
+`stopped`, a dependency block is a `blocked` member, and **stops are reported by cause** — *engine
+정지 <n> · 이슈가 요구한 정지 <n> · 사람 판정 필요 <n>*. Exit 4 (not run here) → say *"엔진 기록 없음"*
+and use the sources below. Never open the files it names in this conversation for the metrics.
 
 Sources, and **what each is honestly derived from**:
 
@@ -296,7 +306,13 @@ the wrong refactor (or, for a safety-net-only slot, the wrong coverage); a `skip
 time. Phase 3 names a `refused` slot by number; a run of `skip:no-candidate` is not a defect, and neither is `skip:epic-overlap` (the slot
 yielded to an epic member that touches the same files — `plan.md` Phase 2).
 
-**The event log** — one call, and it spans **every run of this sprint**, not just the last:
+**The event log** — ⚠ **only when the engine report above exited 4** (the engine never ran this tracker here).
+Exit 0 → **do not read it** (readiness T3 P8): the engine writes no `.sprint-logs/`, so a `failures.jsonl` there
+was written by the 0.98.7 supervisor before the engine took the tracker over (`run.md` Phase 1 step 3b), and
+mixing its events into this sprint's metrics counts another run's failures as this one's. The rows that cite it
+come from the report instead — 의존성 차단 횟수 = its `blocked` members; 분할이 멈춘 것 = *"해당 없음 (엔진 — 에픽
+미지원)"* — and when the file exists (`ls` it) say once *"0.98.7 감독 기록(.sprint-logs/<tracker>/failures.jsonl)은
+엔진 실행 전의 것이라 지표에 넣지 않았습니다"*. Exit 4 — one call, and it spans **every run of this sprint**, not just the last:
 ```bash
 wc -l .claude/guild/.sprint-logs/<tracker>/failures.jsonl
 ```
@@ -314,7 +330,6 @@ and runs once). The calls grow with the number of children — the same per-Issu
 it is exactly the shape that comes back as page 1 only — and a truncated read produces a
 plausible small number, not an error (`_execute_spine.md` Step 4 states the same requirement for
 the same comment):
-⚠ **A block carrying `local-pass:` is counted like any other here** — it is a real loop-back of the sprint, but its miss was the opt-in local model's, not the developer's (`_execute_spine.md` Step 4). When `local_developer.enabled` is on, say so next to the number and read `local_dev.py report`'s `after_pass` for how many were the local model's.
 ⚠⚠ **Count in `jq`, do not pull the bodies back to count them by eye.** Only these are
 used here — the `### audit-record ` heading count, four disposition tokens and the clean-scan /
 no-scan lines (`findings: none` / `scan: none`) — and that comment
@@ -328,7 +343,7 @@ scales with how badly the sprint went. Measured on `dev-yakuza/one-man-company`:
 | #388 | 7,456 B | 67 B |
 
 ```bash
-gh api repos/<owner>/<repo>/issues/<n>/comments --paginate --jq '. as $all | [$all[] | select((.body // "") | contains("<!-- guild:auditor:execute -->")) | .body] | join("\n") as $b | ($b | split("\n")) as $L | ("^- [" + ([96] | implode) + "*]{0,2}") as $p | ("[" + ([96] | implode) + "*]{0,2}([^-A-Za-z0-9_]|$)") as $s | ("disposition: [" + ([96] | implode) + "*]{0,2}") as $d | ("^(- )?role-axis") as $ra | {records: ([$b | match("### audit-record ";"g")] | length), looped_back: ([$L[] | select(test($p + "looped-back" + $s) or ((test($ra) | not) and test($d + "looped-back" + $s)))] | length), fixed: ([$L[] | select(test($p + "fixed" + $s) or ((test($ra) | not) and test($d + "fixed" + $s)))] | length), recorded: ([$L[] | select(test($p + "recorded" + $s) or ((test($ra) | not) and test($d + "recorded" + $s)))] | length), dismissed: ([$L[] | select(test($p + "dismissed" + $s) or ((test($ra) | not) and test($d + "dismissed" + $s)))] | length), loose: ([$b | splits("[^-A-Za-z0-9_]+")] | map(select(. == "looped-back" or . == "fixed" or . == "recorded" or . == "dismissed")) | length), legacy_blocks: ([$b | splits("### audit-record ")] | .[1:] | map(select(((split("\n") | any(test($p + "(looped-back|fixed|recorded|dismissed)" + $s) or ((test($ra) | not) and test($d + "(looped-back|fixed|recorded|dismissed)" + $s)))) or test("findings: none") or test("scan: none")) | not)) | length), variant: ([$L[] | select((test($p + "(looped-back|fixed|recorded|dismissed)" + $s) | not) and (test($ra) | not) and test($d + "(looped-back|fixed|recorded|dismissed)" + $s))] | length), clean: ([$b | match("findings: none";"g")] | length), no_scan: ([$b | match("scan: none";"g")] | length), violation: ([$all[] | select((.body // "") | contains("<!-- guild:auditor-violation -->"))] | length)}'
+gh api repos/<owner>/<repo>/issues/<n>/comments --paginate --jq '. as $all | [$all[] | select((.body // "") | contains("<!-- guild:auditor:execute -->")) | .body] | join("\n") as $b | ($b | split("\n")) as $L | ("^- [\u0060*]{0,2}") as $p | ("[\u0060*]{0,2}([^-A-Za-z0-9_]|$)") as $s | ("disposition: [\u0060*]{0,2}") as $d | ("^(- )?role-axis") as $ra | {records: ([$b | match("### audit-record ";"g")] | length), looped_back: ([$L[] | select(test($p + "looped-back" + $s) or ((test($ra) | not) and test($d + "looped-back" + $s)))] | length), fixed: ([$L[] | select(test($p + "fixed" + $s) or ((test($ra) | not) and test($d + "fixed" + $s)))] | length), recorded: ([$L[] | select(test($p + "recorded" + $s) or ((test($ra) | not) and test($d + "recorded" + $s)))] | length), dismissed: ([$L[] | select(test($p + "dismissed" + $s) or ((test($ra) | not) and test($d + "dismissed" + $s)))] | length), loose: ([$b | splits("[^-A-Za-z0-9_]+")] | map(select(. == "looped-back" or . == "fixed" or . == "recorded" or . == "dismissed")) | length), legacy_blocks: ([$b | splits("### audit-record ")] | .[1:] | map(select(((split("\n") | any(test($p + "(looped-back|fixed|recorded|dismissed)" + $s) or ((test($ra) | not) and test($d + "(looped-back|fixed|recorded|dismissed)" + $s)))) or test("findings: none") or test("scan: none")) | not)) | length), variant: ([$L[] | select((test($p + "(looped-back|fixed|recorded|dismissed)" + $s) | not) and (test($ra) | not) and test($d + "(looped-back|fixed|recorded|dismissed)" + $s))] | length), clean: ([$b | match("findings: none";"g")] | length), no_scan: ([$b | match("scan: none";"g")] | length), violation: ([$all[] | select((.body // "") | contains("<!-- guild:auditor-violation -->"))] | length)}'
 ```
 
 ⚠ **No look-around in a `--jq` regex.** `gh` runs its own `jq` (gojq, RE2 regexes), which rejects
@@ -354,7 +369,6 @@ member of S whose children were found**, and every child of S instead (a member 
 child found is an ordinary member — Phase 1 — and is looked up as one). A parent never runs
 execute, so its own record is always `records: 0` — measured: #146 and #483 reported *"기록 없음"*
 while their children held 18 records, 4 of them looped-back (#532).
-- **Only this sprint's children** (0.99.2): a child of S is excluded only when its PR merged — or it closed — **before this tracker was created** (`gh issue view <tracker> --json createdAt`, the same call that reads its body adds the field — Phase 0 step 2); **an open one counts**. An excluded one is an earlier sprint's work: list it as `이전 스프린트에 끝난 자식 <k>개(#506) — 셈에서 제외` (measured retro #649: #506, a child of epic #161 merged 10-27 in an earlier sprint, added its 5 records to the auditor total and the child count). A child's PR is judged by its `mergedAt`/`closedAt` from Phase 1's PR list; a `CLOSED` child with no PR by its own `closedAt` — `gh issue view <c> --repo <owner>/<repo> --json closedAt --jq .closedAt`, its own call (the child discovery query carries no `closedAt`). The member itself (the epic) keeps its one place.
 - **Numbers are summed, verdicts are not.** Add `records` · `looped_back` · `fixed` · … over the
   children into the epic's row, `#e 에픽(자식 합산)`, but **judge each child on its own**: records 0
   → "기록 없음", `clean == records`, `no_scan == records`, `violation`, `dismissed` — and a child
@@ -395,8 +409,8 @@ collide: neither literal is a substring of the other.
 (`_execute_spine.md` Step 4: `- <token> · <severity> · <axis> · <file:line> — <finding>`), with
 a decoration of up to two backticks or `*` tolerated on either side of the token (older records
 wrote `**recorded**` and `` `looped-back` ``) and no letter, digit, `-` or `_` after it; the
-separators after the token are not read. The backtick is built in jq as `[96] | implode`,
-so the command carries neither a backtick (the command-substitution heuristic, `_bash_rules.md`) nor an escape to decode (measured three retros decoding the earlier six-character escape into a literal backtick — it worked only by luck of the single quotes).
+separators after the token are not read. The backtick is written in the jq string as `\u0060`,
+so the shell command carries no backtick (the command-substitution heuristic, `_bash_rules.md`) — copy the command byte for byte: `\u0060` stays six characters (a decoded backtick works only by luck of the single quotes).
 ⚠ Without `(?m)`, `^` is the start of the **string**, and `(?m)` does not help — gojq reads it as
 multi-line but jq 1.8.2 (Oniguruma) as dot-all (measured: `(?m)^` matched 0 times) — so the joined body is split into lines
 (`split("\n")`) and each line is tested with `^- ` (the same in `gh`'s gojq and in jq 1.8.2). A substring or word-boundary count used to match a finding id
@@ -556,7 +570,7 @@ throughput** (D5), and a sprint that stalled on one unclear Issue says nothing a
 }
 ```
 
-1. Read `.claude/guild/config.json` (Read tool; parse in context).
+1. Read `.claude/guild/harness.json` (Read tool; parse in context).
 2. Apply only the approved changes, **preserving every other key** (`config.md`'s "Set a value").
 3. `history` is **keyed by `sprint`, and the write is replace-or-append, never blind append.**
    If an entry with this `sprint` number already exists, **replace it**; only otherwise append.
@@ -567,7 +581,7 @@ throughput** (D5), and a sprint that stalled on one unclear Issue says nothing a
    **two entries for one sprint** into a 10-slot history and skews every later capacity reading.
    Same for `capacity`: recompute it from the metrics, do not increment whatever is there.
 4. `history` is **bounded — keep the most recent 10** entries, oldest dropped. Unbounded growth
-   would make `config.json` a log, and `plan` only ever reads the recent trend.
+   would make `harness.json` a log, and `plan` only ever reads the recent trend.
    ⚠ Older entries may have a **different shape** (a field this version does not write, or a
    missing one). Keep them byte-intact and do not normalize them — `plan` reads only
    `planned` (and skips `adhoc` entries) to show the largest past size beside the capacity. Only the entry for *this* sprint is written by this command.
@@ -598,10 +612,10 @@ throughput** (D5), and a sprint that stalled on one unclear Issue says nothing a
    outcome is *no outcome*.
 5. Write the full JSON back with the Write tool (2-space indent).
    **DRY**: skip 1–5 entirely and print the JSON that *would* be written.
-6. **Commit `config.json` on its own** — otherwise the next phase's evolve stops at its Phase 6
+6. **Commit `harness.json` on its own** — otherwise the next phase's evolve stops at its Phase 6
    Step 0 clean-tree gate (`evolve.md`), and a leader measured committing it outside these rules
    to get past it. Each its own Bash call:
-   - `git diff --quiet HEAD -- .claude/guild/config.json` — exit 0 (nothing changed: a re-run
+   - `git diff --quiet HEAD -- .claude/guild/harness.json` — exit 0 (nothing changed: a re-run
      writing the same values, step 3) → skip the commit and say so (`git commit`'s *nothing to
      commit* exit 1 must not be reported as a failure).
    - Changed → only **on the default branch**: `git branch --show-current` against `<d>` — the
@@ -610,21 +624,23 @@ throughput** (D5), and a sprint that stalled on one unclear Issue says nothing a
    - **Nothing else staged?** `git diff --cached --name-only` must print nothing (`plan.md` Phase 6
      step 6 sub-step 4 — the commit gate judges the whole index); anything → commit nothing, they
      are the human's.
-   - When `config.json` also holds a line that is not Guild's, ask the same question as `plan.md`
+   - When `harness.json` also holds a line that is not Guild's, ask the same question as `plan.md`
      Phase 6 step 6 sub-step 6.
-   - `git add -- .claude/guild/config.json`
-   - `git commit -m "chore(guild): 스프린트 #<tracker> 회고 결과를 용량 이력에 남긴다" -- .claude/guild/config.json`
+   - `git add -- .claude/guild/harness.json`
+   - `git commit -m "chore(guild): 스프린트 #<tracker> 회고 결과를 용량 이력에 남긴다" -- .claude/guild/harness.json`
      — `timeout` 600000, **never `--no-verify`**.
    - **Do not push.** The next `sprint plan`'s Phase 6 step 6 sub-step 5 finds it among the
      unpushed commits and asks whether to push it together with the record.
    Not on the default branch → commit nothing — and Phase 5 is held as below (a safety net behind Phase 0 step 5, for a human who switched branches since; Phase 5's held line gives the commit command).
-   The commit failed → commit nothing (`git restore --staged -- .claude/guild/config.json`) and
-   say beforehand that evolve will stop at its clean-tree gate until `config.json` is committed.
+   The commit failed → commit nothing (`git restore --staged -- .claude/guild/harness.json`) and
+   say beforehand that evolve will stop at its clean-tree gate until `harness.json` is committed.
    **DRY**: skip this step.
 
-⚠ **Writing `config.json` trips the commit gate's own `--guard-config` guard**, which surfaces as
-a confirmation prompt (`_invariants.md` INV3 — the gate's control files are guarded by an `ask`, not a block). That is expected and intended, not an error — say so before
-it appears, so the human does not read it as a failure.
+⚠ **Writing `harness.json` does not trip the commit gate's `--guard-config` guard** — that guard asks
+only on the gate's control files and the engine's settings file `config.json` (`_invariants.md` INV3).
+A confirmation prompt naming `config.json` here means this phase is about to write the engine's
+settings: decline it and stop — `capacity` and `history` live in `harness.json` only, and an
+LLM-settings key in the engine's file stops the engine on every Issue (H13; readiness T3 P9).
 
 ⚠ `capacity` and `history` have **no `config` setter** (`config.md` Notes) — this command is
 their only writer. Do not tell the human to run `/gld config` for them.
@@ -632,10 +648,14 @@ their only writer. Do not tell the human to run `/gld config` for them.
 ## Phase 5 — Growth loop: run `evolve`, with no arguments
 
 **Held first (0.98.7).** HELD-EVOLVE (Phase 0 step 5 ②), or Phase 4 step 6 committed nothing because the checkout was not the default branch → do **not** read or execute evolve; one line, then Phase 6:
-`성장 단계 보류 — 체크아웃 <b>(기본 브랜치 아님). git switch <d> 후 git commit -m "chore(guild): 스프린트 #<t> 회고 결과를 용량 이력에 남긴다" -- .claude/guild/config.json, 그다음 /gld evolve 를 직접 실행하세요`
-(the switch carries the modified `config.json` along — a conflict makes git refuse, and the human decides). The retro comment (Phase 6 step 2) and the Return carry this line in the same place as the freshness hold below.
+`성장 단계 보류 — 체크아웃 <b>(기본 브랜치 아님). git switch <d> 후 git commit -m "chore(guild): 스프린트 #<t> 회고 결과를 용량 이력에 남긴다" -- .claude/guild/harness.json, 그다음 /gld evolve 를 직접 실행하세요`
+(the switch carries the modified `harness.json` along — a conflict makes git refuse, and the human decides). The retro comment (Phase 6 step 2) and the Return carry this line in the same place as the freshness hold below.
 
 Otherwise read `<<SKILL_DIR>>/commands/evolve.md` and execute it, **passing nothing**.
+
+**What evolve may look at besides its own sources**: the paths in Phase 2's engine report
+(`members[].paths` — procedure, log, facts). They stay in this conversation as plain paths; evolve
+opens one only for the member a proposal is about, and they add no argument and no window.
 
 ⚠ **Do not narrow evolve's signal window to this sprint.** It has no window argument, and adding
 one would change its internals — out of scope. More importantly `_data_sufficiency.md` defines
@@ -803,6 +823,37 @@ mid-run by the next sprint's `worktree_acquire` (*"the branch is held by another
 needs. It runs **after** the tracker is closed on purpose: a cleanup failure must never be the
 reason a finished sprint stays open. Each command its own Bash call (`_bash_rules.md`).
 
+⚠ **Engine members are not cleaned here.** A member the engine ran keeps its worktree
+(`.gld-<repo>-<N>`, branch `gld/<N>`) because `resume --pr-review` needs it: list the kept ones with their
+size from Phase 2's report (`members[].worktree`) and leave removing them to the human. The container,
+the generated script and the run files below exist only for a sprint an older version ran.
+
+> ⚠ **Experimental engine — engine incidents and engine records (readiness R1).** Two more things this phase does,
+> both through the engine and never by hand (no `rm` under `~/.gld`, no file there read into the conversation).
+> Each command its own Bash call, **outside the sandbox** like `dev` (`commands/engine/dev.md` step 1.3) — they remove
+> engine records.
+> - **In step 1 (inventory, read-only)**:
+>   `python3 -I <<SKILL_DIR>>/engine/engine.py incidents prune --json` and
+>   `python3 -I <<SKILL_DIR>>/engine/engine.py records prune --repo OWNER/REPO --tracker T --json`.
+>   `records prune` exit 4 = this sprint was not run on this machine → one line *"엔진 기록 없음 — 이 기계에서 돈
+>   스프린트가 아닙니다"* and no records rows.
+> - **Engine incidents — no question** (the human's rule, decided once: a defect the shipped fixed-defects list explains is
+>   discarded; anything else stays). Show the dry rows under **▎엔진 사건 정리**, one line each, from the engine's fields
+>   only: `would-remove` → `고쳐져서 정리함: <signature> — <fixes[].id 를 ·로> (<fixes[0].version> <commit 들>) <fixes[0].summary>`;
+>   `kept` + `fix_status: recurred` → `재발: <signature> — <fixes[].id> 이후에도 발생(발생 <recurred 를 ,로>번째) · <path>`;
+>   `kept` + `unfixed` → `유지: <signature> (고친 결함 목록에 없음)`; a row with `problem` → `유지: <slug> (읽을 수 없음)`.
+>   Nothing at all → no section. Applied in step 3 (item 5) without asking.
+> - **Engine records — rows in step 2's table, approved like the rest.** One row per `records prune` row whose `action`
+>   is `would-remove`: `#<issue> 엔진 기록 <records_bytes MB> · tmp <tmp_bytes MB> — PR <prs> (<why>)`, action *지움*
+>   (`why: incident` → *tmp 만 지움 — 사건 <...> 이 참조하는 기록은 남김*). Rows `kept` are listed under the exclusions with
+>   their `why` (`open-pr` 열린 PR · `no-pr` PR 없음 · `pr-unknown` PR 상태를 읽지 못함 · `running` 엔진 실행 중 ·
+>   `nothing-here` 기록 없음).
+> - **In step 3, after item 4**: 5. `python3 -I <<SKILL_DIR>>/engine/engine.py incidents prune --apply` (always — the dry
+>   rows above were the answer). 6. Only the approved record rows: `python3 -I <<SKILL_DIR>>/engine/engine.py records prune
+>   --repo OWNER/REPO --tracker T --issue <n> --issue <m> … --apply`; none approved → do not run it. Report what each
+>   printed. A record kept because an incident named it is cleaned by a later retro once that incident is gone.
+> - **DRY**: the two inventory calls only — items 5 and 6 are skipped.
+
 ⚠ **Scope is this sprint and nothing else.** Only (a) worktrees inside this sprint's container,
 (b) the head branches of **confirmed** member and split-child PRs (step 1 says what confirms
 one), and (c) this tracker's run files. **Never** find branches by name pattern: the name a branch
@@ -920,8 +971,6 @@ human's.
 Show one table — worktree path (relative to the container), branch, PR, row, action — plus the
 exclusions and their reasons, and ask. The human may approve all, approve by row numbers, or
 decline; **nothing is removed without that answer.** An unanswered or ambiguous reply is a decline.
-**Every invocation asks for itself** — this run's table and this run's answer. An approval or a delegation given in an earlier command (another tracker's `--cleanup`, "판단해서 정리해 주세요" in that conversation) is never carried into a new `/gld` invocation (measured `--cleanup 630` right after `--cleanup 545`: no table, an untracked file `rm`'d, `branch -D`).
-**A delegation approves the table's rows, never what the table keeps.** "판단해서 해 주세요" removes what the rows say `remove`/`delete`; it does not reach a worktree git refused as dirty (its contents — `git restore`, `rm`, `git clean` of a tracked edit or an untracked file — need that file **named** with `git -C <path> status --short` and its own yes), nor a branch kept for tip ≠ `headRefOid` (that one needs both SHAs shown and its own yes; `git cherry` agreeing is evidence to show, not a reason to skip the ask) (measured `--cleanup 545`).
 ⚠ `git branch -D` and `git push origin --delete` are in the template's `permissions.ask`
 (`settings.json.tmpl`), and `rm`, `rmdir` and `hostname` are in no allow list, so each raises a
 prompt — expected, not an error; say so first. ⚠ That is true only once the repo's
@@ -938,7 +987,8 @@ branch -D`) slips past the `ask` entry that is the harness's half of INV1.
    `rate-limited-*` / `waiting-for-window-*`) with a fresh heartbeat; `finished` stamps a fresh
    heartbeat too and is not live — **and** probe its `pid` the way `run.md` Phase 1 does, when
    `hostname` prints the marker's `host`: `ps -p <pid> -o command=`. A live state with a fresh
-   heartbeat, or `ps` output containing `.gld-sprint-` → remove **nothing** and say so. Another
+   heartbeat, or `ps` output containing `.gld-sprint-` (an older supervisor) or `engine.py sprint run`
+   (the engine's; `sprint status --json` → `"running": true` says the same) → remove **nothing** and say so. Another
    host → no pid to probe here; the state rule alone decides.
    ⚠ **This re-check is never skipped**, not even when Phase 0 already accepted a stale
    heartbeat — that acceptance is exactly the case it exists for. ⚠ The heartbeat alone is not
@@ -950,7 +1000,7 @@ branch -D`) slips past the `ask` entry that is the harness's half of INV1.
    `locked` one is refused and preserved. For each refusal run `git -C <path> status --short` and
    report whether what is left is source or only untracked docs (`daily.md` makes the same
    distinction — an execute-stage ADR is left untracked by design), plus the command the human
-   can run themselves — and stop there for that worktree: removing what is left is the human's, or the named yes above. Then `rmdir <container>` — it fails harmlessly while anything is left.
+   can run themselves. Then `rmdir <container>` — it fails harmlessly while anything is left.
    ⚠ **`git worktree prune` only when every `prunable` entry is inside the container.** prune is
    repo-global and would drop the registration of one of the human's worktrees that is merely on
    an unmounted volume (`sprint-supervisor.sh` `prune_safe`). If any prunable entry is outside it,
@@ -1047,8 +1097,7 @@ Both `closed` lines end with Phase 7's tally — `· cleanup <W> worktrees, <B> 
 - **The retro comment is appended**, never replaced — it is the sprint history.
 - **Record before closing.** A closed tracker with no record loses the sprint.
 - **Only the tracking Issue may be closed here** — never a member, never a child.
-- **Approval is per invocation and per listed item** — `_checkout.md` Section F: an earlier command's yes or "판단해서" never reaches a new invocation, nor what Phase 7's table keeps.
-- **retro never moves the human's branch or history** — no `git checkout <branch>` / `switch`, `pull`, `merge`, `rebase`, `reset`, and no option that offers to (measured #1839: "main 으로 이동 후 진행 (Recommended)" → checkout + merge --ff-only). Phase 0 step 5 asks; updating the checkout is never on its own; on a human request, `_checkout.md`'s request form — Guild runs only a hash-preserving update (`git pull --ff-only` / `--no-rebase`), a rewriting one the human runs, and a switch after a yes (measured #649: "pull 과 push" became `git pull --rebase origin main` — the record commit `76affe6b` became `c8272e40`, told only afterwards). A later "push" request pushes as it is — `git push origin <d>`; rejected (non-fast-forward) → say so and stop: updating is the human's — asked to update first, the request form (no rebase or pull to force it in — measured #630: "push 해 주세요" became `git rebase origin/main`). Phase 7's `git worktree remove` and `branch -D` work outside the human's checkout and are outside this ban.
+- **retro never moves the human's branch or history** — no `git checkout <branch>` / `switch`, `pull`, `merge`, `rebase`, `reset`, and no option that offers to (measured #1839: "main 으로 이동 후 진행 (Recommended)" → checkout + merge --ff-only). Phase 0 step 5 asks; updating the checkout is the human's. A later "push" request pushes as it is — `git push origin <d>`; rejected (non-fast-forward) → say so and stop: updating is the human's (no rebase or pull to force it in — measured #630: "push 해 주세요" became `git rebase origin/main`). Phase 7's `git worktree remove` and `branch -D` work outside the human's checkout and are outside this ban.
 - **Cleanup touches only this sprint** — worktrees inside its container, the head branches of
   confirmed member and child PRs, and this tracker's run files. Never a name-pattern search, never
   the default or current branch, never a fork's branch, never a branch that is the base of a

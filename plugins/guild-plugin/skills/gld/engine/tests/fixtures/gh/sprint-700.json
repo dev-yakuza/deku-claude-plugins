@@ -1,0 +1,292 @@
+{
+ "description": "Stage 4 sprint rules: tracker Issue 700 of acme/app (members 101, 102 on 101, 103), a squash-only repository, the pull requests of 101 (open) and 103 (merged), no remote branch of 102, the run marker comment (created once, then PATCHed), the guild:needs-human label calls (H9). Anything else fails closed.",
+ "rules": [
+  {
+   "args": [
+    "issue",
+    "view",
+    "700",
+    "--repo",
+    "acme/app",
+    "--json",
+    "number,title,body,labels,state,stateReason,createdAt"
+   ],
+   "json": {
+    "number": 700,
+    "title": "Issue 700",
+    "body": "# Sprint: demo\n\n<!-- guild:sprint:plan -->\nplan-hash: 000000000000\n- 목표: demo\n- 스택 깊이 상한: 3\n- 상한 근거: squash-sync\n\n## 멤버 (실행 순서 · 의존성 정본)\n| # | 이슈 | base 의존 | 원래 의존 | 비고 | 구분 |\n|---|---|---|---|---|---|\n| 1 | #101 | — | — | | goal |\n| 2 | #102 | #101 | #101 | | goal |\n| 3 | #103 | — | — | | other |\n<!-- /guild:sprint:plan -->\n",
+    "labels": [
+     {
+      "name": "guild:sprint"
+     }
+    ],
+    "state": "OPEN",
+    "stateReason": null
+   }
+  },
+  {
+   "args": [
+    "api",
+    "repos/acme/app/issues/700/comments",
+    "--paginate"
+   ],
+   "times": 1,
+   "json": []
+  },
+  {
+   "args": [
+    "api",
+    "repos/acme/app/issues/700/comments",
+    "--paginate"
+   ],
+   "json": [
+    {
+     "id": 7001,
+     "user": {
+      "login": "owner"
+     },
+     "author_association": "OWNER",
+     "created_at": "2026-11-25T00:00:00Z",
+     "body": "<!-- guild:sprint:run -->\n```json\n{\"host\": \"mac\", \"pid\": 1, \"state\": \"running\"}\n```\n<!-- /guild:sprint:run -->"
+    }
+   ]
+  },
+  {
+   "args": [
+    "api",
+    "-X",
+    "POST",
+    "repos/acme/app/issues/700/comments",
+    "--input",
+    "-"
+   ],
+   "json": {
+    "id": 7001
+   }
+  },
+  {
+   "args": [
+    "api",
+    "-X",
+    "PATCH",
+    "repos/acme/app/issues/comments/7001",
+    "--input",
+    "-"
+   ],
+   "json": {
+    "id": 7001
+   }
+  },
+  {
+   "args": [
+    "repo",
+    "view",
+    "acme/app",
+    "--json",
+    "defaultBranchRef"
+   ],
+   "json": {
+    "defaultBranchRef": {
+     "name": "main"
+    }
+   }
+  },
+  {
+   "args": [
+    "repo",
+    "view",
+    "acme/app",
+    "--json",
+    "mergeCommitAllowed,squashMergeAllowed,rebaseMergeAllowed"
+   ],
+   "json": {
+    "mergeCommitAllowed": false,
+    "squashMergeAllowed": true,
+    "rebaseMergeAllowed": false
+   }
+  },
+  {
+   "args": [
+    "api",
+    "repos/acme/app/issues/101"
+   ],
+   "json": {
+    "number": 101,
+    "state": "open",
+    "state_reason": null,
+    "labels": [
+     {
+      "name": "type:bug"
+     }
+    ]
+   }
+  },
+  {
+   "args": [
+    "api",
+    "repos/acme/app/issues/102"
+   ],
+   "json": {
+    "number": 102,
+    "state": "open",
+    "state_reason": null,
+    "labels": []
+   }
+  },
+  {
+   "args": [
+    "api",
+    "repos/acme/app/issues/103"
+   ],
+   "json": {
+    "number": 103,
+    "state": "closed",
+    "state_reason": "completed",
+    "labels": []
+   }
+  },
+  {
+   "args": [
+    "api",
+    "repos/acme/app/pulls?head=acme%3Agld%2F101&state=all"
+   ],
+   "json": [
+    {
+     "number": 900,
+     "state": "open",
+     "merged_at": null,
+     "draft": false,
+     "html_url": "https://github.com/acme/app/pull/900",
+     "head": {
+      "ref": "gld/101",
+      "sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+     },
+     "base": {
+      "ref": "main"
+     },
+     "created_at": "2026-11-25T00:00:00Z"
+    }
+   ]
+  },
+  {
+   "args": [
+    "api",
+    "repos/acme/app/pulls?head=acme%3Agld%2F102&state=all"
+   ],
+   "json": []
+  },
+  {
+   "args": [
+    "api",
+    "repos/acme/app/pulls?head=acme%3Agld%2F103&state=all"
+   ],
+   "json": [
+    {
+     "number": 903,
+     "state": "closed",
+     "merged_at": "2026-11-25T01:00:00Z",
+     "draft": false,
+     "html_url": "https://github.com/acme/app/pull/903",
+     "head": {
+      "ref": "gld/103",
+      "sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+     },
+     "base": {
+      "ref": "main"
+     },
+     "created_at": "2026-11-25T00:00:00Z"
+    }
+   ]
+  },
+  {
+   "args": [
+    "api",
+    "repos/acme/app/pulls/900"
+   ],
+   "json": {
+    "number": 900,
+    "state": "open",
+    "merged_at": null,
+    "draft": false,
+    "html_url": "https://github.com/acme/app/pull/900",
+    "head": {
+     "ref": "gld/101",
+     "sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    "base": {
+     "ref": "main"
+    },
+    "created_at": "2026-11-25T00:00:00Z"
+   }
+  },
+  {
+   "args": [
+    "api",
+    "repos/acme/app/labels/guild%3Aneeds-human"
+   ],
+   "exit_code": 1,
+   "stderr": "gh: Not Found (HTTP 404)\n"
+  },
+  {
+   "args": [
+    "api",
+    "-X",
+    "POST",
+    "repos/acme/app/labels",
+    "--input",
+    "-"
+   ],
+   "json": {
+    "name": "guild:needs-human"
+   }
+  },
+  {
+   "args": [
+    "api",
+    "-X",
+    "POST",
+    "repos/acme/app/issues/101/labels",
+    "--input",
+    "-"
+   ],
+   "json": [
+    {
+     "name": "guild:needs-human"
+    }
+   ]
+  },
+  {
+   "args": [
+    "api",
+    "-X",
+    "DELETE",
+    "repos/acme/app/issues/101/labels/guild%3Aneeds-human"
+   ],
+   "json": []
+  },
+  {
+   "args": ["api", "repos/acme/app/issues/700"],
+   "json": {"number": 700, "state": "open", "state_reason": null, "labels": [{"name": "guild:sprint"}]}
+  },
+  {
+   "args": ["api", "repos/acme/app/issues/900"],
+   "json": {"number": 900, "state": "open", "state_reason": null, "labels": [], "pull_request": {"url": "x"}}
+  },
+  {
+   "args": ["api", "repos/acme/app/git/matching-refs/heads/gld/101"],
+   "json": [{"ref": "refs/heads/gld/101"}]
+  },
+  {
+   "args": ["api", "repos/acme/app/git/matching-refs/heads/gld/102"],
+   "json": []
+  },
+  {
+   "args": ["api", "repos/acme/app/git/matching-refs/heads/gld/10"],
+   "json": [{"ref": "refs/heads/gld/101"}, {"ref": "refs/heads/gld/103"}]
+  },
+  {
+   "args": ["api", "repos/acme/app/pulls?head=acme%3Agld%2F10&state=all"],
+   "json": []
+  }
+ ]
+}

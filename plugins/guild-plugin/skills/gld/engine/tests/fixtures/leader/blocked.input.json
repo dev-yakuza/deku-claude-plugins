@@ -1,0 +1,179 @@
+{
+ "allowed": {
+  "answers": [
+   "rerun",
+   "replan",
+   "escalate"
+  ],
+  "human_answers": [
+   "rerun",
+   "replan",
+   "escalate"
+  ],
+  "human_rerun_steps": [
+   "analyze",
+   "ac-format",
+   "design"
+  ],
+  "narrowed": [],
+  "rerun_steps": [
+   "analyze",
+   "ac-format",
+   "design"
+  ]
+ },
+ "budget": null,
+ "call": {
+  "attempt": 1,
+  "errors": [],
+  "format_retry": 0,
+  "kind": "leader",
+  "step": "design"
+ },
+ "comments": null,
+ "cost": {
+  "absolute_usd": 89.57,
+  "issue_usd": 1.5,
+  "soft_usd": 44.79
+ },
+ "counters": {
+  "done_rerun": 0,
+  "done_rerun_max": 2,
+  "leader_calls": 0,
+  "leader_calls_max": 5,
+  "on_fail_rerun_used": false,
+  "plan_rerun": 0,
+  "plan_rerun_max": 2,
+  "soft_budget_rerun_used": false
+ },
+ "docs": [
+  "docs/specs/42/analysis.md"
+ ],
+ "done_gate": null,
+ "format": 1,
+ "in_files": [
+  "leader-decision.md",
+  "failure-summary.md"
+ ],
+ "issue": 42,
+ "mode": "attended",
+ "plan_gate": null,
+ "situation": "blocked",
+ "stage": 2,
+ "steps": [
+  {
+   "attempts": 1,
+   "id": "analyze",
+   "kind": "role",
+   "name": "requirements-engineer",
+   "on_fail_count": 0,
+   "on_fail_max": null,
+   "status": "done"
+  },
+  {
+   "attempts": 1,
+   "id": "ac-format",
+   "kind": "run",
+   "name": "ac-format",
+   "on_fail_count": 0,
+   "on_fail_max": 2,
+   "status": "done"
+  },
+  {
+   "attempts": 1,
+   "id": "plan",
+   "kind": "check",
+   "name": "plan-gate",
+   "on_fail_count": 0,
+   "on_fail_max": null,
+   "status": "done"
+  },
+  {
+   "attempts": 1,
+   "id": "design",
+   "kind": "role",
+   "name": "tech-lead",
+   "on_fail_count": 0,
+   "on_fail_max": null,
+   "status": "needs_leader"
+  },
+  {
+   "attempts": 0,
+   "id": "test-cases",
+   "kind": "role",
+   "name": "tester",
+   "on_fail_count": 0,
+   "on_fail_max": null,
+   "status": "pending"
+  },
+  {
+   "attempts": 0,
+   "id": "implement",
+   "kind": "role",
+   "name": "developer",
+   "on_fail_count": 0,
+   "on_fail_max": 2,
+   "status": "pending"
+  },
+  {
+   "attempts": 0,
+   "id": "test",
+   "kind": "run",
+   "name": "test",
+   "on_fail_count": 0,
+   "on_fail_max": 2,
+   "status": "pending"
+  },
+  {
+   "attempts": 0,
+   "id": "review",
+   "kind": "role",
+   "name": "tech-lead",
+   "on_fail_count": 0,
+   "on_fail_max": 2,
+   "status": "pending"
+  },
+  {
+   "attempts": 0,
+   "id": "qa",
+   "kind": "role",
+   "name": "qa",
+   "on_fail_count": 0,
+   "on_fail_max": 2,
+   "status": "pending"
+  },
+  {
+   "attempts": 0,
+   "id": "done",
+   "kind": "check",
+   "name": "done-gate",
+   "on_fail_count": 0,
+   "on_fail_max": null,
+   "status": "pending"
+  },
+  {
+   "attempts": 0,
+   "id": "pr",
+   "kind": "op",
+   "name": "create-pr",
+   "on_fail_count": 0,
+   "on_fail_max": null,
+   "status": "pending"
+  }
+ ],
+ "stopped": {
+  "attempts": 1,
+  "blocked": {
+   "kind": "missing-input",
+   "note": "which screens get it?"
+  },
+  "format_errors": [],
+  "kind": "role",
+  "name": "tech-lead",
+  "on_fail_count": 0,
+  "on_fail_max": null,
+  "run": null,
+  "session": null,
+  "step": "design"
+ }
+}

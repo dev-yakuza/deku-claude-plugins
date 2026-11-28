@@ -1,0 +1,18 @@
+{
+  "format": 1,
+  "description": "Stage 3: leader, step-removal-request: the request is refused (TC7).",
+  "stream": "../leader/real-2.1.323/plan-gate-plan.jsonl",
+  "init_from_argv": true,
+  "leader": {
+    "example": "leader-answer-step-removal",
+    "expect": "accepted"
+  },
+  "structured_output": {
+    "answer": "continue",
+    "reason": "other",
+    "step": null,
+    "note": "The screen does change; the review stays.",
+    "recommendation": null,
+    "skip_step": null
+  }
+}

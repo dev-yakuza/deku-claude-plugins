@@ -1,9 +1,0 @@
-Issue #103: Decided close
-Stage: done
-- [x] Analyze: completed
-- [ ] Design: 결정대로 닫힘 — 해당 없음
-- [ ] Execute: 결정대로 닫힘 — 해당 없음
-- [ ] Test: 결정대로 닫힘 — 해당 없음
-- [ ] QA: 결정대로 닫힘 — 해당 없음
-PR: none
-Mode: legacy-started

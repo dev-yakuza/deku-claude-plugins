@@ -1,0 +1,37 @@
+{
+  "format": 1,
+  "defects": [
+    {
+      "id": "E1",
+      "signature": "escalate:env-problem @ done-gate",
+      "kind": "suspect",
+      "fixed_in": {"version": "1.0.0-exp.3", "commit": "6757d26"},
+      "summary": "The mutation proof ran its control `test` once: one flaky test on a clean tree turned every mutation row not-run.",
+      "appeared_as": "VW2 word_app#1938: control red once -> rows not-run -> the done-gate leader escalated (env-problem) -> needs_human."
+    },
+    {
+      "id": "E2",
+      "signature": "escalate:env-problem @ done-gate",
+      "kind": "suspect",
+      "fixed_in": {"version": "1.0.0-exp.3", "commit": "20f90cb 5ffdaf1"},
+      "summary": "A killed mutation row gave the leader only the end of its log; the first failing assertion (before --fail-fast clean-up lines) never reached it.",
+      "appeared_as": "VW3 word_app#1938: M1 killed, log_tail without the assertion -> the done-gate leader escalated (env-problem) -> needs_human."
+    },
+    {
+      "id": "O1",
+      "signature": "silent @ runner._overlay_runs",
+      "kind": "silent",
+      "fixed_in": {"version": "1.0.0-exp.3", "commit": "20951e5"},
+      "summary": "safety-net-proof did not run a red or timed-out overlay once more on the same tree; a flaky test sent the role back.",
+      "appeared_as": "VW4 word_app#1938: no stop - one wasted return to the developer step (safety-net-proof red once, green on a rerun)."
+    },
+    {
+      "id": "E3",
+      "signature": "silent @ driver._leader_notes",
+      "kind": "silent",
+      "fixed_in": {"version": "1.0.0-exp.3", "commit": "552f68c"},
+      "summary": "The PR decision list keyed a leader note by kind and k only, so the plan-gate and done-gate check#1 shared one note.",
+      "appeared_as": "VW4 PR #1987 (and VW2 #1984): no stop - the done-gate note was printed on the plan-gate line of the PR body."
+    }
+  ]
+}

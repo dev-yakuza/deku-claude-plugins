@@ -1,0 +1,47 @@
+{
+  "format": 1,
+  "issue": 42,
+  "step": "design",
+  "attempt": 1,
+  "kind": "role",
+  "base_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "start_head": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "created_at": "2026-11-23T01:02:03Z",
+  "role": "tech-lead",
+  "role_class": "judge",
+  "result_kind": "work",
+  "instruction": "<instruction>",
+  "system_prompt_sources": [
+    {
+      "path": "CLAUDE.md",
+      "blob": "cccccccccccccccccccccccccccccccccccccccc"
+    }
+  ],
+  "inputs": [
+    "docs/specs/42/analysis.md"
+  ],
+  "in_dir": "/Users/u/.gld/records/acme/app/42/runs/design/1/in",
+  "in_files": [],
+  "outputs": [
+    "docs/specs/42/design.md"
+  ],
+  "checks": [],
+  "rule_checks": [],
+  "facts": {},
+  "returned": null,
+  "reentry": null,
+  "session": {
+    "model": "sonnet",
+    "effort": "high",
+    "tools": [
+      "Read",
+      "Write"
+    ],
+    "max_budget_usd": null,
+    "wall_clock_s": null,
+    "no_output_s": null,
+    "resume": null,
+    "cli_version": "2.1.323"
+  },
+  "run": null
+}

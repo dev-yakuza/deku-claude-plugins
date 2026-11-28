@@ -1,0 +1,15 @@
+{
+  "format": 1,
+  "description": "Raw F2 r1 init (default tool set incl. Task/WebFetch, 17 built-in skills) — lists the engine never expected. Was S6 init-mismatch; since FC decision D (no system/init check) the session must run on to its result.",
+  "stream": "../f2/r1.jsonl",
+  "structured_output": {
+    "status": "done",
+    "outputs": [
+      "docs/specs/42/design.md"
+    ],
+    "requests": [],
+    "blocked_by": null,
+    "discoveries": [],
+    "note": "fixture"
+  }
+}

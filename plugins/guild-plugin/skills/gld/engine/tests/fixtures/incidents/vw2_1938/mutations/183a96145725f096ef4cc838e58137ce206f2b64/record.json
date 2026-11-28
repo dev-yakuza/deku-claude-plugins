@@ -1,0 +1,29 @@
+{
+  "format": 1,
+  "issue": 1938,
+  "head": "183a96145725f096ef4cc838e58137ce206f2b64",
+  "blob": "0ded6443f0ff989f12356133f438e2568457e7b3",
+  "problem": null,
+  "control": {
+    "exit_code": 1,
+    "timed_out": false,
+    "log_file": "try-1/control.log"
+  },
+  "rows": [
+    {
+      "id": "M1",
+      "acs": [
+        3
+      ],
+      "path": "lib/features/kanji_detail_modal/widgets/kanji_strokes_section.dart",
+      "find": "    if (_isProbeStarted) return;\n",
+      "replace": "",
+      "note": "재진입 차단 제거 → 번들 교체 때마다 탐침이 다시 시작돼 light-日-4.svg 로드 횟수가 늘어야 한다",
+      "status": "not-run",
+      "detail": null,
+      "run": null,
+      "log_tail": "[gld engine] not run: the control run was not green on a clean tree"
+    }
+  ],
+  "at": "2026-11-26T05:20:08Z"
+}

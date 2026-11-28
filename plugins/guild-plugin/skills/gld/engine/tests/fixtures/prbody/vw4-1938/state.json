@@ -1,0 +1,10 @@
+{
+  "_comment": "VW4 E3: the leader_calls of ~/.gld/records/owner/app_a/1938/state.json (VW4, engine 20f90cb, 2026-11-26) as recorded; the rest of the state is cut. plan-gate check k=1 and done-gate check k=1 share k (a check call's k is its check step's attempt).",
+  "format": 1,
+  "issue": 1938,
+  "leader_calls": [
+    {"kind": "check", "k": 1, "sessions": [1], "situation": "plan-gate", "step": null, "answer": "plan", "reason": "fits-template", "cost_usd": 0.211944, "counted": false, "failed": null},
+    {"kind": "check", "k": 1, "sessions": [1], "situation": "done-gate", "step": "safety-net", "answer": "rerun", "reason": "real-defect", "cost_usd": 0.35832, "counted": false, "failed": null},
+    {"kind": "check", "k": 2, "sessions": [2], "situation": "done-gate", "step": null, "answer": "approve", "reason": "acceptance-met", "cost_usd": 0.382981, "counted": false, "failed": null}
+  ]
+}

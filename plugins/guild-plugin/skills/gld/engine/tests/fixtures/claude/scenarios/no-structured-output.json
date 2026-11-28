@@ -1,0 +1,6 @@
+{
+  "format": 1,
+  "description": "Session completes without a structured output (R5).",
+  "stream": "../f2/r4.jsonl",
+  "init_from_argv": true
+}

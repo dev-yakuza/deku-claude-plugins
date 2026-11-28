@@ -1,0 +1,51 @@
+{
+  "fill": {
+    "{catalog_steps}": [
+      "product-review",
+      "ux-design",
+      "threat-model",
+      "data-design",
+      "i18n-plan",
+      "ux-review",
+      "security-review",
+      "data-review",
+      "i18n-review",
+      "performance-review",
+      "infra-review"
+    ]
+  },
+  "answer": {
+    "status": "done",
+    "outputs": [],
+    "requests": [],
+    "blocked_by": null,
+    "discoveries": [],
+    "irreversible": [
+      {
+        "code": "breaking-api",
+        "where": "src/api.py",
+        "note": "a field was removed"
+      }
+    ],
+    "note": "fixture",
+    "verdict": "pass",
+    "reviewed": [
+      "src/a.py"
+    ],
+    "checks": [
+      {
+        "id": "diff-review",
+        "result": "pass",
+        "note": ""
+      }
+    ],
+    "findings": [
+      {
+        "severity": "minor",
+        "file": "src/a.py",
+        "line": 3,
+        "text": "naming"
+      }
+    ]
+  }
+}

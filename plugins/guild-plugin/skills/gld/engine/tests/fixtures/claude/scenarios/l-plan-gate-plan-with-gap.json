@@ -1,0 +1,18 @@
+{
+  "format": 1,
+  "description": "Stage 2 leader, plan-gate: plan although R2 is marked not covered — schema-valid, refused by the plan-gate rule (L2, plan-with-gap).",
+  "stream": "../leader/real-2.1.323/plan-gate-plan.jsonl",
+  "init_from_argv": true,
+  "leader": {"example": "leader-answer-plan-gate", "expect": "plan-with-gap"},
+  "structured_output": {
+    "answer": "plan",
+    "reason": "fits-template",
+    "step": null,
+    "note": "Close enough.",
+    "recommendation": null,
+    "requirements": [{"row": "R1", "covered": true}, {"row": "R2", "covered": false}],
+    "missing_requirements": [],
+    "plan": {"template": "feature"},
+    "close": null
+  }
+}

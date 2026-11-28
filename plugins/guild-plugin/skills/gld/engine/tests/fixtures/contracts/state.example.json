@@ -1,0 +1,70 @@
+{
+  "format": 1,
+  "issue": 42,
+  "revision": 1,
+  "last_head": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "steps": [
+    {
+      "id": "analyze",
+      "status": "done",
+      "latest_attempt": 1,
+      "start_head": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    {
+      "id": "ac-format",
+      "status": "done",
+      "latest_attempt": 2,
+      "on_fail_count": 1
+    },
+    {
+      "id": "plan",
+      "status": "done",
+      "latest_attempt": 1
+    },
+    {
+      "id": "design",
+      "status": "running",
+      "latest_attempt": 1,
+      "start_head": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    },
+    {
+      "id": "setup",
+      "status": "pending",
+      "latest_attempt": null
+    }
+  ],
+  "repo": "acme/app",
+  "mode": "attended",
+  "plugin_version": "1.0.0-exp.0",
+  "base_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "branch": "gld/42-os-permission",
+  "remote_url": "git@github.com:acme/app.git",
+  "git": {
+    "git_dir": "/Users/u/projects/app/.git/worktrees/.gld-app-42",
+    "common_dir": "/Users/u/projects/app/.git",
+    "work_tree": "/Users/u/projects/.gld-app-42",
+    "main_checkout": "/Users/u/projects/app"
+  },
+  "procedure": {
+    "path": "docs/specs/42/procedure.yaml",
+    "commit": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+  },
+  "github": {
+    "summary_comment_id": 900,
+    "engine_comment_ids": [
+      900
+    ],
+    "last_seen_comment_id": 901,
+    "pr_number": null,
+    "pr_url": null
+  },
+  "totals": {
+    "attempts": 5,
+    "cost_usd": 1.23,
+    "leader_calls": 0,
+    "warnings": 0
+  },
+  "stop": null,
+  "created_at": "2026-11-23T01:02:03Z",
+  "updated_at": "2026-11-23T01:02:03Z"
+}

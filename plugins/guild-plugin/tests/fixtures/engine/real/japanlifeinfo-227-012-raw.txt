@@ -1,6 +1,0 @@
-$ pnpm exec turbo run test
-rc: 1
-
- WARN  Issue while reading "/Users/u/.npmrc". EPERM: operation not permitted, open '/Users/u/.npmrc'
-undefined
- ERR_PNPM_RECURSIVE_EXEC_FIRST_FAIL  Command "turbo" not found

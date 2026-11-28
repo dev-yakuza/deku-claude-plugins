@@ -1,0 +1,52 @@
+{
+  "fill": {
+    "{answers}": [
+      "rerun",
+      "replan",
+      "escalate"
+    ],
+    "{rerun_steps}": [
+      "analyze",
+      "design",
+      "implement"
+    ],
+    "{human_answers}": [
+      "rerun",
+      "replan",
+      "escalate"
+    ],
+    "{human_rerun_steps}": [
+      "analyze",
+      "design",
+      "implement"
+    ],
+    "{requirement_rows}": [
+      "R1",
+      "R2"
+    ],
+    "{models}": [
+      "opus",
+      "sonnet",
+      "haiku"
+    ],
+    "{efforts}": [
+      "low",
+      "medium",
+      "high",
+      "xhigh"
+    ],
+    "{close_reasons}": []
+  },
+  "answer": {
+    "answer": "rerun",
+    "reason": "repeated-failure",
+    "step": "implement",
+    "note": "Try again with a stronger session.",
+    "recommendation": null,
+    "defer": null,
+    "session": {
+      "model": "opus",
+      "effort": "high"
+    }
+  }
+}

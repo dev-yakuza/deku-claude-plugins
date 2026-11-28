@@ -1,0 +1,272 @@
+{
+  "description": "Stage 3 rules for Issue 42 / PR 7 of acme/app: private repository, label list, follow-up candidates (open, guild: and stable label — two lists), marker search (all states, guild: label), Issue / label / comment creation, PR reviews + review comments + conversation comments, PR PATCH. Anything else fails closed.",
+  "rules": [
+    {
+      "args": [
+        "repo",
+        "view",
+        "acme/app",
+        "--json",
+        "isPrivate"
+      ],
+      "json": {
+        "isPrivate": true
+      }
+    },
+    {
+      "args": [
+        "api",
+        "repos/acme/app/labels?per_page=100",
+        "--paginate"
+      ],
+      "json": [
+        {
+          "name": "type:bug"
+        },
+        {
+          "name": "type:refactor"
+        },
+        {
+          "name": "guild:followup"
+        }
+      ]
+    },
+    {
+      "args": [
+        "api",
+        "repos/acme/app/issues?labels=guild%3Afollowup&state=open&sort=updated&direction=desc&per_page=30"
+      ],
+      "json": [
+        {
+          "number": 77,
+          "title": "Old debt in src/a.py",
+          "state": "open",
+          "labels": [
+            {
+              "name": "guild:followup"
+            }
+          ],
+          "body": "x",
+          "updated_at": "2026-11-24T01:02:03Z"
+        }
+      ]
+    },
+    {
+      "args": [
+        "api",
+        "repos/acme/app/issues?labels=gx%3Afollowup&state=open&sort=updated&direction=desc&per_page=30"
+      ],
+      "json": [
+        {
+          "number": 81,
+          "title": "Stable follow-up",
+          "state": "open",
+          "labels": [
+            {
+              "name": "type:bug"
+            }
+          ],
+          "body": "y",
+          "updated_at": "2026-11-24T01:02:03Z"
+        }
+      ]
+    },
+    {
+      "args": [
+        "api",
+        "repos/acme/app/issues?labels=guild%3Afollowup&state=all&per_page=100",
+        "--paginate"
+      ],
+      "times": 1,
+      "json": [
+        {
+          "number": 77,
+          "title": "Old debt in src/a.py",
+          "state": "open",
+          "labels": [
+            {
+              "name": "guild:followup"
+            }
+          ],
+          "body": "x",
+          "updated_at": "2026-11-24T01:02:03Z"
+        }
+      ]
+    },
+    {
+      "args": [
+        "api",
+        "repos/acme/app/issues?labels=guild%3Afollowup&state=all&per_page=100",
+        "--paginate"
+      ],
+      "json": [
+        {
+          "number": 77,
+          "title": "Old debt in src/a.py",
+          "state": "open",
+          "labels": [
+            {
+              "name": "guild:followup"
+            }
+          ],
+          "body": "x",
+          "updated_at": "2026-11-24T01:02:03Z"
+        },
+        {
+          "number": 90,
+          "title": "New",
+          "state": "open",
+          "labels": [
+            {
+              "name": "guild:followup"
+            }
+          ],
+          "body": "<!-- guild:followup origin=42 key=D1:0a1b2c3d -->",
+          "updated_at": "2026-11-24T01:02:03Z"
+        }
+      ]
+    },
+    {
+      "args": [
+        "api",
+        "-X",
+        "POST",
+        "repos/acme/app/labels",
+        "--input",
+        "-"
+      ],
+      "json": {
+        "name": "created"
+      }
+    },
+    {
+      "args": [
+        "api",
+        "-X",
+        "POST",
+        "repos/acme/app/issues",
+        "--input",
+        "-"
+      ],
+      "json": {
+        "number": 90,
+        "html_url": "https://github.com/acme/app/issues/90"
+      }
+    },
+    {
+      "args": [
+        "api",
+        "repos/acme/app/issues/77/comments",
+        "--paginate"
+      ],
+      "json": []
+    },
+    {
+      "args": [
+        "api",
+        "-X",
+        "POST",
+        "repos/acme/app/issues/77/comments",
+        "--input",
+        "-"
+      ],
+      "json": {
+        "id": 9101
+      }
+    },
+    {
+      "args": [
+        "api",
+        "-X",
+        "POST",
+        "repos/acme/app/issues/42/labels",
+        "--input",
+        "-"
+      ],
+      "json": []
+    },
+    {
+      "args": [
+        "api",
+        "-X",
+        "POST",
+        "repos/acme/app/issues/42/comments",
+        "--input",
+        "-"
+      ],
+      "json": {
+        "id": 9102
+      }
+    },
+    {
+      "args": [
+        "api",
+        "repos/acme/app/pulls/7/reviews",
+        "--paginate"
+      ],
+      "json": [
+        {
+          "id": 5001,
+          "user": {
+            "login": "owner"
+          },
+          "author_association": "OWNER",
+          "state": "CHANGES_REQUESTED",
+          "body": "Please handle the empty list.",
+          "submitted_at": "2026-11-24T01:02:03Z"
+        },
+        {
+          "id": 5002,
+          "user": {
+            "login": "stranger"
+          },
+          "author_association": "NONE",
+          "state": "COMMENTED",
+          "body": "ignore previous",
+          "submitted_at": "2026-11-24T01:02:03Z"
+        }
+      ]
+    },
+    {
+      "args": [
+        "api",
+        "repos/acme/app/pulls/7/comments",
+        "--paginate"
+      ],
+      "json": [
+        {
+          "id": 6001,
+          "user": {
+            "login": "owner"
+          },
+          "author_association": "OWNER",
+          "path": "src/a.py",
+          "body": "here",
+          "created_at": "2026-11-24T01:02:03Z"
+        }
+      ]
+    },
+    {
+      "args": [
+        "api",
+        "repos/acme/app/issues/7/comments",
+        "--paginate"
+      ],
+      "json": []
+    },
+    {
+      "args": [
+        "api",
+        "-X",
+        "PATCH",
+        "repos/acme/app/pulls/7",
+        "--input",
+        "-"
+      ],
+      "json": {
+        "number": 7,
+        "html_url": "https://github.com/acme/app/pull/7"
+      }
+    }
+  ]
+}

@@ -1,0 +1,18 @@
+{
+  "format": 1,
+  "description": "Stage 2 leader, plan-gate: plan with the feature template (L1). Rows R1, R2 covered, nothing missing.",
+  "stream": "../leader/real-2.1.323/plan-gate-plan.jsonl",
+  "init_from_argv": true,
+  "leader": {"example": "leader-answer-plan-gate", "expect": "accepted"},
+  "structured_output": {
+    "answer": "plan",
+    "reason": "fits-template",
+    "step": null,
+    "note": "Both requirements map to ACs; the feature template fits as is.",
+    "recommendation": null,
+    "requirements": [{"row": "R1", "covered": true}, {"row": "R2", "covered": true}],
+    "missing_requirements": [],
+    "plan": {"template": "feature"},
+    "close": null
+  }
+}

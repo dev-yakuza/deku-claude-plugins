@@ -1,0 +1,16 @@
+pre-push:
+  parallel: false
+  commands:
+    gate-suite:
+      use_stdin: true
+      run: bash tool/hooks/pre_push_scope.sh gate-suite -- python3 gates/test_gate.py
+    dart-format:
+      use_stdin: true
+      run: bash tool/hooks/pre_push_scope.sh dart-format -- bash tool/hooks/with_clean_git_env.sh dart format --output=none --set-exit-if-changed lib/ test/
+    analyze:
+      run: >-
+        bash tool/hooks/with_clean_git_env.sh flutter analyze
+pre-commit:
+  commands:
+    staged-only:
+      run: echo {staged_files}

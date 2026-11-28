@@ -1,0 +1,28 @@
+{
+  "format": 1,
+  "description": "P3-A O3: a judge (qa) writes its output AND a file outside its outputs → security stop.",
+  "stream": "../f2/r4.jsonl",
+  "init_from_argv": true,
+  "structured_output": {
+    "status": "done",
+    "outputs": [
+      "docs/specs/42/qa-checklist.md"
+    ],
+    "requests": [],
+    "blocked_by": null,
+    "discoveries": [],
+    "note": "fixture"
+  },
+  "actions": [
+    {
+      "op": "write",
+      "path": "docs/specs/42/qa-checklist.md",
+      "content": "- [ ] x\n"
+    },
+    {
+      "op": "write",
+      "path": "src/a.py",
+      "content": "x = 9\n"
+    }
+  ]
+}

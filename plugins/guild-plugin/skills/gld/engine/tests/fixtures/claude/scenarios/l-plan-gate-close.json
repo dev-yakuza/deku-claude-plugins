@@ -1,0 +1,18 @@
+{
+  "format": 1,
+  "description": "Stage 2 leader, plan-gate: close-as-decided, reason completed (L5).",
+  "stream": "../leader/real-2.1.323/plan-gate-plan.jsonl",
+  "init_from_argv": true,
+  "leader": {"example": "leader-answer-plan-gate", "expect": "accepted"},
+  "structured_output": {
+    "answer": "close-as-decided",
+    "reason": "already-decided",
+    "step": null,
+    "note": "The plan-decision block says this was shipped in #540; nothing is left to do.",
+    "recommendation": null,
+    "requirements": [{"row": "R1", "covered": true}, {"row": "R2", "covered": true}],
+    "missing_requirements": [],
+    "plan": null,
+    "close": {"reason": "completed"}
+  }
+}

@@ -1,0 +1,19 @@
+{
+  "format": 1,
+  "description": "Stage 2 leader, done-gate: approve — AC 1 met, AC 2 manual, D1 a follow-up candidate (L16).",
+  "stream": "../leader/real-2.1.323/done-gate-rerun.jsonl",
+  "init_from_argv": true,
+  "leader": {"example": "leader-answer-done-gate", "expect": "accepted"},
+  "structured_output": {
+    "answer": "approve",
+    "reason": "acceptance-met",
+    "step": null,
+    "note": "AC 1 is covered by the unit test; AC 2 is a manual check on a device.",
+    "recommendation": null,
+    "ac_verdicts": [
+      {"ac": 1, "status": "met", "evidence": "test/settings_test.dart: review types selectable"},
+      {"ac": 2, "status": "manual", "evidence": "manual-test-checklist.md item 1"}
+    ],
+    "discoveries": [{"id": "D1", "disposition": "followup"}]
+  }
+}

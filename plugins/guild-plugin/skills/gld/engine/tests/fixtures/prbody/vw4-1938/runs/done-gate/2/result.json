@@ -1,0 +1,1 @@
+{"answer": "approve", "reason": "acceptance-met", "step": null, "note": "지난 done-gate 에서 비어 있던 AC #3 증거가 이제 있다. M1 은 `if (_isProbeStarted) return;` 를 제거한 변경이고 결과는 killed 다.\n(VW4 runs/done-gate/2 note, cut)"}

@@ -1,0 +1,27 @@
+{
+  "format": 1,
+  "description": "Stage 3: leader, pr-review: a change request → rerun (TP1).",
+  "stream": "../leader/real-2.1.323/plan-gate-plan.jsonl",
+  "init_from_argv": true,
+  "leader": {
+    "example": "leader-answer-pr-review",
+    "expect": "accepted"
+  },
+  "structured_output": {
+    "answer": "rerun",
+    "reason": "real-defect",
+    "step": "implement",
+    "note": "Handle the empty list as the reviewer asks.",
+    "recommendation": null,
+    "reviews": [
+      {
+        "id": "review:5001",
+        "effect": "change-request"
+      },
+      {
+        "id": "review-comment:6001",
+        "effect": "change-request"
+      }
+    ]
+  }
+}

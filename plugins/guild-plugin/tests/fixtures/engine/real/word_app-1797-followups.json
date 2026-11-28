@@ -1,1 +1,0 @@
-[{"title":"SettingsController._allAvailableQuizTypes 가 ENV.hasExample 를 무시하는 불일치 해소","rationale":"docs/specs/1797/skeleton.md §알려진 사실(AC #9) / test-cases.md §후속 기록 — 컨트롤러 불일치는 이 이슈에서 고치지 않고 후속 이슈로 이월","keywords":["_allAvailableQuizTypes","hasExample","exampleReading","toggleAllQuizTypes","selectedQuizTypes"]}]

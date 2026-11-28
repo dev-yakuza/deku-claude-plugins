@@ -1,19 +1,16 @@
 # DESIGN (stage)
 
-> **0.102 (engine)**: `/gld design $1` runs the engine's **design** stage alone — follow `<<SKILL_DIR>>/commands/dev.md` *Engine driver* with `--only design` on step 1. The rest of this file is the 0.101.x reference the roles' atoms cite; it is **not executed**. **Reference (0.102) — removed in the next release.**
-
 **Stage: design.** Core roles: **tech-lead ∥ tester** (leader orchestrates), **plus any conditional participation specialists the leader convenes** (designer/i18n/dba/analytics/performance/tech-writer/security — Step 1.5). The tech-lead drafts the skeleton; the tester writes test cases from the acceptance criteria **without seeing the skeleton** (bias-free). They run in parallel. Invocable directly (`/gld design <issue>`) or via `/gld dev`.
 
 `$1` = Issue number. Returns a Section D line.
 
 > **Bash**: `_bash_rules.md`. State/handoff: `_handoff.md`.
-> **Checkout**: never move the human's branch or history — `_checkout.md` (a pull/sync/switch request: show the commands and which commits change hash, then ask).
 > **Output language**: all human-readable output in `config.language` (`_handoff.md` Section K); sub-agent prompts carry that instruction.
 
 ---
 
 ## Step 0 — Preflight
-As the leader, follow `_preflight.md` **Medium tier** (per its Section A table: items **1 + 2 + 3 + 4 + 6 + 8** — not just 1–4; items 6/8 are the ⑥ knowledge-slice retrieval and ④ working-memory read, both needed to honestly populate the Section C self-review trace). If `.claude/guild/config.json` is absent → `FAIL: Guild not initialized (run /gld init)`. Item 4 loads the `<!-- guild:analyze:output -->` comment (feature list + **acceptance criteria**). If analyze output is missing → the stage is out of order; return `NEEDS_CONTEXT: analyze output not found for #$1` (leader should run analyze first).
+**First, the engine guard** — `_preflight.md` **Section 0** with `<N>` = $1: an Issue the engine works on is refused there (`/gld resume $1`) before anything else is read or written. As the leader, follow `_preflight.md` **Medium tier** (per its Section A table: items **1 + 2 + 3 + 4 + 6 + 8** — not just 1–4; items 6/8 are the ⑥ knowledge-slice retrieval and ④ working-memory read, both needed to honestly populate the Section C self-review trace). If `.claude/guild/harness.json` is absent → `FAIL: Guild not initialized (run /gld init)`. Item 4 loads the `<!-- guild:analyze:output -->` comment (feature list + **acceptance criteria**). If analyze output is missing → the stage is out of order; return `NEEDS_CONTEXT: analyze output not found for #$1` (leader should run analyze first).
 
 Validate `$1` is an Issue (not a PR). **Read current labels first** (its own Bash call, same pattern as `analyze.md`):
 ```bash
@@ -22,7 +19,7 @@ gh issue view $1 --json labels --jq '[.labels[].name] | map(select(startswith("g
 **Split-parent guard** (right here, before any other work): if that read contains `guild:children`, refuse — a parent at `guild:children` is in an *orchestration* state, not a stage (`_handoff.md` Section A: a parent never carries both `guild:children` and a stage label at once), so Step 4's transition would destroy the link `dev.md` Phase 2b uses to drive the children:
 ```
 >>> RESULT <<<
-FAIL: #$1 is a split parent (guild:children) — its work is its children's, not its own. Run `/gld dev $1` (or `/gld resume $1`) to drive the children.
+FAIL: #$1 is a split parent (guild:children) — its work is its children's, not its own. Epics are not supported yet — develop its children one by one (`/gld dev <child>`).
 ```
 (`guild:child` is **not** this case — see the next bullet; a child legitimately carries two labels.)
 
@@ -45,7 +42,7 @@ ls docs/specs/$1
 ## Step 1 — Spawn tech-lead and tester in parallel
 **Visual decision first (leader, before spawning — no extra call).** Decide `VISUAL` now, because the tester prompt below carries it and Step 1.5 is spawned in the same message:
 - **UI surface** — the same trigger Step 1.5 uses for the designer (the Issue body / AC / hotspots describe a screen, widget, component, layout, theme or style change) — **inside `visual.packages`** when that list is non-empty (a UI change in an app with no visual tests gets none, even if a sibling package has them).
-- **Visual tests are available** — `VISUAL_AVAILABLE` per `_handoff.md` Section L.1, from `config.json` (already read in preflight Item 1): `visual.runnable` is `true` and (`commands.vrt` non-null or `visual.baselines` non-empty).
+- **Visual tests are available** — `VISUAL_AVAILABLE` per `_handoff.md` Section L.1, from `harness.json` (already read in preflight Item 1; guild-plugin writes no `visual` block — D7): `visual.runnable` is `true` and (`commands.vrt` non-null or `visual.baselines` non-empty).
 - **Safety net override** — an AC tagged `(safety net)` that names a visual case (screen · state · theme · size) **and** `VISUAL_AVAILABLE` → `VISUAL = yes` regardless of the UI-surface judgment: the net promised that picture.
 - The override, or both of the first two → `VISUAL = yes`. Otherwise → `VISUAL = no` (a UI change in a repo with no runnable golden/VRT setup still gets its behavior tests; Guild does not introduce the tooling — `audit` reports the gap). Writing visual cases nobody can turn into images would leave every one of them uncovered at test.
 
@@ -159,7 +156,7 @@ When children were created (or re-derived) above, the parent does **not** advanc
 >>> RESULT <<<
 OK SPLIT: N children
 ```
-This routes `/gld dev` into child orchestration (dev Phase 2b). The parent's execute/test/qa are the sum of its children + a parent-integration check.
+Epics are not supported yet in this edition: `/gld dev` and `/gld resume` refuse the parent (`unsupported-epic`) — tell the human to develop the children one by one (`/gld dev <child>`) and to close the parent when they are done (no parent-integration check runs).
 
 ## Hard rules
 - **Tester independence**: the tester MUST NOT see the skeleton (spawn prompt enforces this). This is the anti-bias core of design.

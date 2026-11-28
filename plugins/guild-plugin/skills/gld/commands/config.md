@@ -1,18 +1,17 @@
 # CONFIG
 
-**Guild configuration.** View and adjust settings in `.claude/guild/config.json`. `config` turns dials; `init` builds the house. Off-switch for automation lives here (user escape hatch).
+**Guild configuration.** View and adjust settings in `.claude/guild/harness.json`. `config` turns dials; `init` builds the house. Off-switch for automation lives here (user escape hatch).
 
 Parse `$1` onward:
 - No arguments → **show current config**.
 - `--language=<code>` → set `language` (`en`/`ko`/`ja`).
 - `--evolve-nudge=<on|off>` → set `automation.evolve_nudge` (default `on`). This dial gates the **review-stage evolve nudge** (`review.md` Step 5 — the advisory "신호가 충분히 쌓였습니다, `/gld evolve` 적기" reminder). `off` silences it entirely; the review nudge reads this flag before evaluating its 충분/cooldown gate. (evolve itself is always run manually — there is no *automatic* evolve trigger; this switch only controls the reminder.)
-- `--gates=<on|off>` → set `gates.enabled` (M3 강제층 off-switch). `off` makes the commit gate advisory (no blocking) — the escape hatch. `on` (default) blocks secret / verification-weakening commits, in **all three** of its wirings (`.git/hooks/pre-commit`, the `PreToolUse(Bash)` early warning, and the `--guard-config` control-file guard). `off` also turns off the Bash text guard (`shell-text` · `bodies-save` · `directive-slice` · `unmarked-comment` — the same `PreToolUse(Bash)` hook refusing a backtick the shell would run, an Issue-body bundle saved to a file, a cut read of the unmarked comments, or an unattended comment whose body file opens with no marker).
-  - ⚠ **Scope**: this dial governs the *commit gate* only. It is **not** an override for INV2 — `/gld evolve`'s apply-time hard-block on a verification-weakening change is non-negotiable and ignores this flag (`_invariants.md` INV2). Turning gates off is for a repo the gate misjudges, not permission to weaken tests.
-  - Writing this key trips the gate's own `--guard-config` guard, so the change surfaces as an explicit confirmation prompt. That is intended: disabling the enforcement layer should be a decision on the record.
+- `--gates=<on|off>` → **refused in guild-plugin**: the commit gate is always on.
+  - It reads `.claude/guild/config.json` (the engine settings, which have no `gates` key).
+  - `harness.json` holds no `gates` and no `visual`: a switch written there would be read by nobody. Write nothing; say exactly that.
 - `--max-stack-depth=<n>` → set `sprint.max_stack_depth` (default `3`). See the section below.
 - `--refactor-slot=<on|off>` → set `sprint.refactor_slot` (default `on`). Whether `/gld sprint plan` reserves one member slot for a refactor. See the section below.
 - `--window=<HH:MM-HH:MM|none>` → set `sprint.window` (default `null` = no window). The run window: `/gld sprint run` only starts a **new** member inside it. See the section below.
-- `--local-dev=<on|off>` → set `local_developer.enabled` (default `off`). The opt-in local-model developer of the execute stage. See the section below.
 - Other keys → report "unknown/unsupported config key" and list the supported ones.
 
 > **Bash**: `_bash_rules.md`. Read/write JSON via the Read/Write tools (not `jq -i`).
@@ -20,15 +19,15 @@ Parse `$1` onward:
 ---
 
 ## Show current config
-1. Read `.claude/guild/config.json`.
+1. Read `.claude/guild/harness.json`.
    - Absent → "Guild is not initialized (run `/gld init`)." Stop.
 2. Display readably. ⚠ **Every value below comes from the file you just read — none of it is a literal to copy from this doc.** The shape is the example; the content never is. A doc-copied value here is worse than a missing one, because it reads as a real reading of the user's config:
    ```
-   Guild config (.claude/guild/config.json)
+   Guild config (.claude/guild/harness.json)
    ────────────────────────────────────────
-   version:    <config.json's "version">
-   language:   <config.json's "language">
-   roles:      <count of config.json's "roles"> — spine: <the spine roles present in that array>
+   version:    <harness.json's "version">
+   language:   <harness.json's "language">
+   roles:      <count of harness.json's "roles"> — spine: <the spine roles present in that array>
                specialists: <the remaining roles in that array>
    commands:   test=<...> lint=<...> typecheck=<...> build=<...> e2e=<...>
                (e2e is auto-run by the qa stage when available/warranted; the test
@@ -38,7 +37,7 @@ Parse `$1` onward:
                tests=<globs|없음> matchers=<names|없음> config_files=<paths|없음>
                create=<recipe|없음> run_file=<recipe|없음> (commit gate warns when a baseline or config file changes)
    automation: evolve_nudge=<on|off>
-   gates:      enabled=<on|off> (commit gate: secret + verification-weakening block)
+   gates:      on (always — guild-plugin has no switch)
    sprint:     capacity=<n|미설정> max_stack_depth=<n> history=<count> runs
                refactor_slot=<on|off> (키가 없으면 on)
                window=<HH:MM-HH:MM|미설정>
@@ -46,17 +45,15 @@ Parse `$1` onward:
                ⚠ `last_projected` 는 `plan --create` 만 쓴다 — **"마지막 투영"이 아니다.**
                카드가 마지막으로 움직인 시각은 run 마커의 `board_last_write` 이고
                `sprint daily`·`sprint board` 가 그것을 렌더한다
-   local_dev:  enabled=<on|off> (키가 없으면 off) model=<...|미설정> attempts=<max_attempts>
-               attempt_timeout=<attempt_timeout_min>m total_timeout=<total_timeout_min>m (큐 대기 제외)
    ```
-   Render `roles` from the array in the file — **do not enumerate the roster from memory or from this document.** The installed roster is whatever `.claude/guild/config.json` lists and `.claude/agents/` contains; a repo may have grown or pruned it via `evolve` HR, so a hardcoded 16-name list would silently misreport it. Spine roles always run; specialists are convened per task by the leader (participation model: `_handoff.md` Section G).
+   Render `roles` from the array in the file — **do not enumerate the roster from memory or from this document.** The installed roster is whatever `.claude/guild/harness.json` lists and `.claude/agents/` contains; a repo may have grown or pruned it via `evolve` HR, so a hardcoded 16-name list would silently misreport it. Spine roles always run; specialists are convened per task by the leader (participation model: `_handoff.md` Section G).
 
 ## Set a value
-1. Read `.claude/guild/config.json` (parse as JSON in context).
+1. Read `.claude/guild/harness.json` (parse as JSON in context).
 2. Validate the key/value:
    - `language` ∈ {en, ko, ja}.
    - `evolve_nudge` ∈ {on→true, off→false} (sets `automation.evolve_nudge`).
-   - `gates` ∈ {on→true, off→false} (sets `gates.enabled`).
+   - `gates` — refused, whatever the value (see `--gates` above); write nothing.
    - `max_stack_depth` — an integer ≥ 1 (sets `sprint.max_stack_depth`). Reject `0` and
      non-integers: a cap of 0 would block every dependent Issue in every sprint. A value of 1
      is meaningful — it means "no stacking, every PR targets the default branch" (what `sprint
@@ -67,12 +64,9 @@ Parse `$1` onward:
      **start == end** (say *"omit the window instead"*). `~` is accepted as the separator and
      normalised to `-`. The end is **exclusive** — `22:00-10:00` is already outside at 10:00.
      ⚠ **The same rule exists in three places** — this list, `sprint/run.md`'s argument
-     contract, and the supervisor script's own `case`. All three quote the literal
+     contract, and the engine's `sprintdag.parse_window` (the supervisor's own check). All three quote the literal
      `HH:MM-HH:MM (24h, zero-padded)` so that a drift is visible; this list is where the
      *validation* lives, and an empty one leaves the other two unchecked.
-   - `local_dev` ∈ {on→true, off→false} (sets `local_developer.enabled`). `on` with no
-     `local_developer.model` is written but warn: the execute stage will fall back with
-     `ineligible:no_model_configured` until a model is set.
    - Invalid → report the allowed values; do not write.
 3. Update the key in the in-context object, preserving all other keys.
 4. Write the full JSON back via the Write tool (2-space indent).
@@ -109,157 +103,17 @@ Same `=` syntax as the five dials above. ⚠ **`sprint run`'s flag takes a space
 config key and there is no `--duration=` setter here.
 
 This value is the default for every run of this repo; the per-run flag overrides it, and on a
-resume the tracking Issue marker's `window` key overrides both (that is where a run's own
-window survives a crash — it is never written to `config.json`).
+resume the previous run's window overrides it too — the engine keeps that in its own sprint record
+(that is where a run's own window survives a crash — it is never written to `harness.json`). The
+engine does not read the tracking Issue marker's `window` key, so a sprint continued from Guild
+0.98.7 needs `--window` (`sprint/run.md` Phase 1 step 3b).
 
 `sprint.capacity` and `sprint.history` are **written by `/gld sprint retro`** after per-item
 human approval, not set here — they are shown by "Show current config" and have no setter, the
 same gap `commands` has (see Notes). ⚠ **`sprint.window` is not in that set** — it has a setter
 (above), so do not add it to the "no setter" list.
 
-`sprint.stage_groups` (default `false`, edited in `config.json` directly — no setter) runs each
-sprint member as up to three **grouped sessions** — analyze+design · execute · test+qa — instead
-of one session for the whole spine (`dev.md` Phase 2 *Grouped sessions*). A later group then does
-not carry an earlier one's context, which is most of the leader's cost (measured: 99.7% of it is
-re-reading accumulated context). Each later group starts inside the window (waiting in place when
-it is closed), and a member stops at 12 grouped sessions. Attended `/gld dev` and `batch` are
-unaffected. Experimental — compare a sprint's cost with and without it before keeping it on.
-
-### `--local-dev=<on|off>`
-
-The **local developer** (`local_developer.enabled`, default `false`; an absent block means off).
-With it on, the execute stage (`_execute_spine.md` Step 1L) has a Sonnet developer write the
-failing tests (committed, or left staged when a pre-commit hook that runs the suite refuses red
-tests), then asks a model served by a local Ollama to write the implementation
-— up to `max_attempts` tries — and hands the Issue back to the Sonnet developer when it cannot.
-Loop-backs and `refactor` Issues always go to the Sonnet developer.
-
-Only `enabled` has a setter; the rest of the block is edited in `config.json` directly:
-
-```json
-"local_developer": {
-  "enabled": false,
-  "model": "<an Ollama model name, e.g. qwen3.8:27b>",
-  "ollama_url": "http://127.0.0.1:11434",
-  "max_attempts": 3,
-  "max_output_tokens": 8000,
-  "max_output_tokens_retry": 16000,
-  "attempt_timeout_min": 20,
-  "total_timeout_min": 60,
-  "num_ctx": 65536,
-  "persona": true,
-  "mode": "oneshot",
-  "max_turns": 30,
-  "agent_think": false,
-  "max_restarts": 2,
-  "auto_escalate": true,
-  "test_cmd": "<runner> {files}",
-  "test_file_patterns": ["*_test.*", "*.test.*", "*.spec.*", "*_spec.*", "test_*.py"],
-  "lint_cmd": null
-}
-```
-
-- `attempt_timeout_min` bounds one model call; `total_timeout_min` bounds the job's **active**
-  time (model calls + lint + tests). **Queue wait is not counted**: the model is shared by every
-  repo on the machine through a first-come-first-served queue, and an unattended job waits its
-  turn however long that takes. An attended job never waits — a busy queue is an immediate
-  fallback (`queue_busy`).
-- `test_cmd` — **required**: the command that runs only the new tests, with `{files}` where
-  their paths go (e.g. `flutter test {files}`, `npx jest {files}`). Without `{files}` every job
-  falls back with `ineligible:no_test_cmd` — a whole-suite run would make one unrelated red test
-  fail every attempt. The leader still runs the full `commands.test` after a local pass.
-  `{files}` gets only the `--tests` whose file name matches `test_file_patterns` — a helper the
-  new tests import (passed in `--tests` so it is protected and committed) is not loadable as a
-  test, and handing it to the runner fails every check; no match → all of `--tests`.
-  `lint_cmd` `null` → `commands.lint`; lint counts only when it is green before the model edits.
-- **Cost.** A local pass saves the implementation part of the developer's work. A **fallback costs
-  more than not using this** — the tests-only spawn, then the full developer spawn, plus a leader
-  turn per `wait` call. Check `report`'s pass rate before leaving it on.
-- Skipped automatically for loop-backs, `refactor` Issues, Issues with visual cases and Issues
-  without a (non-empty) `docs/specs/<N>/skeleton.md` — with only the tests to go on, a 27B model
-  was measured reasoning until `max_output_tokens` on every attempt (`ineligible:no_skeleton`).
-  The tests must be committed or staged with nothing unstaged on top: an untracked test is
-  `ineligible:test_untracked`, one with unstaged edits `ineligible:tests_unstaged` (the model is
-  checked against the working tree, the leader commits the index).
-  A check run that changes a test file (an inline snapshot filled in, a formatter in
-  `lint_cmd`) does not count as a pass: the test is put back and the job falls back with
-  `tests_modified`.
-- A reasoning model's thinking counts against `max_output_tokens` (`output_cap` in `report`).
-  An attempt cut off there raises the cap of every later attempt to `max_output_tokens_retry`
-  (as far as `num_ctx` allows — below; a value under `max_output_tokens` means no raise):
-  most passes fit the first cap, a few need more, and starting high only lets a runaway hold the
-  model longer. An attempt cut off while still reasoning — no edit block written yet — usually
-  has its answer in the reasoning, so the next attempt that gets an answer is handed that
-  reasoning's last 12,000 characters (beside the last test failure, if any), and reasoning stays
-  off for the rest of the job (`think: false`, sent only to a model that showed it reasons).
-- Input and output share `num_ctx`. A job is `ineligible:context_too_large` when its prompt
-  (skeleton, test diff, implementation files) plus `max_output_tokens` plus ~7k tokens of
-  feedback and margin does not fit. What is left goes first to the reasoning tail, then to the
-  raised cap — so with a small `num_ctx` the raised cap is lowered per job (at the start never
-  below `max_output_tokens`) and the tail shortened or dropped, never an error. Defaults
-  (`num_ctx` 65536) leave both in full for prompts up to about 30k tokens. Earlier attempts'
-  edits stay in the files, so each attempt re-checks the fit and shortens the tail, then the
-  cap; a job whose files outgrow `num_ctx` falls back with `context_overflow`.
-- `persona` (default `true`) hands the model the part of `.claude/agents/developer.md` below
-  `<!-- guild:persona:end -->` — the project specifics and the habits `evolve` grows — so a
-  lesson learned by the developer role reaches the local model too. The template part above the
-  marker (stages, hand-offs, return lines) is the Sonnet developer's own workflow and is never
-  sent. It is copied into the job at start (an `evolve` mid-job changes nothing) and is
-  guidance, not material: a part over 8,000 characters is left out whole (`too_long`), one that
-  would make the job `context_too_large` is left out (`no_room`), and a prompt grown by earlier
-  edits drops it before the cap shrinks (`dropped`). `runs.jsonl` records which (`persona`, and
-  per attempt) — compare pass rates with it on and off before trusting it. The other half of
-  the loop: `evolve` reads `local_dev.py lessons` (a diagnostic recurring across Issues, a local
-  pass sent back later) and may grow it into a developer habit there — which this then sends.
-- `mode` — `"oneshot"` (default): one request with the implementation files whole, SEARCH/REPLACE
-  blocks back, up to `max_attempts`. `"agent"`: the model works in turns through tools —
-  `read_file`/`outline`/`search` over files git tracks, `edit_file` on the `--files` only,
-  `run_tests` — so a large file is read in parts instead of sent whole (`local_dev_agent.py`).
-  `"auto"`: oneshot, and agent for a job oneshot finds `context_too_large` — and, unattended
-  with `auto_escalate` (default `true`), for a one-shot job that ends `max_attempts` or
-  `context_overflow`: the same job goes on as an agent job from the original files (its own
-  budget, the one-shot's last diff shown for reference, one runs.jsonl line with
-  `oneshot_attempts`). Attended jobs never escalate (a human is waiting). ⚠ The agent mode
-  is **experimental** — keep `oneshot` until its measurements (cache reuse, pass rate, time) are in.
-  It needs a model Ollama lists with the `tools` capability (`ineligible:model_no_tools`) and
-  room to work beside the first message (~28k tokens — `num_ctx` 131072 is the practical
-  setting; too small → `context_too_large`). `max_turns` (default 30) bounds its model calls;
-  `agent_think` (default `false`) turns reasoning on for its turns (14 tok/s makes each reasoned
-  turn minutes long). `max_attempts` and `max_output_tokens_retry` do not apply to it, and its
-  `attempt_count` counts check runs. Its own fallbacks: `max_turns`, `stuck` (six turns without
-  progress, or eight missed edits on one file), `attempt_timeout` (two timed-out calls in a row),
-  `out_of_scope_write` (a check run changed a tracked file outside `--files` and the tests — put
-  back, listed as `out_of_scope`; a new untracked file is moved into the job folder's `stray/`
-  instead). An attended agent job holds the model to its end like any attended job; an
-  unattended one holds it across consecutive model turns (the prefix cache) and lets go while
-  its checks run and after 15 minutes. A human must not edit the checkout while a job runs.
-- **Persistence (agent mode)**: a conversation that ends `stuck`, `max_turns` or
-  `context_overflow` starts over as a fresh one on the same job — the current files, the diff so
-  far and the last check, nothing else — up to `max_restarts` (default 2, `0` = off) while a
-  quarter of the budget remains. The model may end its work with `report_blocker` only when the
-  checks show a wall outside the files it may edit (a load/compile error at another path that was
-  already in the baseline run and survives its edits; or, after a restart, the same failure three
-  times with changed files) → fallback `blocked`, with its diagnosis in `blocker` (unverified —
-  `report` lists them). `attempt_count` = one-shot attempts + agent check runs.
-- `restore_failed` (any mode): a file the job must put back was replaced by a directory or now
-  sits under a path leading out of the repo — the leader hands the Issue to a human.
-- `report` warns when, at the speed it observed, `max_output_tokens_retry` cannot be generated
-  within `attempt_timeout_min` (raise that, or lower the cap); `raised_cap_outcomes` shows
-  whether the raised attempts actually pass, `observed_tok_per_s` the measured speed.
-- An attended job keeps the model until it ends (so it never waits between attempts); a session
-  closed mid-job leaves its worker running to its own end, bounded by `total_timeout_min` of
-  active time — other jobs queue behind it meanwhile.
-- Every job is logged under `.claude/guild/memory/local-dev/` (gitignored): `runs.jsonl` has one
-  line per job — each attempt's outcome, the fallback reason, queue wait and active time — and
-  each job folder keeps the prompts, the replies and, on a fallback, the model's last diff.
-  `python3 <<SKILL_DIR>>/commands/atoms/local_dev.py report` aggregates it (fallback reasons,
-  pass-at-attempt-k, attempt outcomes, what happened to passes later — `after_pass` — and the
-  raised-cap and speed fields above). A `local_developer` value of the wrong type (e.g. a
-  non-integer `num_ctx`) makes every call exit 65 — the leader records a `tool error` fallback.
-
 ## Notes
-- M1 config schema is a **versioned subset**: `{ version, language, roles[], commands{}, visual{baselines[], tests[], matchers[], packages[], config_files[], runnable, env, create, run_file}, automation{evolve_nudge}, gates{}, sprint{capacity, max_stack_depth, refactor_slot, stage_groups, history[], board, window}, local_developer{enabled, model, ollama_url, max_attempts, max_output_tokens, max_output_tokens_retry, attempt_timeout_min, total_timeout_min, num_ctx, persona, mode, max_turns, agent_think, max_restarts, auto_escalate, test_cmd, test_file_patterns, lint_cmd} }`. It is forward-compatible — later milestones add gate/evolve dials without breaking this shape.
+- M1 config schema is a **versioned subset**: `{ version, language, roles[], commands{}, automation{evolve_nudge}, sprint{capacity, max_stack_depth, refactor_slot, history[], board, window} }`. (guild-plugin keeps it in `.claude/guild/harness.json`, without `gates` and `visual`; `.claude/guild/config.json` is the engine's and refuses these keys.) It is forward-compatible — later milestones add gate/evolve dials without breaking this shape.
 - `roles` is edited by init (and by evolve HR later), not by `config` in M1 — editing the active roster manually is possible but unsupported as a config command yet.
-- `commands` (test/lint/typecheck/build/e2e/vrt), `visual.*`, `sprint.capacity`/`sprint.history` and `sprint.board` have the **same gap** (⚠ `sprint.window` does **not** — it has a `--window=` setter): they are part of the real schema and shown in "Show current config" above, but `config`'s "Set a value" section has no setter for them (`sprint.max_stack_depth` and `sprint.refactor_slot` do have one) — an attempt to change it (e.g. after a build-tool migration changes the test command) falls into "Other keys → unknown/unsupported," same as any other unrecognized key. Edit `.claude/guild/config.json` directly for now.
-- `engine.effective.copy_ignored` (the issue-flow engine — read only once the engine ships, 0.102.0; no setter, edit `config.json`): an explicit list of **git-ignored** relative paths (no glob, no `..`, no symlink on the way, inside the repo) the engine copies (a) into the Issue worktree it creates for execute and (b) into the temp trees where it runs the suite and the TEST effective re-runs — **after** any networked step, never during one (the dependency step and the warm-up cannot read these originals). Default `[]`: tests that need such files halt with `halted: env ignored-missing`, naming the paths. Typical entries are generated or secret-bearing sources the tests import (word_app needs four: `assets/data.db`, `lib/env/env.dart`, `lib/firebase_options.dart`, `lib/controller/tts_controller/wrong_words.dart`). A run that copies them posts only a structured summary of the test output, and the copied files' string literals are redacted by value — but listing a secret here does put it where role-written tests run: list only what the tests genuinely need.
-- `commands.test_one` (the issue-flow engine — read only once the engine ships, 0.102.0; no setter, edit `config.json`): the command the engine uses to re-run ONE test for the TEST effective check, a template with `{file}` and `{name}` (e.g. `flutter test --no-pub {file} --plain-name {name}`). Absent → the engine's built-in exact-name command for the runner it recognises (flutter, dart, jest, vitest, pytest, go, unittest); a runner it cannot recognise from `commands.test` leaves the check `unverified` (sampled by a person) until this is set. Read from the base branch's committed config, never the Issue branch's.
+- `commands` (test/lint/typecheck/build/e2e/vrt), `sprint.capacity`/`sprint.history` and `sprint.board` have the **same gap** (⚠ `sprint.window` does **not** — it has a `--window=` setter): they are part of the real schema and shown in "Show current config" above, but `config`'s "Set a value" section has no setter for them (`sprint.max_stack_depth` and `sprint.refactor_slot` do have one) — an attempt to change it (e.g. after a build-tool migration changes the test command) falls into "Other keys → unknown/unsupported," same as any other unrecognized key. Edit `.claude/guild/harness.json` directly for now.

@@ -1,0 +1,78 @@
+{
+  "format": 1,
+  "issue": 42,
+  "step": "verification-frozen",
+  "attempt": 1,
+  "kind": "run",
+  "started_at": "2026-11-23T01:02:03Z",
+  "ended_at": "2026-11-23T01:02:03Z",
+  "duration_s": 12.5,
+  "base_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "merge_base": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "start_head": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "end_head": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "start_tree": {
+    "clean": true,
+    "dirty_files": []
+  },
+  "end_tree": {
+    "clean": true,
+    "dirty_files": []
+  },
+  "exit_code": 1,
+  "changed_files": [
+    {
+      "path": "src/a.py",
+      "change": "modified",
+      "from": null,
+      "where": "committed"
+    },
+    {
+      "path": "src/b.py",
+      "change": "renamed",
+      "from": "src/old_b.py",
+      "where": "committed"
+    }
+  ],
+  "commits": [],
+  "outputs": [],
+  "control_files": {
+    "ok": true,
+    "changed": []
+  },
+  "ownership": {
+    "ok": true,
+    "foreign": []
+  },
+  "judge_writes_outside": null,
+  "reentry": null,
+  "session": null,
+  "run": {
+    "name": "verification-frozen",
+    "exit_code": 1,
+    "timed_out": false,
+    "log_file": "run.log",
+    "rerun": null,
+    "base_run": null,
+    "head": null,
+    "head_rerun": null,
+    "evidence": null,
+    "paths_check": {
+      "ok": false,
+      "violations": [
+        {
+          "path": "test/a_test.dart",
+          "change": "modified",
+          "from": null
+        }
+      ]
+    }
+  },
+  "outcome": {
+    "status": "failed",
+    "code": "check-failed",
+    "detail": "verification-changed",
+    "stop": null
+  },
+  "warnings": []
+}

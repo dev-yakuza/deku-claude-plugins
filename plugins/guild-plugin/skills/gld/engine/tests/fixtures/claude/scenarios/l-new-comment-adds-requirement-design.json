@@ -1,0 +1,15 @@
+{
+  "format": 1,
+  "description": "Stage 2 leader, new collaborator comment: a comment adds a requirement but the rerun names design, not analyze — refused by D16 (L11, adds-requirement-not-analyze).",
+  "stream": "../leader/real-2.1.323/new-comment-escalate.jsonl",
+  "init_from_argv": true,
+  "leader": {"example": "leader-answer-new-comment", "expect": "adds-requirement-not-analyze"},
+  "structured_output": {
+    "answer": "rerun",
+    "reason": "assumption-corrected",
+    "step": "design",
+    "note": "The owner wants a reset button too.",
+    "recommendation": null,
+    "comments": [{"id": 9101, "effect": "adds-requirement"}, {"id": 9102, "effect": "none"}]
+  }
+}

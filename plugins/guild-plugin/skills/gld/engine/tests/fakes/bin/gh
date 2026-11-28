@@ -1,0 +1,80 @@
+#!/usr/bin/env -S python3 -I
+"""Fake `gh` for engine tests — records every call, answers from fixture rules (scope §6.2).
+
+Put tests/fakes/bin first on PATH. Environment:
+  GLD_FAKE_GH_FIXTURES  JSON file {"rules": [rule, …]}.
+  GLD_FAKE_GH_LOG       directory; appends one JSON line per call to calls.jsonl
+                       {argv, cwd, stdin, rule} and keeps rule use counts in uses.json.
+
+Rule: {"args": ["api", "-X", "PATCH", "repos/*/issues/comments/*"],  fnmatch per element
+       "prefix": false,       true = the rule's args are a prefix of argv
+       "stdout": "text" | "json": {…},  "stderr": "", "exit_code": 0,
+       "times": null}         a number = the rule answers that many calls, then is skipped
+The first matching rule answers. No match → exit 1 with a "no fixture" message (fail-closed),
+so an unexpected GitHub call fails the test instead of passing silently.
+stdin is read only when argv asks for it (`-`, `--input -`, `--body-file -`, `x=@-`).
+"""
+
+import fnmatch
+import json
+import os
+import sys
+
+
+def _matches(rule, argv):
+    pat = rule["args"]
+    if rule.get("prefix"):
+        if len(argv) < len(pat):
+            return False
+        argv = argv[: len(pat)]
+    elif len(argv) != len(pat):
+        return False
+    return all(fnmatch.fnmatchcase(a, p) for a, p in zip(argv, pat))
+
+
+def main(argv):
+    log_dir = os.environ.get("GLD_FAKE_GH_LOG")
+    fx = os.environ.get("GLD_FAKE_GH_FIXTURES")
+    stdin = None
+    if "-" in argv or any(a.endswith("=@-") for a in argv):
+        stdin = sys.stdin.read()
+    rules = []
+    if fx:
+        with open(fx, encoding="utf-8") as f:
+            rules = json.load(f).get("rules", [])
+    uses = {}
+    uses_path = os.path.join(log_dir, "uses.json") if log_dir else None
+    if uses_path and os.path.exists(uses_path):
+        with open(uses_path, encoding="utf-8") as f:
+            uses = json.load(f)
+    chosen = None
+    for i, rule in enumerate(rules):
+        if not _matches(rule, argv):
+            continue
+        if rule.get("times") is not None and uses.get(str(i), 0) >= rule["times"]:
+            continue
+        chosen = i
+        break
+    if log_dir:
+        os.makedirs(log_dir, exist_ok=True)
+        with open(os.path.join(log_dir, "calls.jsonl"), "a", encoding="utf-8") as f:
+            f.write(json.dumps({"argv": argv, "cwd": os.getcwd(), "stdin": stdin, "rule": chosen}, ensure_ascii=False) + "\n")
+        if chosen is not None:
+            uses[str(chosen)] = uses.get(str(chosen), 0) + 1
+            with open(uses_path, "w", encoding="utf-8") as f:
+                json.dump(uses, f)
+    if chosen is None:
+        sys.stderr.write("fake gh: no fixture rule matches: " + json.dumps(argv) + "\n")
+        return 1
+    rule = rules[chosen]
+    if "json" in rule:
+        sys.stdout.write(json.dumps(rule["json"], ensure_ascii=False) + "\n")
+    elif "stdout" in rule:
+        sys.stdout.write(rule["stdout"])
+    if rule.get("stderr"):
+        sys.stderr.write(rule["stderr"])
+    return int(rule.get("exit_code", 0))
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

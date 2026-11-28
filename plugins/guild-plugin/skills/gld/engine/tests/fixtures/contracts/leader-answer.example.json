@@ -1,0 +1,19 @@
+{
+  "fill": {
+    "{answers}": ["rerun", "replan", "escalate"],
+    "{rerun_steps}": ["analyze", "ac-format", "design"],
+    "{human_answers}": ["rerun", "replan", "escalate"],
+    "{human_rerun_steps}": ["analyze", "ac-format", "design"]
+  },
+  "answer": {
+    "answer": "escalate",
+    "reason": "needs-human-decision",
+    "step": null,
+    "note": "The design step is blocked on a product decision (which screens get the setting).",
+    "recommendation": {
+      "answer": "rerun",
+      "step": "design",
+      "note": "After the owner decides the screens, run design again with that decision."
+    }
+  }
+}

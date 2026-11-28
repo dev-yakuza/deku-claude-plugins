@@ -1,0 +1,45 @@
+{
+  "fill": {
+    "{answers}": [
+      "continue",
+      "rerun",
+      "escalate"
+    ],
+    "{rerun_steps}": [
+      "analyze",
+      "design",
+      "implement"
+    ],
+    "{human_answers}": [
+      "continue",
+      "rerun",
+      "escalate"
+    ],
+    "{human_rerun_steps}": [
+      "analyze",
+      "design",
+      "implement"
+    ],
+    "{review_ids}": [
+      "review:5001",
+      "review-comment:6001"
+    ]
+  },
+  "answer": {
+    "answer": "rerun",
+    "reason": "real-defect",
+    "step": "implement",
+    "note": "Handle the empty list as the reviewer asks.",
+    "recommendation": null,
+    "reviews": [
+      {
+        "id": "review:5001",
+        "effect": "change-request"
+      },
+      {
+        "id": "review-comment:6001",
+        "effect": "change-request"
+      }
+    ]
+  }
+}

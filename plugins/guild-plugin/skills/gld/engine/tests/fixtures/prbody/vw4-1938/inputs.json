@@ -1,0 +1,1366 @@
+{
+ "_comment": "VW4 #1938 (owner/app_a, engine 20f90cb, 2026-11-26): what prbody.build read for PR #1987, rebuilt read-only from the archived engine records (validation-archive/app_a-1938/runs/s4-final) and the repository blobs (procedure.yaml / analysis.md at ef3059a, config at a0bb960); trimmed to the fields prbody reads, personal paths replaced. The rebuilt body equals PR #1987's but for the E3 note fix (552f68c) and the closing line github.create_pr appends.",
+ "analysis": "# Analysis — #1938\n\ntype: refactor\nsize: small\nrisk: low\nsplit: none\nprerequisite: met — #1933 closed as completed\nsafety_net: only\n\n## Interpretation\n\n이슈는 `KanjiStrokesSection` 의 획순 탐침이 `didChangeDependencies` 재호출에도 한 번만 실행된다는 현재 동작을 테스트로 고정해 달라는 요청이다. 운영 코드(`lib/`)는 바꾸지 않는다.\n\n가능한 읽기:\n\n1. **(선택) 테스트만 추가한다.** 자산 `load` 호출을 세는 테스트용 번들로 섹션을 그리고, 섹션 State 의 `didChangeDependencies` 가 실제로 다시 불리는 의존성 변경을 일으킨 뒤 로드 횟수가 처음과 같음을 단언한다. 플래그를 지운 코드에서 이 테스트가 실패함을 뮤테이션으로 확인하고, 운영 코드는 원래대로 둔다.\n2. 테스트와 함께 탐침을 `initState` 쪽으로 되돌리거나 플래그 구조를 바꾼다 — 이슈가 요구하지 않은 운영 코드 변경이다. 결과: 리팩터 범위로 커지고 골든 회귀 위험이 생긴다.\n3. 섹션이 아니라 `SvgAssetStrokeSource` 단위만 테스트한다 — 플래그는 섹션 State 에 있으므로 이 읽기로는 플래그 제거를 잡지 못한다. 결과: 뮤테이션 실패 기준인 AC #3 을 만족하지 못한다.\n\n주의: 현재 섹션 State 는 `DefaultAssetBundle.of(context)` 에만 직접 의존하고, 크기는 `Get.context` 의 `MediaQuery` 로 읽으며 테마는 `Get.isDarkMode` 로 읽는다. 따라서 이슈가 예로 든 `MediaQuery`·테마 변경이 섹션 State 의 `didChangeDependencies` 를 실제로 다시 부르지 않을 수 있다. 어떤 변경을 쓸지는 design 이 정하되, 실제로 재호출을 일으킨다는 것은 뮤테이션 기준인 AC #3 으로 증명돼야 한다.\n\n## Acceptance criteria\n\n- AC #1: 자산 `load` 호출 횟수를 세는 테스트용 번들을 `DefaultAssetBundle` 로 주입해 `KanjiStrokesSection` 을 그리는 위젯 테스트가 추가된다. 이 테스트는 첫 그리기 후 탐침이 끝난 시점의 획순 자산 로드 횟수를 기록한다. (must)\n- AC #2: 같은 테스트에서 섹션 State 를 유지한 채 의존성 변경을 일으켜 다시 그린 뒤, 획순 자산 로드 횟수가 AC #1 에서 기록한 값과 같음을 단언하고, 현재 코드에서 이 테스트는 통과한다. (must)\n- AC #3: `_isProbeStarted` 의 한 번만 실행 가드를 제거한 코드(뮤테이션)에서 이 테스트가 실패하고, 그 실패를 러너 원문 출력으로 기록한다. 뮤테이션은 되돌려져 최종 diff 에 남지 않는다. (must)\n- AC #4: 새 테스트의 다시 그리기는 원래 섹션 State 를 버리고 새로 만드는 방식(키 변경, 위젯 트리 교체 등)이 아니다. 즉 같은 State 에서 `didChangeDependencies` 가 다시 불리는 경로를 쓴다. (must)\n- AC #5: 첫 탐침이 실제로 하나 이상의 자산을 읽는다. 즉 AC #1 의 로드 횟수가 0보다 크다. 이렇게 해서 \"아무것도 읽지 않아 같다\" 로 통과하는 공허한 테스트를 막는다. (must)\n- AC #6: `lib/` 아래 운영 코드는 변경되지 않는다. `git diff --stat origin/main...HEAD -- lib` 가 비어 있다. (must)\n- AC #7: 기존 `test/features/kanji_detail_modal/**` 테스트 케이스의 본문·단언·골든 파일명·`tags` 는 바뀌지 않는다. 새 테스트 케이스와 그에 필요한 import·헬퍼 추가만 허용한다. (must)\n- AC #8: 골든 PNG 는 한 장도 추가·수정·삭제되지 않는다. `git diff --stat origin/main...HEAD -- '*.png'` 가 비어 있다. (must)\n- AC #9: 기존 한자 모달 테스트(`test/features/kanji_detail_modal/**`)와 전체 유닛 테스트 커맨드(`docs/standards/verification.md`)가 green 이다. (must)\n- AC #10: 새 테스트의 이름(`testWidgets`/`group`)에는 이슈 번호나 스펙 케이스 ID 를 넣지 않는다. 이름만 읽어도 \"다시 그려도 획순 탐침은 한 번만 자산을 읽는다\" 는 취지가 드러나는 서술형이다. (should)\n\n## Requirement map\n\n| Issue requirement | AC |\n|---|---|\n| 자산 로드 횟수를 세는 테스트용 번들로 `KanjiStrokesSection` 을 그린다 | AC #1, #5 |\n| 의존성 변경을 일으켜 다시 그려도(예: `MediaQuery` 또는 테마 변경) 탐침 로드 횟수가 처음과 같다 | AC #2, #4 |\n| 플래그를 제거한 코드에서는 이 테스트가 실패한다(뮤테이션으로 확인) | AC #3 |\n| 기존 한자 모달 테스트·골든은 바뀌지 않는다 | AC #7, #8, #9 |\n| (배경) 플래그가 탐침을 한 번만 돌게 막는 현재 동작을 고정한다 — 운영 코드 변경 없이 | AC #6 |\n| (근거) `docs/specs/1933/skeleton.md` §8.2 \"load 호출 횟수를 세는 가짜로 재호출 시 증가하지 않음을 S 케이스 하나로 고정\" | AC #1, #2 |\n| (표준 quality-bar) 테스트 이름은 자기완결적 서술 | AC #10 |\n\n## Assumptions\n\n- 이 이슈는 테스트만 추가하는 안전망 작업이다. `lib/` 의 운영 코드는 바꾸지 않는다(`safety_net: only`).\n- 선행 이슈 #1933 은 완료(CLOSED/COMPLETED)됐다. 현재 코드에 `_isProbeStarted` 플래그와 `DefaultAssetBundle` 주입 경로가 실제로 있음을 확인했다(`lib/features/kanji_detail_modal/widgets/kanji_strokes_section.dart`).\n- 이슈의 \"`MediaQuery` 또는 테마 변경\" 은 예시로 읽는다. 섹션 State 는 `MediaQuery`·테마에 `context` 로 직접 의존하지 않으므로 이 변경이 재호출을 일으키지 않을 수 있다. 재호출을 실제로 일으키는 어떤 의존성 변경이든 허용하고, AC #3 의 뮤테이션 실패로 효과를 증명한다.\n- \"탐침 로드 횟수\" 는 획순 SVG 키(`assets/kanji/…`)에 대한 `load` 호출 수로 센다. `SvgPicture` 렌더링도 같은 번들을 읽을 수 있으므로, 탐침 호출을 렌더 호출과 구분하거나 둘을 합쳐도 재그리기 전후 비교가 뮤테이션을 잡는 방식인지는 design 이 정한다.\n- 카운팅 번들은 기존 `test/helpers/fake_kanji_asset_bundle.dart` 를 감싸거나 확장해도 되고 새 헬퍼여도 된다. 기존 헬퍼의 동작(없는 키는 `FlutterError`)은 바꾸지 않는다.\n- 새 테스트는 기존 `kanji_strokes_section_test.dart` 에 케이스로 추가해도 되고 새 파일이어도 된다. 기존 케이스는 그대로 둔다.\n- 뮤테이션 증거는 PR 기록(러너 원문)으로 남기며, 뮤테이션 자체를 자동화하는 스크립트나 CI 변경은 하지 않는다.\n- 라벨대로 `type: refactor` 로 분류했다. 관찰 가능한 동작 변경은 없다.\n",
+ "config": {
+  "cache_env": {
+   "COREPACK_HOME": "{cache}/corepack",
+   "CP_HOME_DIR": "{cache}/cocoapods",
+   "GRADLE_USER_HOME": "{cache}/gradle",
+   "GLD_FLUTTER_ROOT": "{cache}/flutter-sdk",
+   "GLD_HOME": "{cache}/home",
+   "PUB_CACHE": "{cache}/pub",
+   "npm_config_cache": "{cache}/npm"
+  },
+  "commands": {
+   "ac-coverage": {
+    "plugin": "ac-coverage"
+   },
+   "ac-format": {
+    "plugin": "ac-format"
+   },
+   "check-verification-doc-refs": {
+    "cmd": "export PATH=\"$GLD_FLUTTER_ROOT/bin:$PATH\"; export GIT_CONFIG_GLOBAL=\"${GIT_CONFIG_GLOBAL:-$HOME/.gitconfig}\"; export HOME=\"$GLD_HOME\"; mkdir -p \"$HOME\"; bash scripts/check_verification_doc_refs.sh",
+    "description": "CI markdown/check › run"
+   },
+   "lint": {
+    "cmd": "export PATH=\"$GLD_FLUTTER_ROOT/bin:$PATH\"; export GIT_CONFIG_GLOBAL=\"${GIT_CONFIG_GLOBAL:-$HOME/.gitconfig}\"; export HOME=\"$GLD_HOME\"; mkdir -p \"$HOME\"; flutter analyze && npx cspell '**' --gitignore --no-progress && npx remark . --quiet --frail",
+    "description": "0.98.7 commands.lint"
+   },
+   "no-production-change": {
+    "plugin": "no-production-change"
+   },
+   "repro-red": {
+    "plugin": "repro-red"
+   },
+   "safety-net-proof": {
+    "plugin": "safety-net-proof"
+   },
+   "setup": {
+    "cmd": "export PATH=\"$GLD_FLUTTER_ROOT/bin:$PATH\"; export GIT_CONFIG_GLOBAL=\"${GIT_CONFIG_GLOBAL:-$HOME/.gitconfig}\"; export HOME=\"$GLD_HOME\"; mkdir -p \"$HOME\"; npm ci && flutter pub get --enforce-lockfile",
+    "description": "lockfile-pinned install (§7.12 S8)"
+   },
+   "test": {
+    "cmd": "export PATH=\"$GLD_FLUTTER_ROOT/bin:$PATH\"; export GIT_CONFIG_GLOBAL=\"${GIT_CONFIG_GLOBAL:-$HOME/.gitconfig}\"; export HOME=\"$GLD_HOME\"; mkdir -p \"$HOME\"; flutter test --fail-fast --concurrency=12 --file-reporter json:build/guild-test-report.json $(find test -name '*_test.dart' ! -path test/bin/smoke_external_steps_test.dart | sort) && printf '%s\\n' '{\"type\":\"suite\",\"suite\":{\"path\":\"test/bin/smoke_external_steps_test.dart\"}}' > build/guild-quarantine-suites.json && scripts/verify_test_coverage.sh build/guild-test-report.json build/guild-quarantine-suites.json",
+    "description": "0.98.7 commands.test; human decision: quarantine (2026-11-23): flutter test has no file-exclusion option, so the command passes every test/**/*_test.dart except the quarantined file; scripts/verify_test_coverage.sh (0.98.7 coverage check, unchanged) gets a second report that declares the quarantined suite, so the deliberate exclusion is not read as a silent drop while every other file is still checked"
+   },
+   "verification-frozen": {
+    "plugin": "verification-frozen"
+   },
+   "verify-gate": {
+    "plugin": "verify-gate"
+   }
+  },
+  "followups_dry_run": true,
+  "format": 1,
+  "not_checked_locally": [
+   {
+    "name": "code_quality/golden_test",
+    "note": "needs sudo (CI machine setup); rewrites git state; rewrites tracked files (golden / fix / write mode); step 'Check if golden tests exist': shell logic (if / loops / heredoc); uses GitHub runner variables; uses a workflow expression (PR context / CI runner values)"
+   },
+   {
+    "name": "code_quality/test_all",
+    "note": "needs sudo (CI machine setup)"
+   },
+   {
+    "name": "code_quality/upload-failure-golden-images",
+    "note": "needs sudo (CI machine setup); rewrites git state; rewrites tracked files (golden / fix / write mode); uses GitHub runner variables; uses a workflow expression (PR context / CI runner values); uses actions/github-script"
+   },
+   {
+    "name": "e2e_test/e2e_test",
+    "note": "needs an Android emulator / SDK manager; needs sudo (CI machine setup); step 'Free up disk space': shell logic (if / loops / heredoc); uses reactivecircus/android-emulator-runner; whole job is bound to the CI machine — its other commands were not carried"
+   },
+   {
+    "name": "set_assignees/set-assignees",
+    "note": "uses actions/github-script"
+   },
+   {
+    "name": "update_release_notes_draft/validate_pr",
+    "note": "uses Slashgear/action-check-pr-title; uses danielchabr/pr-labels-checker; uses release-drafter/release-drafter/autolabeler"
+   },
+   {
+    "name": "update_release_notes_draft/update_release_draft",
+    "note": "uses release-drafter/release-drafter"
+   },
+   {
+    "name": "build",
+    "note": "flutter build apk needs GitHub release hosts, Android SDK writes and the signing key (key.properties is a secret path) inside srt (measured 2026-11-23, tools/out/BASE_GREEN.md) (base-green check: cannot run inside the sandbox — human decision)"
+   },
+   {
+    "name": "e2e",
+    "note": "needs an Android emulator and the adb server socket, impossible inside srt (measured 2026-11-23; CI also needs an emulator + KVM) (base-green check: cannot run inside the sandbox — human decision)"
+   }
+  ],
+  "path_rules": [
+   {
+    "category": "golden",
+    "globs": [
+     "test/**/goldens/**"
+    ],
+    "kind": "verification",
+    "note": "0.98.7 visual.baselines"
+   },
+   {
+    "category": "comparison-config",
+    "globs": [
+     "**/flutter_test_config.dart",
+     "dart_test.yaml",
+     "test/helpers/load_font.dart"
+    ],
+    "kind": "verification",
+    "note": "0.98.7 visual.config_files"
+   },
+   {
+    "category": "test",
+    "globs": [
+     "test/**",
+     "integration_test/**",
+     "**/*_test.dart",
+     "**/*.test.*",
+     "**/tests/**",
+     "**/test_*.py"
+    ],
+    "kind": "verification",
+    "note": "test directories and files (by stack, only patterns that match tracked files)"
+   },
+   {
+    "category": "ci",
+    "globs": [
+     ".github/workflows/**",
+     ".github/actions/**"
+    ],
+    "kind": "verification",
+    "note": "CI configuration"
+   },
+   {
+    "category": "runner",
+    "globs": [
+     "scripts/verify_test_coverage.sh",
+     "scripts/check_verification_doc_refs.sh",
+     "scripts/check_test_coverage_wiring.sh",
+     "scripts/verify_release_notes_length.sh",
+     "package.json",
+     "**/package.json",
+     "pubspec.yaml",
+     "analysis_options.yaml",
+     "dart_test.yaml",
+     "lefthook.yml",
+     ".cspell.json",
+     ".remarkrc.json",
+     ".remarkignore",
+     ".fvmrc",
+     ".nvmrc"
+    ],
+    "kind": "verification",
+    "note": "command definition files and the wrappers / scripts the named commands run (I11 b)"
+   },
+   {
+    "globs": [
+     "**/tests/**/*.py",
+     "integration_test/**/*.dart",
+     "test/**/*_test.dart"
+    ],
+    "kind": "test-code",
+    "note": "test source files of the repository (stage 3 E4 — never goldens, snapshots or config); reviewed by a human (V19 — every line judged in report.md)"
+   },
+   {
+    "globs": [
+     "test/**/*_safety_net_test.dart"
+    ],
+    "kind": "safety-net",
+    "note": "safety-net file names (0.98.7 refactor: new files with a safety-net name); reviewed by a human (V19 — every line judged in report.md)"
+   },
+   {
+    "area": "security",
+    "gate": "security-review",
+    "globs": [
+     "lib/controller/iap_controller.dart",
+     "lib/controller/store/iap_store.dart",
+     "lib/helpers/google_api_helpers/google_auth_client.dart",
+     "lib/services/sync/google_sign_in_failure.dart",
+     "lib/services/api_service/api_service.dart",
+     "lib/controller/sync_data_controller.dart",
+     "lib/helpers/google_api_helpers/google_drive_helper.dart",
+     "lib/env/**",
+     "env/*/src/env/**"
+    ],
+    "kind": "risk",
+    "note": "REVIEWED (V19 human review — every line judged in report.md): 0.98.7 Section G security trigger: path-name candidates and human additions"
+   },
+   {
+    "area": "data-migration",
+    "gate": "data-review",
+    "globs": [
+     "lib/helpers/db_helper.dart"
+    ],
+    "kind": "risk",
+    "note": "REVIEWED (V19 human review — every line judged in report.md): 0.98.7 Section G data-migration trigger: path-name candidates and human additions"
+   },
+   {
+    "category": "external-side-effect",
+    "globs": [
+     ".github/workflows/publish_release_notes.yml",
+     ".github/workflows/release_android.yml",
+     ".github/workflows/release_ios.yml",
+     ".github/workflows/update_release_notes_draft.yml",
+     "android/fastlane/**",
+     "ios/fastlane/**"
+    ],
+    "kind": "irreversible",
+    "note": "REVIEWED (V19 human review — every line judged in report.md): tool candidates (release / deploy / publish workflows — a merged change acts outside the repository) and human additions"
+   },
+   {
+    "category": "human-executed",
+    "globs": [
+     "bin/release_app.dart"
+    ],
+    "kind": "irreversible",
+    "note": "REVIEWED (V19 human review — every line judged in report.md): tool candidates (SQL migrations a human runs) and human additions"
+   },
+   {
+    "category": "hard-to-revert",
+    "globs": [
+     "lib/helpers/db_helper.dart"
+    ],
+    "kind": "irreversible",
+    "note": "REVIEWED (V19 human review — every line judged in report.md): tool candidates (schema / migration code (a bad migration is hard to revert once it ran)) and human additions"
+   }
+  ],
+  "quarantine": [
+   {
+    "added": "2026-11-23",
+    "note": "fails only inside srt: '에뮬레이터 launch 실행기 초과 시 띄워진 에뮬레이터는 남기고 나머지 하위 프로세스만 종료한다' checks with `pgrep -f` that the emulator child is still alive, and srt does not let pgrep see processes (the file's other `pgrep` checks expect 'not alive' and pass for that reason too); 9431 of 9432 tests pass in srt; alone the file fails in srt ('pgrep: Cannot get process list') and passes 57/57 without the sandbox (measured 2026-11-23, tools/out/app_a/base-check-quarantine/)",
+    "test": "test/bin/smoke_external_steps_test.dart"
+   }
+  ],
+  "registry_hosts": [
+   "registry.npmjs.org",
+   "pub.dev",
+   "storage.googleapis.com",
+   "cdn.cocoapods.org"
+  ],
+  "run_timeout_min": 30,
+  "sandbox_exceptions": {
+   "allow_local_binding": true,
+   "allow_write": [
+    "{user_tmp}"
+   ],
+   "note": "approved 2026-11-23: measured need, BASE_GREEN.md",
+   "weaker_network_isolation": true
+  },
+  "secret_paths": [
+   ".env*",
+   "*.pem",
+   "*.p12",
+   "*.key",
+   "**/.env*",
+   "**/*.pem",
+   "**/*.p12",
+   "**/*.key",
+   "**/*.keystore",
+   "**/*.p8",
+   "**/api-*-*.json",
+   "**/key.properties"
+  ],
+  "source": {
+   "at": "2026-11-25T00:38:53Z",
+   "by": "tools/convert_config.py v1",
+   "converted_from": ".claude/guild/config.json v0.102.3 @ /home/user/projects/app_a @ main (cf570960e05b)"
+  },
+  "toolchain_prepare": [
+   {
+    "description": "per-repository Flutter SDK copy in the Guild cache: a file copy outside the sandbox, re-made at every engine start (§7.12 S8: the user's SDK is only read; P3-Z decision 4)",
+    "name": "flutter-sdk",
+    "sync": {
+     "from": [
+      "{home}/fvm/versions/3.47.7"
+     ],
+     "to": "flutter-sdk"
+    }
+   },
+   {
+    "cmd": "export PATH=\"$GLD_FLUTTER_ROOT/bin:$PATH\"; export GIT_CONFIG_GLOBAL=\"${GIT_CONFIG_GLOBAL:-$HOME/.gitconfig}\"; export HOME=\"$GLD_HOME\"; mkdir -p \"$HOME\"; flutter precache",
+    "description": "artifacts of the private SDK copy, inside srt (needs storage.googleapis.com in registry_hosts)",
+    "name": "flutter-precache"
+   }
+  ],
+  "worktree_prepare": [
+   {
+    "copy": "lib/env/env.dart",
+    "note": "0.98.7 engine.effective.copy_ignored"
+   },
+   {
+    "copy": "lib/firebase_options.dart",
+    "note": "0.98.7 engine.effective.copy_ignored"
+   },
+   {
+    "copy": "assets/data.db",
+    "note": "0.98.7 engine.effective.copy_ignored"
+   },
+   {
+    "copy": "lib/controller/tts_controller/wrong_words.dart",
+    "note": "0.98.7 engine.effective.copy_ignored"
+   },
+   {
+    "copy": ".dart_tool/hooks_runner/shared/sqlite3/**",
+    "note": "sqlite3 build-hook download cache (ignored generated files) — avoids opening github.com"
+   }
+  ]
+ },
+ "facts_by_step": {
+  "ac-coverage": {
+   "attempt": 3,
+   "changed_files": [
+    {
+     "from": null,
+     "path": "docs/specs/1938/analysis.md"
+    },
+    {
+     "from": null,
+     "path": "docs/specs/1938/mutations.json"
+    },
+    {
+     "from": null,
+     "path": "docs/specs/1938/procedure.yaml"
+    },
+    {
+     "from": null,
+     "path": "docs/specs/1938/test-cases.md"
+    },
+    {
+     "from": null,
+     "path": "test/features/kanji_detail_modal/widgets/kanji_strokes_section_probe_safety_net_test.dart"
+    }
+   ],
+   "end_head": "ef3059a873375d95fabb48b8ab76a00cc507c830",
+   "end_tree": {
+    "clean": true
+   },
+   "golden": [],
+   "run": {
+    "base_run": null,
+    "exit_code": 0,
+    "log_file": "run.log",
+    "rerun": null,
+    "timed_out": false
+   },
+   "session": null,
+   "warnings": []
+  },
+  "ac-format": {
+   "attempt": 3,
+   "changed_files": [
+    {
+     "from": null,
+     "path": "docs/specs/1938/analysis.md"
+    },
+    {
+     "from": null,
+     "path": "docs/specs/1938/mutations.json"
+    },
+    {
+     "from": null,
+     "path": "docs/specs/1938/procedure.yaml"
+    },
+    {
+     "from": null,
+     "path": "docs/specs/1938/test-cases.md"
+    },
+    {
+     "from": null,
+     "path": "test/features/kanji_detail_modal/widgets/kanji_strokes_section_probe_safety_net_test.dart"
+    }
+   ],
+   "end_head": "ef3059a873375d95fabb48b8ab76a00cc507c830",
+   "end_tree": {
+    "clean": true
+   },
+   "golden": [],
+   "run": {
+    "base_run": null,
+    "exit_code": 0,
+    "log_file": "run.log",
+    "rerun": null,
+    "timed_out": false
+   },
+   "session": null,
+   "warnings": []
+  },
+  "analyze": {
+   "attempt": 1,
+   "changed_files": [
+    {
+     "from": null,
+     "path": "docs/specs/1938/procedure.yaml"
+    },
+    {
+     "from": null,
+     "path": "docs/specs/1938/analysis.md"
+    }
+   ],
+   "end_head": "b557790cd2792bea85ac4892407853e7ab348b6b",
+   "end_tree": {
+    "clean": false
+   },
+   "golden": [],
+   "run": null,
+   "session": {
+    "permission_denials": []
+   },
+   "warnings": []
+  },
+  "check-verification-doc-refs": {
+   "attempt": 2,
+   "changed_files": [
+    {
+     "from": null,
+     "path": "docs/specs/1938/analysis.md"
+    },
+    {
+     "from": null,
+     "path": "docs/specs/1938/mutations.json"
+    },
+    {
+     "from": null,
+     "path": "docs/specs/1938/procedure.yaml"
+    },
+    {
+     "from": null,
+     "path": "docs/specs/1938/test-cases.md"
+    },
+    {
+     "from": null,
+     "path": "test/features/kanji_detail_modal/widgets/kanji_strokes_section_probe_safety_net_test.dart"
+    }
+   ],
+   "end_head": "ef3059a873375d95fabb48b8ab76a00cc507c830",
+   "end_tree": {
+    "clean": true
+   },
+   "golden": [],
+   "run": {
+    "base_run": null,
+    "exit_code": 0,
+    "log_file": "run.log",
+    "rerun": null,
+    "timed_out": false
+   },
+   "session": null,
+   "warnings": []
+  },
+  "done-gate": {
+   "attempt": 2,
+   "changed_files": [
+    {
+     "from": null,
+     "path": "docs/specs/1938/analysis.md"
+    },
+    {
+     "from": null,
+     "path": "docs/specs/1938/mutations.json"
+    },
+    {
+     "from": null,
+     "path": "docs/specs/1938/procedure.yaml"
+    },
+    {
+     "from": null,
+     "path": "docs/specs/1938/test-cases.md"
+    },
+    {
+     "from": null,
+     "path": "test/features/kanji_detail_modal/widgets/kanji_strokes_section_probe_safety_net_test.dart"
+    }
+   ],
+   "end_head": "ef3059a873375d95fabb48b8ab76a00cc507c830",
+   "end_tree": {
+    "clean": true
+   },
+   "golden": [],
+   "run": null,
+   "session": {
+    "permission_denials": []
+   },
+   "warnings": []
+  },
+  "followups": {
+   "attempt": 1,
+   "changed_files": [
+    {
+     "from": null,
+     "path": "docs/specs/1938/analysis.md"
+    },
+    {
+     "from": null,
+     "path": "docs/specs/1938/mutations.json"
+    },
+    {
+     "from": null,
+     "path": "docs/specs/1938/procedure.yaml"
+    },
+    {
+     "from": null,
+     "path": "docs/specs/1938/test-cases.md"
+    },
+    {
+     "from": null,
+     "path": "test/features/kanji_detail_modal/widgets/kanji_strokes_section_probe_safety_net_test.dart"
+    }
+   ],
+   "end_head": "ef3059a873375d95fabb48b8ab76a00cc507c830",
+   "end_tree": {
+    "clean": true
+   },
+   "golden": [],
+   "run": null,
+   "session": null,
+   "warnings": []
+  },
+  "lint": {
+   "attempt": 2,
+   "changed_files": [
+    {
+     "from": null,
+     "path": "docs/specs/1938/analysis.md"
+    },
+    {
+     "from": null,
+     "path": "docs/specs/1938/mutations.json"
+    },
+    {
+     "from": null,
+     "path": "docs/specs/1938/procedure.yaml"
+    },
+    {
+     "from": null,
+     "path": "docs/specs/1938/test-cases.md"
+    },
+    {
+     "from": null,
+     "path": "test/features/kanji_detail_modal/widgets/kanji_strokes_section_probe_safety_net_test.dart"
+    }
+   ],
+   "end_head": "ef3059a873375d95fabb48b8ab76a00cc507c830",
+   "end_tree": {
+    "clean": true
+   },
+   "golden": [],
+   "run": {
+    "base_run": null,
+    "exit_code": 0,
+    "log_file": "run.log",
+    "rerun": null,
+    "timed_out": false
+   },
+   "session": null,
+   "warnings": []
+  },
+  "no-production-change": {
+   "attempt": 2,
+   "changed_files": [
+    {
+     "from": null,
+     "path": "docs/specs/1938/analysis.md"
+    },
+    {
+     "from": null,
+     "path": "docs/specs/1938/mutations.json"
+    },
+    {
+     "from": null,
+     "path": "docs/specs/1938/procedure.yaml"
+    },
+    {
+     "from": null,
+     "path": "docs/specs/1938/test-cases.md"
+    },
+    {
+     "from": null,
+     "path": "test/features/kanji_detail_modal/widgets/kanji_strokes_section_probe_safety_net_test.dart"
+    }
+   ],
+   "end_head": "ef3059a873375d95fabb48b8ab76a00cc507c830",
+   "end_tree": {
+    "clean": true
+   },
+   "golden": [],
+   "run": {
+    "base_rerun": null,
+    "base_run": null,
+    "exit_code": 0,
+    "head": null,
+    "head_rerun": null,
+    "log_file": "run.log",
+    "rerun": null,
+    "timed_out": false
+   },
+   "session": null,
+   "warnings": []
+  },
+  "plan": {
+   "attempt": 1,
+   "changed_files": [
+    {
+     "from": null,
+     "path": "docs/specs/1938/analysis.md"
+    },
+    {
+     "from": null,
+     "path": "docs/specs/1938/procedure.yaml"
+    }
+   ],
+   "end_head": "9dcaa4ac14fdd59b9968e4b8fd9e1307868adcf2",
+   "end_tree": {
+    "clean": true
+   },
+   "golden": [],
+   "run": null,
+   "session": {
+    "permission_denials": []
+   },
+   "warnings": []
+  },
+  "pr": {
+   "attempt": 1,
+   "changed_files": [
+    {
+     "from": null,
+     "path": "docs/specs/1938/analysis.md"
+    },
+    {
+     "from": null,
+     "path": "docs/specs/1938/mutations.json"
+    },
+    {
+     "from": null,
+     "path": "docs/specs/1938/procedure.yaml"
+    },
+    {
+     "from": null,
+     "path": "docs/specs/1938/test-cases.md"
+    },
+    {
+     "from": null,
+     "path": "test/features/kanji_detail_modal/widgets/kanji_strokes_section_probe_safety_net_test.dart"
+    }
+   ],
+   "end_head": "ef3059a873375d95fabb48b8ab76a00cc507c830",
+   "end_tree": {
+    "clean": true
+   },
+   "golden": [],
+   "run": null,
+   "session": null,
+   "warnings": []
+  },
+  "review-audit": {
+   "attempt": 2,
+   "changed_files": [
+    {
+     "from": null,
+     "path": "docs/specs/1938/analysis.md"
+    },
+    {
+     "from": null,
+     "path": "docs/specs/1938/mutations.json"
+    },
+    {
+     "from": null,
+     "path": "docs/specs/1938/procedure.yaml"
+    },
+    {
+     "from": null,
+     "path": "docs/specs/1938/test-cases.md"
+    },
+    {
+     "from": null,
+     "path": "test/features/kanji_detail_modal/widgets/kanji_strokes_section_probe_safety_net_test.dart"
+    }
+   ],
+   "end_head": "ef3059a873375d95fabb48b8ab76a00cc507c830",
+   "end_tree": {
+    "clean": true
+   },
+   "golden": [],
+   "run": null,
+   "session": {
+    "permission_denials": []
+   },
+   "warnings": []
+  },
+  "review-tests": {
+   "attempt": 2,
+   "changed_files": [
+    {
+     "from": null,
+     "path": "docs/specs/1938/analysis.md"
+    },
+    {
+     "from": null,
+     "path": "docs/specs/1938/mutations.json"
+    },
+    {
+     "from": null,
+     "path": "docs/specs/1938/procedure.yaml"
+    },
+    {
+     "from": null,
+     "path": "docs/specs/1938/test-cases.md"
+    },
+    {
+     "from": null,
+     "path": "test/features/kanji_detail_modal/widgets/kanji_strokes_section_probe_safety_net_test.dart"
+    }
+   ],
+   "end_head": "ef3059a873375d95fabb48b8ab76a00cc507c830",
+   "end_tree": {
+    "clean": true
+   },
+   "golden": [],
+   "run": null,
+   "session": {
+    "permission_denials": []
+   },
+   "warnings": []
+  },
+  "safety-net": {
+   "attempt": 3,
+   "changed_files": [
+    {
+     "from": null,
+     "path": "docs/specs/1938/analysis.md"
+    },
+    {
+     "from": null,
+     "path": "docs/specs/1938/mutations.json"
+    },
+    {
+     "from": null,
+     "path": "docs/specs/1938/procedure.yaml"
+    },
+    {
+     "from": null,
+     "path": "docs/specs/1938/test-cases.md"
+    },
+    {
+     "from": null,
+     "path": "test/features/kanji_detail_modal/widgets/kanji_strokes_section_probe_safety_net_test.dart"
+    }
+   ],
+   "end_head": "ef3059a873375d95fabb48b8ab76a00cc507c830",
+   "end_tree": {
+    "clean": true
+   },
+   "golden": [],
+   "run": null,
+   "session": {
+    "permission_denials": []
+   },
+   "warnings": []
+  },
+  "safety-net-proof": {
+   "attempt": 3,
+   "changed_files": [
+    {
+     "from": null,
+     "path": "docs/specs/1938/analysis.md"
+    },
+    {
+     "from": null,
+     "path": "docs/specs/1938/mutations.json"
+    },
+    {
+     "from": null,
+     "path": "docs/specs/1938/procedure.yaml"
+    },
+    {
+     "from": null,
+     "path": "docs/specs/1938/test-cases.md"
+    },
+    {
+     "from": null,
+     "path": "test/features/kanji_detail_modal/widgets/kanji_strokes_section_probe_safety_net_test.dart"
+    }
+   ],
+   "end_head": "ef3059a873375d95fabb48b8ab76a00cc507c830",
+   "end_tree": {
+    "clean": true
+   },
+   "golden": [],
+   "run": {
+    "base_rerun": null,
+    "base_run": null,
+    "evidence": {
+     "overlay": {
+      "files": [
+       {
+        "path": "test/features/kanji_detail_modal/widgets/kanji_strokes_section_probe_safety_net_test.dart"
+       }
+      ]
+     },
+     "scope": {
+      "attempts": [
+       1,
+       2,
+       3
+      ],
+      "ok": true,
+      "outside": [],
+      "step": "safety-net"
+     }
+    },
+    "exit_code": 0,
+    "head": {
+     "exit_code": 0,
+     "log_file": "run-head.log",
+     "timed_out": false
+    },
+    "head_rerun": null,
+    "log_file": "run.log",
+    "rerun": null,
+    "timed_out": false
+   },
+   "session": null,
+   "warnings": []
+  },
+  "setup": {
+   "attempt": 3,
+   "changed_files": [
+    {
+     "from": null,
+     "path": "docs/specs/1938/analysis.md"
+    },
+    {
+     "from": null,
+     "path": "docs/specs/1938/mutations.json"
+    },
+    {
+     "from": null,
+     "path": "docs/specs/1938/procedure.yaml"
+    },
+    {
+     "from": null,
+     "path": "docs/specs/1938/test-cases.md"
+    },
+    {
+     "from": null,
+     "path": "test/features/kanji_detail_modal/widgets/kanji_strokes_section_probe_safety_net_test.dart"
+    }
+   ],
+   "end_head": "ef3059a873375d95fabb48b8ab76a00cc507c830",
+   "end_tree": {
+    "clean": true
+   },
+   "golden": [],
+   "run": {
+    "base_run": null,
+    "exit_code": 0,
+    "log_file": "run.log",
+    "rerun": null,
+    "timed_out": false
+   },
+   "session": null,
+   "warnings": []
+  },
+  "test": {
+   "attempt": 2,
+   "changed_files": [
+    {
+     "from": null,
+     "path": "docs/specs/1938/analysis.md"
+    },
+    {
+     "from": null,
+     "path": "docs/specs/1938/mutations.json"
+    },
+    {
+     "from": null,
+     "path": "docs/specs/1938/procedure.yaml"
+    },
+    {
+     "from": null,
+     "path": "docs/specs/1938/test-cases.md"
+    },
+    {
+     "from": null,
+     "path": "test/features/kanji_detail_modal/widgets/kanji_strokes_section_probe_safety_net_test.dart"
+    }
+   ],
+   "end_head": "ef3059a873375d95fabb48b8ab76a00cc507c830",
+   "end_tree": {
+    "clean": true
+   },
+   "golden": [],
+   "run": {
+    "base_run": null,
+    "exit_code": 0,
+    "log_file": "run.log",
+    "rerun": null,
+    "timed_out": false
+   },
+   "session": null,
+   "warnings": []
+  },
+  "test-cases": {
+   "attempt": 1,
+   "changed_files": [
+    {
+     "from": null,
+     "path": "docs/specs/1938/analysis.md"
+    },
+    {
+     "from": null,
+     "path": "docs/specs/1938/procedure.yaml"
+    },
+    {
+     "from": null,
+     "path": "docs/specs/1938/test-cases.md"
+    }
+   ],
+   "end_head": "87d600ce8501ce0448698d12309b450c63c54015",
+   "end_tree": {
+    "clean": false
+   },
+   "golden": [],
+   "run": null,
+   "session": {
+    "permission_denials": []
+   },
+   "warnings": []
+  },
+  "verify-gate": {
+   "attempt": 2,
+   "changed_files": [
+    {
+     "from": null,
+     "path": "docs/specs/1938/analysis.md"
+    },
+    {
+     "from": null,
+     "path": "docs/specs/1938/mutations.json"
+    },
+    {
+     "from": null,
+     "path": "docs/specs/1938/procedure.yaml"
+    },
+    {
+     "from": null,
+     "path": "docs/specs/1938/test-cases.md"
+    },
+    {
+     "from": null,
+     "path": "test/features/kanji_detail_modal/widgets/kanji_strokes_section_probe_safety_net_test.dart"
+    }
+   ],
+   "end_head": "ef3059a873375d95fabb48b8ab76a00cc507c830",
+   "end_tree": {
+    "clean": true
+   },
+   "golden": [],
+   "run": {
+    "base_run": null,
+    "exit_code": 0,
+    "log_file": "run.log",
+    "rerun": null,
+    "timed_out": false
+   },
+   "session": null,
+   "warnings": []
+  }
+ },
+ "leader": {
+  "discoveries": [
+   {
+    "blocks_current_ac": false,
+    "id": "D1",
+    "kind": "test-gap",
+    "note": "벽시계 시간 20ms 단언이라 전체 스위트를 동시 12개로 돌릴 때 부하로 흔들립니다. safety-net-proof에서는 麟의 warm-max가 23.6ms로 나와 `--fail-fast`가 나머지 테스트를 `did not complete`로 중단시켰습니다. 한자 모달 폴더만 돌렸을 때는 4~10ms였습니다. 이 이슈의 AC와는 무관해서 고치지 않았습니다.",
+    "role": "developer",
+    "where": "test/features/kanji_detail_modal/controller/related_words_query_test.dart:374 (그룹 '조회 속도')"
+   }
+  ],
+  "notes": {
+   "check:done-gate:1": "AC #3(플래그 제거 뮤테이션에서 테스트 실패, 러너 원문 기록)에 대한 증거가 없다: done_gate.mutations 가 null 이고, 뮤테이션 선언도 실행 결과도 없다. 커밋 메시지나 보고서에 적힌 말은 증거로 치지 않는다. safety-net 역할에게: 테스트 파일은 그대로 두고 mutations.json 에 AC 3 용 행 하나를 선언할 것. path 는 lib/features/kanji_detail_modal/widgets/kanji_strokes_section.dart, find 는 파일 안에서 한 번만 나오는 `if (_isProbeStarted) return;` 줄, replace 는 그 가드를 없앤 코드(예: 빈 문자열 또는 주석)다. 엔진이 그 변경을 적용해 테스트를 돌렸을 때, '번들이 바뀌어 의존성이 갱신돼도 같은 State 에서 획순 자산을 다시 읽지 않는다'와 '번들이 여러 번 바뀌어도 …' 케이스가 `expect(counter.strokeAssetLoads, baseline)` 단언에서 실패해야 한다(빌드나 import 오류로 실패하면 무효다). lib/ 는 실제로 수정하지 말 것(AC #6). 나머지 AC 는 현재 diff 로 충족된다.",
+   "check:done-gate:2": "지난 done-gate 에서 비어 있던 AC #3 증거가 이제 있다. M1 은 `if (_isProbeStarted) return;` 를 제거한 변경이고 결과는 killed 다. 실패한 케이스는 '번들이 바뀌어 의존성이 갱신돼도 같은 State 에서 획순 자산을 다시 읽지 않는다' 이고, 실패 위치는 test 116행의 `expect(counter.strokeAssetLoads, baseline)` 단언이다(Expected 9, Actual 18). 빌드나 import 오류로 난 실패가 아니다. log_tail 의 'Bad state' 줄은 --fail-fast 로 멈출 때 나오는 종료 잡음이다. lib/ 와 PNG 변경은 없다. 기존 한자 모달 테스트도 바뀌지 않았다. diff 에 새로 생긴 테스트 파일은 하나뿐이다. CI 골든 잡은 로컬에서 돌리지 못했다. 다만 골든이나 기존 테스트를 건드리지 않았으므로 리뷰어는 CI 결과만 확인하면 된다. D1(related_words_query_test 의 20ms 벽시계 단언이 부하에 흔들리는 문제)은 이 이슈와 무관하다. 그래서 후속 이슈로 분리한다.",
+   "check:plan-gate:1": "이슈의 수용 기준 3개와 배경·근거(1933 skeleton §8.2)가 모두 AC로 덮여 있다. 선행 이슈 #1933은 CLOSED/COMPLETED이고, #1986은 스프린트 참조일 뿐 선행 이슈가 아니다. 테스트만 추가하는 안전망 작업이므로 safety-net 템플릿으로 진행하고 추가 스텝은 없다(UI·텍스트·보안 표면 없음). 다음 역할에게: 섹션 State는 MediaQuery·테마를 context로 직접 구독하지 않으므로, 실제로 didChangeDependencies를 다시 부르는 의존성 변경(예: DefaultAssetBundle 쪽 InheritedWidget 갱신)을 고를 것. 그렇게 해야 AC #3 뮤테이션이 실제로 실패한다. 카운트가 SvgPicture 렌더 로드를 섞어 세더라도 뮤테이션을 잡는지 러너 원문으로 보일 것(AC #3, #5). 원래 State를 유지할 것(AC #4)."
+  }
+ },
+ "procedure_yaml": "{\n  \"format\": 1,\n  \"issue\": 1938,\n  \"revision\": 2,\n  \"origin\": {\n    \"template\": \"safety-net\",\n    \"version\": \"exp-1\",\n    \"start\": \"exp-1\"\n  },\n  \"steps\": [\n    {\n      \"id\": \"analyze\",\n      \"role\": \"requirements-engineer\",\n      \"inputs\": [\n        \"in:issue.md\",\n        \"in:failure-summary.md\",\n        \"in:leader-decision.md\"\n      ],\n      \"outputs\": [\n        \"docs/specs/1938/analysis.md\"\n      ]\n    },\n    {\n      \"id\": \"ac-format\",\n      \"run\": \"ac-format\",\n      \"inputs\": [\n        \"docs/specs/1938/analysis.md\"\n      ],\n      \"on_fail\": {\n        \"back_to\": \"analyze\",\n        \"max\": 2\n      }\n    },\n    {\n      \"id\": \"plan\",\n      \"check\": \"plan-gate\",\n      \"inputs\": [\n        \"docs/specs/1938/analysis.md\",\n        \"in:issue.md\"\n      ]\n    },\n    {\n      \"id\": \"test-cases\",\n      \"role\": \"tester\",\n      \"inputs\": [\n        \"docs/specs/1938/analysis.md\",\n        \"in:failure-summary.md\",\n        \"in:leader-decision.md\"\n      ],\n      \"outputs\": [\n        \"docs/specs/1938/test-cases.md\"\n      ]\n    },\n    {\n      \"id\": \"ac-coverage\",\n      \"run\": \"ac-coverage\",\n      \"inputs\": [\n        \"docs/specs/1938/analysis.md\",\n        \"docs/specs/1938/test-cases.md\"\n      ],\n      \"on_fail\": {\n        \"back_to\": \"test-cases\",\n        \"max\": 2\n      }\n    },\n    {\n      \"id\": \"setup\",\n      \"run\": \"setup\"\n    },\n    {\n      \"id\": \"safety-net\",\n      \"role\": \"developer\",\n      \"inputs\": [\n        \"docs/specs/1938/analysis.md\",\n        \"docs/specs/1938/test-cases.md\",\n        \"in:failure-summary.md\",\n        \"in:leader-decision.md\",\n        \"in:pr-review.md\",\n        \"in:blocking-discoveries.md\"\n      ],\n      \"outputs\": [\n        \"test/**/*_safety_net_test.dart\"\n      ],\n      \"on_fail\": {\n        \"back_to\": \"safety-net\",\n        \"max\": 2\n      }\n    },\n    {\n      \"id\": \"safety-net-proof\",\n      \"run\": \"safety-net-proof\",\n      \"on_fail\": {\n        \"back_to\": \"safety-net\",\n        \"max\": 2\n      }\n    },\n    {\n      \"id\": \"no-production-change\",\n      \"run\": \"no-production-change\",\n      \"on_fail\": {\n        \"back_to\": \"safety-net\",\n        \"max\": 2\n      }\n    },\n    {\n      \"id\": \"test\",\n      \"run\": \"test\",\n      \"on_fail\": {\n        \"back_to\": \"safety-net\",\n        \"max\": 2\n      }\n    },\n    {\n      \"id\": \"lint\",\n      \"run\": \"lint\",\n      \"on_fail\": {\n        \"back_to\": \"safety-net\",\n        \"max\": 2\n      }\n    },\n    {\n      \"id\": \"check-verification-doc-refs\",\n      \"run\": \"check-verification-doc-refs\",\n      \"on_fail\": {\n        \"back_to\": \"safety-net\",\n        \"max\": 2\n      }\n    },\n    {\n      \"id\": \"review-tests\",\n      \"role\": \"tester\",\n      \"inputs\": [\n        \"in:review.diff\",\n        \"docs/specs/1938/test-cases.md\",\n        \"docs/specs/1938/analysis.md\",\n        \"in:leader-decision.md\"\n      ],\n      \"outputs\": [],\n      \"on_fail\": {\n        \"back_to\": \"safety-net\",\n        \"max\": 2\n      },\n      \"checks\": [\n        \"test-quality\",\n        \"net-public-behavior\"\n      ]\n    },\n    {\n      \"id\": \"review-audit\",\n      \"role\": \"auditor\",\n      \"inputs\": [\n        \"in:review.diff\",\n        \"docs/specs/1938/analysis.md\",\n        \"docs/specs/1938/test-cases.md\",\n        \"in:leader-decision.md\"\n      ],\n      \"outputs\": [],\n      \"on_fail\": {\n        \"back_to\": \"safety-net\",\n        \"max\": 2\n      },\n      \"checks\": [\n        \"diff-review\"\n      ]\n    },\n    {\n      \"id\": \"verify-gate\",\n      \"run\": \"verify-gate\",\n      \"on_fail\": {\n        \"back_to\": \"safety-net\",\n        \"max\": 2\n      }\n    },\n    {\n      \"id\": \"done-gate\",\n      \"check\": \"done-gate\",\n      \"inputs\": [\n        \"docs/specs/1938/analysis.md\",\n        \"docs/specs/1938/test-cases.md\",\n        \"in:review.diff\",\n        \"in:leader-decision.md\"\n      ]\n    },\n    {\n      \"id\": \"pr\",\n      \"op\": \"create-pr\",\n      \"inputs\": [\n        \"docs/specs/1938/analysis.md\"\n      ]\n    },\n    {\n      \"id\": \"followups\",\n      \"op\": \"create-followups\"\n    }\n  ]\n}\n",
+ "public_repo": null,
+ "results_by_step": {
+  "analyze": {
+   "discoveries": [],
+   "note": "Test-only safety net (type refactor, safety_net only, small/low). Prerequisite #1933 is closed as completed. 10 ACs: a load-counting bundle, an unchanged count after a dependency-change redraw in the same State, a mutation failure when the _isProbeStarted guard is removed, a non-empty first probe, no lib/ change, and no changes to existing tests or golden PNGs. Key caveat for design: the section State depends only on DefaultAssetBundle.of(context). MediaQuery and theme are read through Get, so the Issue's example triggers may not re-invoke didChangeDependencies. Whatever trigger design picks must be proven by the mutation AC. SvgPicture render loads go through the same bundle, and design must handle that.",
+   "status": "done"
+  },
+  "done-gate": {
+   "ac_verdicts": [
+    {
+     "ac": 1,
+     "evidence": "kanji_strokes_section_probe_safety_net_test.dart: pumpSection 이 _CountingAssetBundle 을 DefaultAssetBundle 로 주입하고, pumpAndSettle 다음 baseline = counter.strokeAssetLoads 로 기준값을 기록한다.",
+     "status": "met"
+    },
+    {
+     "ac": 2,
+     "evidence": "'번들이 바뀌어 의존성이 갱신돼도 …' 케이스와 '번들이 여러 번 바뀌어도 …' 케이스: bundle.value 를 교체한 뒤 expect(counter.strokeAssetLoads, baseline) 와 byKey 동일을 단언한다. test run exit 0 으로 현재 코드에서 통과한다.",
+     "status": "met"
+    },
+    {
+     "ac": 3,
+     "evidence": "M1 killed: lib/.../kanji_strokes_section.dart 에서 `if (_isProbeStarted) return;` 를 제거하면 safety_net_test.dart:116 의 expect(counter.strokeAssetLoads, baseline) 가 실패한다(Expected <9>, Actual <18>). 최종 diff 에 lib 변경은 없다.",
+     "status": "met"
+    },
+    {
+     "ac": 4,
+     "evidence": "두 재그리기 케이스: expect(tester.state(sectionFinder()), same(stateBefore)) 로 같은 State 임을 확인하고, DefaultAssetBundle.of(...) 가 same(replacement) 인지도 확인한다. M1 killed 로 didChangeDependencies 가 실제로 다시 불린다는 것이 입증된다.",
+     "status": "met"
+    },
+    {
+     "ac": 5,
+     "evidence": "'처음 그릴 때 획순 자산을 한 번 이상 읽는다' 케이스: strokeAssetLoads greaterThan(0) 을 단언한다. 재그리기 케이스들도 expect(baseline, greaterThan(0)) 을 단언한다.",
+     "status": "met"
+    },
+    {
+     "ac": 6,
+     "evidence": "review.diff 에 lib/ 경로 변경이 없다. no-production-change run 은 exit 0 이다. 변경 파일은 docs/specs/1938/* 와 새 테스트 파일 하나뿐이다.",
+     "status": "met"
+    },
+    {
+     "ac": 7,
+     "evidence": "review.diff 에서 test/features/kanji_detail_modal/** 의 변경은 새 파일 kanji_strokes_section_probe_safety_net_test.dart 하나다. 기존 테스트 파일과 fake_kanji_asset_bundle.dart 에는 수정이 없다.",
+     "status": "met"
+    },
+    {
+     "ac": 8,
+     "evidence": "review.diff 에 *.png 변경이 없다(골든 추가·수정·삭제 0건).",
+     "status": "met"
+    },
+    {
+     "ac": 9,
+     "evidence": "verification.md 의 test 커맨드 run 은 exit 0 이고 flaky·base_red 가 아니다. CI 골든 잡은 not_checked_locally 이지만 골든과 기존 테스트에는 변경이 없다.",
+     "status": "met"
+    },
+    {
+     "ac": 10,
+     "evidence": "group '획순 탐침' 과 testWidgets 3개의 이름에 이슈 번호나 케이스 ID 가 없다. 이름만 읽어도 '재그리기에도 획순 자산을 다시 읽지 않는다' 는 서술형 취지가 드러난다.",
+     "status": "met"
+    }
+   ],
+   "answer": "approve",
+   "discoveries": [
+    {
+     "disposition": "followup",
+     "duplicate_of": null,
+     "id": "D1",
+     "title": "related_words_query_test '조회 속도' 그룹의 20ms 벽시계 단언이 전체 스위트 병렬 실행 부하에서 흔들린다"
+    }
+   ],
+   "note": "지난 done-gate 에서 비어 있던 AC #3 증거가 이제 있다. M1 은 `if (_isProbeStarted) return;` 를 제거한 변경이고 결과는 killed 다. 실패한 케이스는 '번들이 바뀌어 의존성이 갱신돼도 같은 State 에서 획순 자산을 다시 읽지 않는다' 이고, 실패 위치는 test 116행의 `expect(counter.strokeAssetLoads, baseline)` 단언이다(Expected 9, Actual 18). 빌드나 import 오류로 난 실패가 아니다. log_tail 의 'Bad state' 줄은 --fail-fast 로 멈출 때 나오는 종료 잡음이다. lib/ 와 PNG 변경은 없다. 기존 한자 모달 테스트도 바뀌지 않았다. diff 에 새로 생긴 테스트 파일은 하나뿐이다. CI 골든 잡은 로컬에서 돌리지 못했다. 다만 골든이나 기존 테스트를 건드리지 않았으므로 리뷰어는 CI 결과만 확인하면 된다. D1(related_words_query_test 의 20ms 벽시계 단언이 부하에 흔들리는 문제)은 이 이슈와 무관하다. 그래서 후속 이슈로 분리한다.",
+   "reason": "acceptance-met",
+   "recommendation": null,
+   "step": null
+  },
+  "plan": {
+   "answer": "plan",
+   "note": "이슈의 수용 기준 3개와 배경·근거(1933 skeleton §8.2)가 모두 AC로 덮여 있다. 선행 이슈 #1933은 CLOSED/COMPLETED이고, #1986은 스프린트 참조일 뿐 선행 이슈가 아니다. 테스트만 추가하는 안전망 작업이므로 safety-net 템플릿으로 진행하고 추가 스텝은 없다(UI·텍스트·보안 표면 없음). 다음 역할에게: 섹션 State는 MediaQuery·테마를 context로 직접 구독하지 않으므로, 실제로 didChangeDependencies를 다시 부르는 의존성 변경(예: DefaultAssetBundle 쪽 InheritedWidget 갱신)을 고를 것. 그렇게 해야 AC #3 뮤테이션이 실제로 실패한다. 카운트가 SvgPicture 렌더 로드를 섞어 세더라도 뮤테이션을 잡는지 러너 원문으로 보일 것(AC #3, #5). 원래 State를 유지할 것(AC #4).",
+   "reason": "fits-template",
+   "recommendation": null,
+   "step": null
+  },
+  "review-audit": {
+   "discoveries": [],
+   "findings": [],
+   "note": "전체 diff(476줄, 끝까지 읽음)를 검토했다. spec 폴더 밖에서 바뀐 파일은 새 테스트 파일 kanji_strokes_section_probe_safety_net_test.dart 하나뿐이고, lib/·골든 PNG·기존 테스트는 바뀌지 않았다. 의존성 변경 방식으로 ValueNotifier 를 통해 DefaultAssetBundle 을 새 인스턴스로 바꾼다. DefaultAssetBundle.updateShouldNotify 는 bundle 이 달라지면 알림을 보내고, 섹션 State 는 첫 didChangeDependencies 에서 DefaultAssetBundle.of 로 의존성을 등록했으므로 같은 State 에서 didChangeDependencies 가 실제로 다시 불린다. 위젯 타입·위치·키를 그대로 두므로 State 도 유지되고, 테스트는 same(stateBefore) 로 이를 단언한다(AC #4). 현재 코드에서는 _source 가 처음 번들에 고정되어 있어 SvgPicture.asset(bundle: 옛 번들)이 캐시에 맞고 다시 로드하지 않는다. 그래서 같은 카운터를 공유해도 로드 횟수가 기준값과 같다(AC #2). 뮤테이션(가드 제거)에서는 새 번들로 탐침이 다시 돌고, 이 번들도 같은 카운터를 올리므로 expect(counter.strokeAssetLoads, baseline) 에서 실패한다. 그 앞의 단언(번들 동일성·State 동일성)은 뮤테이션에서도 통과하므로 실패 이유가 맞는 단언에서 나온다(AC #3, C8). mutations.json 의 find 문자열은 운영 파일에 한 번만 나온다. greaterThan(0) 단언이 공허한 테스트를 막는다(AC #5). 테스트 이름은 서술형이고 이슈 번호나 케이스 ID 가 없다(AC #10). 기존 FakeKanjiAssetBundle 은 감싸서만 쓰고 바꾸지 않았다(C13). 결함은 찾지 못했다. 뮤테이션 실행 원문 증거는 엔진의 verify-gate 가 맡는다.",
+   "status": "done"
+  },
+  "review-tests": {
+   "discoveries": [],
+   "findings": [],
+   "note": "새 파일 kanji_strokes_section_probe_safety_net_test.dart 한 개만 추가됐고 기존 테스트·골든은 건드리지 않았다. 뮤테이션 실행 결과 원문은 이 리뷰에서 직접 보지 못했고 mutations.json 선언만 확인했다. 엔진이 적용해 돌린 결과를 따로 확인해야 한다.",
+   "status": "done"
+  },
+  "safety-net": {
+   "discoveries": [
+    {
+     "blocks_current_ac": false,
+     "kind": "test-gap",
+     "note": "벽시계 시간 20ms 단언이라 전체 스위트를 동시 12개로 돌릴 때 부하로 흔들립니다. safety-net-proof에서는 麟의 warm-max가 23.6ms로 나와 `--fail-fast`가 나머지 테스트를 `did not complete`로 중단시켰습니다. 한자 모달 폴더만 돌렸을 때는 4~10ms였습니다. 이 이슈의 AC와는 무관해서 고치지 않았습니다.",
+     "where": "test/features/kanji_detail_modal/controller/related_words_query_test.dart:374 (그룹 '조회 속도')"
+    }
+   ],
+   "note": "이번 시도에서는 아무 파일도 바꾸지 않았고 새 커밋도 없습니다. net 파일(`kanji_strokes_section_probe_safety_net_test.dart`)에서 고칠 결함을 찾지 못했습니다.\n\n반려 원인: safety-net-proof 로그에서 실제로 빨갛게 실패한 테스트는 기존의 `related_words_query_test.dart` '조회 속도' 하나뿐입니다. 이 테스트는 벽시계 20ms를 단언하는데 `Expected: <= 20000  Actual: 23654 (麟)`로 실패했습니다. `flutter test --fail-fast --concurrency=12`가 그 실패에서 멈추면서, 아직 돌지 않던 우리 테스트를 포함한 10건 안팎이 `did not complete [E]`로 찍혔습니다. 우리 테스트는 단언 실패 로그가 없습니다. 우리 파일은 위젯 테스트 3개로 가볍고 파일별 격리로 도는 터라 다른 테스트와 상태를 공유하지 않습니다.\n\n이번에 직접 확인한 결과(원문):\n- 새 테스트 단독: `00:00 +3: All tests passed!`\n- 한자 모달 폴더 전체(새 파일 포함, `--concurrency=12 --exclude-tags=golden`, 골든 태그 테스트는 제외하고 돌린 것): `00:20 +285: All tests passed!`, 같은 실행에서 조회 속도 테스트는 `related-words 麟 cold=16.406ms warm-max=4.653ms`, `矗 warm-max=10.355ms`로 한도 20ms 안이었습니다.\n- 전체 스위트는 지시대로 돌리지 않았습니다. 전체 부하에서의 재현은 확인하지 못했습니다.\n- `docs/specs/1938/mutations.json`(AC 3)은 2차 시도에서 커밋한 그대로입니다.\n- `lib/`·PNG 변경은 없고 작업 트리도 깨끗합니다.\n\nnet-red-on-base는 기존 테스트의 부하 의존 시간 플레이크라서 재실행으로 풀릴 가능성이 큽니다. 계속 실패하면 같은 테스트가 같은 방식으로 실패하는지 확인해야 합니다. 기존 테스트는 동결이라 건드리지 않았습니다.",
+   "status": "done"
+  },
+  "test-cases": {
+   "discoveries": [],
+   "note": "analysis.md 의 AC #1~#10 만으로 케이스 C1~C18 을 작성했습니다. 구현은 읽지 않았고 모든 AC 에 케이스가 하나 이상 있습니다. 리더 지시에 따라 State 를 유지한 채 DefaultAssetBundle 갱신으로 didChangeDependencies 를 다시 부르는 경로를 케이스(C3~C5)로 정했습니다. 골든 이미지가 바뀌지 않으므로 Visual cases 는 해당 없음으로 뒀습니다. 이 작업에서 테스트는 실행하지 않았습니다.",
+   "status": "done"
+  }
+ },
+ "stage3": {
+  "dry_run": true,
+  "followups": [
+   {
+    "at": "2026-11-26T13:09:55Z",
+    "comment_id": null,
+    "disposition": "followup",
+    "dry_run": true,
+    "key": "D1:3c24f379",
+    "kind": "test-gap",
+    "number": null,
+    "private_path": false
+   }
+  ],
+  "is_private": true
+ },
+ "stage4": {
+  "allowed_test_changes": [],
+  "mutations": {
+   "at": "2026-11-26T13:08:59Z",
+   "blob": "51ea17a5d5e6d116f9036fc004c7ffecb9493750",
+   "control": {
+    "again": null,
+    "exit_code": 0,
+    "flaky": false,
+    "log_file": "try-1/control.log",
+    "timed_out": false
+   },
+   "format": 1,
+   "head": "ef3059a873375d95fabb48b8ab76a00cc507c830",
+   "issue": 1938,
+   "problem": null,
+   "rows": [
+    {
+     "acs": [
+      3
+     ],
+     "again": null,
+     "detail": null,
+     "find": "if (_isProbeStarted) return;",
+     "id": "M1",
+     "note": "AC 3: without the run-once probe guard the redraw tests (bundle replaced once and repeatedly) fail on expect(counter.strokeAssetLoads, baseline)",
+     "path": "lib/features/kanji_detail_modal/widgets/kanji_strokes_section.dart",
+     "replace": "",
+     "run": {
+      "exit_code": 1,
+      "log_file": "try-1/m1.log",
+      "timed_out": false
+     },
+     "status": "killed"
+    }
+   ]
+  },
+  "stack": null
+ },
+ "state": {
+  "base_branch": "main",
+  "counters": {
+   "done_rerun": 1
+  },
+  "draft": false,
+  "followups": [
+   {
+    "at": "2026-11-26T13:09:55Z",
+    "comment_id": null,
+    "disposition": "followup",
+    "dry_run": true,
+    "key": "D1:3c24f379",
+    "kind": "test-gap",
+    "number": null,
+    "private_path": false
+   }
+  ],
+  "format": 1,
+  "github": {
+   "is_private": true,
+   "pr_number": 1987
+  },
+  "issue": 1938,
+  "leader_calls": [
+   {
+    "answer": "plan",
+    "cost_usd": 0.211944,
+    "counted": false,
+    "failed": null,
+    "k": 1,
+    "kind": "check",
+    "reason": "fits-template",
+    "sessions": [
+     1
+    ],
+    "situation": "plan-gate",
+    "step": null
+   },
+   {
+    "answer": "rerun",
+    "cost_usd": 0.35832,
+    "counted": false,
+    "failed": null,
+    "k": 1,
+    "kind": "check",
+    "reason": "real-defect",
+    "sessions": [
+     1
+    ],
+    "situation": "done-gate",
+    "step": "safety-net"
+   },
+   {
+    "answer": "approve",
+    "cost_usd": 0.382981,
+    "counted": false,
+    "failed": null,
+    "k": 2,
+    "kind": "check",
+    "reason": "acceptance-met",
+    "sessions": [
+     2
+    ],
+    "situation": "done-gate",
+    "step": null
+   }
+  ],
+  "sprint": 1986,
+  "steps": [
+   {
+    "id": "analyze",
+    "latest_attempt": 1,
+    "output_format_retries": 0,
+    "start_head": "b557790cd2792bea85ac4892407853e7ab348b6b",
+    "status": "done"
+   },
+   {
+    "id": "ac-format",
+    "latest_attempt": 3,
+    "output_format_retries": 0,
+    "start_head": "ef3059a873375d95fabb48b8ab76a00cc507c830",
+    "status": "done"
+   },
+   {
+    "id": "plan",
+    "latest_attempt": 1,
+    "start_head": "9dcaa4ac14fdd59b9968e4b8fd9e1307868adcf2",
+    "status": "done"
+   },
+   {
+    "id": "test-cases",
+    "latest_attempt": 1,
+    "output_format_retries": 0,
+    "start_head": "87d600ce8501ce0448698d12309b450c63c54015",
+    "status": "done"
+   },
+   {
+    "id": "ac-coverage",
+    "latest_attempt": 3,
+    "output_format_retries": 0,
+    "start_head": "ef3059a873375d95fabb48b8ab76a00cc507c830",
+    "status": "done"
+   },
+   {
+    "id": "setup",
+    "latest_attempt": 3,
+    "output_format_retries": 0,
+    "start_head": "ef3059a873375d95fabb48b8ab76a00cc507c830",
+    "status": "done"
+   },
+   {
+    "id": "safety-net",
+    "latest_attempt": 3,
+    "output_format_retries": 0,
+    "resume_count": 2,
+    "returns": 2,
+    "session_id": "4da1a233-6786-4d9b-8ce5-fb432354d807",
+    "start_head": "ef3059a873375d95fabb48b8ab76a00cc507c830",
+    "status": "done"
+   },
+   {
+    "detail": "net-red-on-base",
+    "id": "safety-net-proof",
+    "latest_attempt": 3,
+    "on_fail_count": 1,
+    "output_format_retries": 0,
+    "reason": "check-failed",
+    "start_head": "ef3059a873375d95fabb48b8ab76a00cc507c830",
+    "status": "done"
+   },
+   {
+    "id": "no-production-change",
+    "latest_attempt": 2,
+    "output_format_retries": 0,
+    "start_head": "ef3059a873375d95fabb48b8ab76a00cc507c830",
+    "status": "done"
+   },
+   {
+    "id": "test",
+    "latest_attempt": 2,
+    "output_format_retries": 0,
+    "start_head": "ef3059a873375d95fabb48b8ab76a00cc507c830",
+    "status": "done"
+   },
+   {
+    "id": "lint",
+    "latest_attempt": 2,
+    "output_format_retries": 0,
+    "start_head": "ef3059a873375d95fabb48b8ab76a00cc507c830",
+    "status": "done"
+   },
+   {
+    "id": "check-verification-doc-refs",
+    "latest_attempt": 2,
+    "output_format_retries": 0,
+    "start_head": "ef3059a873375d95fabb48b8ab76a00cc507c830",
+    "status": "done"
+   },
+   {
+    "added_checks": [
+     "test-change-review"
+    ],
+    "id": "review-tests",
+    "latest_attempt": 2,
+    "output_format_retries": 0,
+    "start_head": "ef3059a873375d95fabb48b8ab76a00cc507c830",
+    "status": "done"
+   },
+   {
+    "id": "review-audit",
+    "latest_attempt": 2,
+    "output_format_retries": 0,
+    "start_head": "ef3059a873375d95fabb48b8ab76a00cc507c830",
+    "status": "done"
+   },
+   {
+    "id": "verify-gate",
+    "latest_attempt": 2,
+    "output_format_retries": 0,
+    "start_head": "ef3059a873375d95fabb48b8ab76a00cc507c830",
+    "status": "done"
+   },
+   {
+    "id": "done-gate",
+    "latest_attempt": 2,
+    "output_format_retries": 0,
+    "start_head": "ef3059a873375d95fabb48b8ab76a00cc507c830",
+    "status": "done"
+   },
+   {
+    "id": "pr",
+    "latest_attempt": 1,
+    "output_format_retries": 0,
+    "start_head": "ef3059a873375d95fabb48b8ab76a00cc507c830",
+    "status": "done"
+   },
+   {
+    "id": "followups",
+    "latest_attempt": 1,
+    "output_format_retries": 0,
+    "start_head": "ef3059a873375d95fabb48b8ab76a00cc507c830",
+    "status": "done"
+   }
+  ],
+  "totals": {
+   "attempts": 36,
+   "cost_usd": 3.605579,
+   "leader_calls": 0,
+   "warnings": 0
+  }
+ }
+}

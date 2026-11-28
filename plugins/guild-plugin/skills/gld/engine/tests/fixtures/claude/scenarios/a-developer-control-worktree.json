@@ -1,0 +1,21 @@
+{
+  "format": 1,
+  "description": "P3-A C2: developer changes a control file in the worktree only (not committed).",
+  "stream": "../f2/r4.jsonl",
+  "init_from_argv": true,
+  "structured_output": {
+    "status": "done",
+    "outputs": [],
+    "requests": [],
+    "blocked_by": null,
+    "discoveries": [],
+    "note": "fixture"
+  },
+  "actions": [
+    {
+      "op": "write",
+      "path": ".claude/agents/developer.md",
+      "content": "tampered\n"
+    }
+  ]
+}

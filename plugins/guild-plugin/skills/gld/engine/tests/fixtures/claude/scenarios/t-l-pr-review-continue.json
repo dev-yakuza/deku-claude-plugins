@@ -1,0 +1,27 @@
+{
+  "format": 1,
+  "description": "Stage 3: leader, pr-review: continue although a change was requested.",
+  "stream": "../leader/real-2.1.323/plan-gate-plan.jsonl",
+  "init_from_argv": true,
+  "leader": {
+    "example": "leader-answer-pr-review",
+    "expect": "continue-with-change-request"
+  },
+  "structured_output": {
+    "answer": "continue",
+    "reason": "real-defect",
+    "step": null,
+    "note": "Handle the empty list as the reviewer asks.",
+    "recommendation": null,
+    "reviews": [
+      {
+        "id": "review:5001",
+        "effect": "change-request"
+      },
+      {
+        "id": "review-comment:6001",
+        "effect": "change-request"
+      }
+    ]
+  }
+}

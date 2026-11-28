@@ -1,0 +1,26 @@
+{
+  "fill": {
+    "{answers}": [
+      "skip",
+      "continue",
+      "escalate"
+    ],
+    "{rerun_steps}": [],
+    "{human_answers}": [
+      "continue",
+      "escalate"
+    ],
+    "{human_rerun_steps}": [],
+    "{skippable_steps}": [
+      "ux-review"
+    ]
+  },
+  "answer": {
+    "answer": "skip",
+    "reason": "other",
+    "step": null,
+    "note": "No user interface changed after all.",
+    "recommendation": null,
+    "skip_step": "ux-review"
+  }
+}

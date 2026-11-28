@@ -1,0 +1,21 @@
+{
+  "format": 1,
+  "defects": [
+    {
+      "id": "E1",
+      "signature": "escalate:env-problem @ done-gate",
+      "kind": "suspect",
+      "fixed_in": {"version": "1.0.0-exp.3", "commit": "6757d26"},
+      "summary": "The mutation proof ran its control once.",
+      "appeared_as": "done-gate leader escalate (env-problem) -> needs_human"
+    },
+    {
+      "id": "E9",
+      "signature": "engine-error @ mutation._control",
+      "kind": "defect",
+      "fixed_in": {"version": "1.0.0-exp.4", "commit": null},
+      "summary": "An example entry.",
+      "appeared_as": "engine-error stop at done-gate"
+    }
+  ]
+}

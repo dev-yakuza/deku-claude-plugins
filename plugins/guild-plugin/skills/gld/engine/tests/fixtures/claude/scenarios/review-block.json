@@ -1,0 +1,42 @@
+{
+  "format": 1,
+  "description": "A review step returns verdict block with a blocker finding and a failed check (R1, R8).",
+  "stream": "../f2/r4.jsonl",
+  "init_from_argv": true,
+  "structured_output": {
+    "status": "done",
+    "outputs": [
+      "docs/specs/42/review.md"
+    ],
+    "requests": [],
+    "blocked_by": null,
+    "discoveries": [],
+    "note": "fixture",
+    "verdict": "block",
+    "reviewed": [
+      "src/app.py"
+    ],
+    "checks": [
+      {
+        "id": "diff-review",
+        "result": "fail",
+        "note": "missing null check"
+      }
+    ],
+    "findings": [
+      {
+        "severity": "blocker",
+        "file": "src/app.py",
+        "line": 3,
+        "text": "crashes on empty input"
+      }
+    ]
+  },
+  "actions": [
+    {
+      "op": "write",
+      "path": "docs/specs/42/review.md",
+      "content": "# review\n"
+    }
+  ]
+}

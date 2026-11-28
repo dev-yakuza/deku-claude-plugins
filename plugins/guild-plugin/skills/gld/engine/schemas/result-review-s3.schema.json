@@ -1,0 +1,260 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "gld/result-review-s3",
+  "title": "Role result — review (design §4 checks, §6.2, §7.2-4, I5) (stage 3)",
+  "description": "Passed verbatim to `claude --json-schema` for steps with `checks`. = every property of result-work (identical definitions, tests/test_contracts.py checks) + verdict, reviewed, checks, findings. The engine adds: reviewed non-empty and ⊇ the actual changed files outside docs/specs/<N>/ for a diff review, every required check id present, pass with a blocker finding = output-format, a required check with result fail = check-failed, a rule-added check with n/a = output-format, status blocked = stop without looking at verdict (§6.2, I5). Stage 3 (E16, E22, E33). ENUM TEMPLATE: \"{catalog_steps}\" is filled by schema.fill_enums with every requestable catalog id (codes.RESULT_SCHEMA_TOKENS); stages 1–2 keep result-work / result-review.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "status",
+    "outputs",
+    "requests",
+    "blocked_by",
+    "discoveries",
+    "note",
+    "verdict",
+    "reviewed",
+    "checks",
+    "findings",
+    "irreversible"
+  ],
+  "properties": {
+    "status": {
+      "enum": [
+        "done",
+        "blocked"
+      ],
+      "description": "done = the step's outputs are written. blocked = cannot continue; say why in blocked_by."
+    },
+    "outputs": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Paths of the declared output files you wrote."
+    },
+    "requests": {
+      "type": "array",
+      "description": "Procedure change requests (§6): the engine adds a catalog step itself, remove / skip goes to the leader. Never a command.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "op",
+          "step",
+          "trigger",
+          "note"
+        ],
+        "properties": {
+          "op": {
+            "enum": [
+              "add",
+              "remove",
+              "skip"
+            ]
+          },
+          "step": {
+            "enum": [
+              "{catalog_steps}"
+            ],
+            "description": "A plugin step-catalog name."
+          },
+          "trigger": {
+            "enum": [
+              "ui-change",
+              "new-dependency",
+              "schema-change",
+              "security-surface",
+              "no-user-facing-text",
+              "user-facing-text",
+              "performance-risk",
+              "infra-change",
+              "blocking-discovery",
+              "scope-question",
+              "other"
+            ]
+          },
+          "note": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "blocked_by": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "note"
+      ],
+      "description": "Required (not null) when status is blocked.",
+      "properties": {
+        "kind": {
+          "enum": [
+            "missing-input",
+            "ambiguous",
+            "env",
+            "other"
+          ]
+        },
+        "note": {
+          "type": "string"
+        }
+      }
+    },
+    "discoveries": {
+      "type": "array",
+      "description": "Out-of-scope problems found while working (§7.5).",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "kind",
+          "where",
+          "note",
+          "blocks_current_ac"
+        ],
+        "properties": {
+          "kind": {
+            "enum": [
+              "bug",
+              "debt",
+              "security",
+              "test-gap",
+              "doc"
+            ]
+          },
+          "where": {
+            "type": "string"
+          },
+          "note": {
+            "type": "string"
+          },
+          "blocks_current_ac": {
+            "type": "boolean"
+          }
+        }
+      }
+    },
+    "irreversible": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "code",
+          "where",
+          "note"
+        ],
+        "properties": {
+          "code": {
+            "enum": [
+              "deploy-or-release",
+              "external-api-effect",
+              "shared-db-execution",
+              "iac-apply",
+              "resource-deletion",
+              "destructive-migration",
+              "data-transform",
+              "breaking-api",
+              "storage-format-change",
+              "major-dependency-upgrade",
+              "migration-file"
+            ]
+          },
+          "where": {
+            "type": "string"
+          },
+          "note": {
+            "type": "string"
+          }
+        }
+      },
+      "description": "Changes that are hard or impossible to revert, or effects outside this repository, that this step made or that the Issue needs (empty if none). Reporting only ever raises the handling level (§7.4)."
+    },
+    "note": {
+      "type": "string",
+      "description": "Free text for humans and evolve. The engine never branches on it."
+    },
+    "verdict": {
+      "enum": [
+        "pass",
+        "block"
+      ],
+      "description": "block if anything must be fixed before merge; a blocker finding requires block."
+    },
+    "reviewed": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Every file you actually reviewed. An empty list is a format error."
+    },
+    "checks": {
+      "type": "array",
+      "description": "One entry per check id the step asked for.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "result",
+          "note"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "result": {
+            "enum": [
+              "pass",
+              "fail",
+              "n/a"
+            ]
+          },
+          "note": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "findings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "severity",
+          "file",
+          "line",
+          "text"
+        ],
+        "properties": {
+          "severity": {
+            "enum": [
+              "blocker",
+              "major",
+              "minor"
+            ]
+          },
+          "file": {
+            "type": "string"
+          },
+          "line": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "description": "null when the finding is not about one line."
+          },
+          "text": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  }
+}

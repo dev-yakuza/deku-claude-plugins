@@ -1,0 +1,24 @@
+{
+  "fill": {
+    "{answers}": ["plan", "rerun", "close-as-decided", "escalate"],
+    "{rerun_steps}": ["analyze"],
+    "{human_answers}": ["plan", "rerun", "close-as-decided", "escalate"],
+    "{human_rerun_steps}": ["analyze"],
+    "{requirement_rows}": ["R1", "R2"],
+    "{templates}": ["feature"]
+  },
+  "answer": {
+    "answer": "plan",
+    "reason": "fits-template",
+    "step": null,
+    "note": "Both requirements map to ACs; the feature template fits as is.",
+    "recommendation": null,
+    "requirements": [
+      {"row": "R1", "covered": true},
+      {"row": "R2", "covered": true}
+    ],
+    "missing_requirements": [],
+    "plan": {"template": "feature"},
+    "close": null
+  }
+}

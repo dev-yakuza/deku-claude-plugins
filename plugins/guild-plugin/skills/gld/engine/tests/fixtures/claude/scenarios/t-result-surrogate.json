@@ -1,0 +1,20 @@
+{
+  "format": 1,
+  "description": "Stage 3: a lone surrogate in the note (review-q0 D9): the schema accepts it, the engine does not.",
+  "stream": "../f2/r4.jsonl",
+  "init_from_argv": true,
+  "role": {
+    "example": "result-work-s3",
+    "expect": "result-schema"
+  },
+  "structured_output": {
+    "status": "done",
+    "outputs": [],
+    "requests": [],
+    "blocked_by": null,
+    "discoveries": [],
+    "irreversible": [],
+    "golden_reasons": [],
+    "note": "bad \ud800 text"
+  }
+}

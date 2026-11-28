@@ -1,0 +1,20 @@
+{
+  "fill": {
+    "{answers}": ["continue", "rerun", "replan", "escalate"],
+    "{rerun_steps}": ["analyze", "ac-format", "design"],
+    "{human_answers}": ["continue", "rerun", "replan", "escalate"],
+    "{human_rerun_steps}": ["analyze", "ac-format", "design"],
+    "{comment_ids}": [9101, 9102]
+  },
+  "answer": {
+    "answer": "rerun",
+    "reason": "assumption-corrected",
+    "step": "analyze",
+    "note": "The owner says the setting must also apply to the review screen; analysis assumption 2 was wrong.",
+    "recommendation": null,
+    "comments": [
+      {"id": 9101, "effect": "corrects-assumption"},
+      {"id": 9102, "effect": "none"}
+    ]
+  }
+}

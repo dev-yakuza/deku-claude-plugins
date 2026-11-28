@@ -1,13 +1,15 @@
 # RESUME
 
-> **0.102 (engine)**: route with `python3 <<SKILL_DIR>>/engine/gld_engine.py status route --issue $1` (one call; print its line). `dev` → follow `<<SKILL_DIR>>/commands/dev.md` *Engine driver* (it attaches to a running worker). Any other answer → print it and stop. The *Process* below is the 0.101.x reference; it is **not executed**.
+> **Stage-1 engine (guild-plugin redesign) — this is the path that runs.** `/gld resume` now drives the
+> gld engine: read `<<SKILL_DIR>>/commands/engine/resume.md` and follow it instead of the sections
+> below. The sections below are the 0.98.7 conversation-driven flow, kept unchanged as the
+> reference the stage-1 templates and role files were derived from — do not execute them.
 
 Continue an in-progress Issue from where it left off. Guild's state lives in GitHub labels (`_handoff.md` Section A), so resume is stateless recovery: read the label, continue the spine from that stage.
 
 `$1` = Issue number.
 
 > **Bash**: `_bash_rules.md`.
-> **Checkout**: never move the human's branch or history — `_checkout.md` (a pull/sync/switch request: show the commands and which commits change hash, then ask) — the Issue's own branch is the one exception (`_checkout.md` Section C).
 
 ---
 
@@ -16,9 +18,14 @@ Continue an in-progress Issue from where it left off. Guild's state lives in Git
    ```bash
    gh issue view $1 --json url --jq .url
    ```
+1a. **Refuse the other Guild channel's Issue** — same rule as `dev.md` Phase 0 step 1a: <!-- promote: other; rename-exception: other-channel label guard -->
+   ```bash
+   gh issue view $1 --json labels --jq '[.labels[].name | select(startswith("gx:"))] | join(",")'  # promote: other; rename-exception: other-channel label guard
+   ```
+   Non-empty → `FAIL: Issue #$1 carries the other Guild channel's label(s) <list> — use /gldx.` Stop; change no label, post no comment. <!-- promote: other; rename-exception: other-channel label guard -->
 2. Confirm Guild is initialized:
    ```bash
-   ls .claude/guild/config.json
+   ls .claude/guild/harness.json
    ```
    Absent → "Guild not initialized (run `/gld init`)." Stop.
 3. Read the current stage — `_handoff.md` **Section A — canonical stage derivation**, which returns `stage` (the one current stage label, or `"none"`) plus `harness` (`guild:harness` present) and `child` (`guild:child` present); `guild:needs-human` and `guild:harness` are excluded from `stage` because neither is one, and resume leaves every non-stage label untouched:
@@ -34,7 +41,6 @@ Continue an in-progress Issue from where it left off. Guild's state lives in Git
    - `"none"` (no `guild:*` stage label) → nothing to resume; suggest `/gld dev $1` to start fresh.
 
 ## Notes
-- **Resume never updates the checkout to see merged work** — dev Phase 2c judges from the PRs; running the merged result is the human's (`dev.md` Phase 2c).
 - **Resume == dev from a mid-spine label.** There is no separate resume state — the label is the checkpoint. This is why interruption is safe (labels are the state; no local file to corrupt).
 - If a stage previously returned `NEEDS_HUMAN` or `OK PAUSE`, resume re-enters that stage; the leader re-runs the gate and prompts the human again as needed. Such an Issue also carries `guild:needs-human` — additive on top of its stage label, so `stage` is unaffected and routing above is unchanged. Resume never strips it; it is removed by the stage's own next forward transition, or by a loop-back the human decided (`_handoff.md` Section A).
 - A test/qa loop-back moves the label back to `guild:execute` (`_handoff.md` Section A, *Backward transitions*), so resume routes to execute, which reads the reason from the `<!-- guild:loopback -->` record. A loop-back that was recorded but whose label move was interrupted leaves the label at `guild:test`/`guild:qa`; resume routes there, and that stage's Step 0 finishes the move (*Interrupted loop-back*) without re-running anything. Report the active loop-back count the way `status.md` does.

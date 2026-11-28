@@ -1,0 +1,36 @@
+{
+  "format": 1,
+  "issue": 1938,
+  "head": "27dffac98f13b6d8524bba8719a68e00c137786c",
+  "blob": "2420d26059e07a0a269356226cb20b9067593b84",
+  "problem": null,
+  "control": {
+    "exit_code": 0,
+    "timed_out": false,
+    "log_file": "try-1/control.log",
+    "again": null,
+    "flaky": false
+  },
+  "rows": [
+    {
+      "id": "M1",
+      "acs": [
+        4
+      ],
+      "path": "lib/features/kanji_detail_modal/widgets/kanji_strokes_section.dart",
+      "find": "    if (_isProbeStarted) return;\n",
+      "replace": "",
+      "note": "AC 4: without the probe-started guard the dependency-change test is red",
+      "status": "killed",
+      "detail": null,
+      "run": {
+        "exit_code": 1,
+        "timed_out": false,
+        "log_file": "try-1/m1.log"
+      },
+      "again": null,
+      "log_tail": "\nWhen the exception was thrown, this was the stack:\n#0      TestHandle.markPending (package:test_api/hooks.dart:60:26)\n#1      _expect (package:matcher/src/expect/expect.dart:151:36)\n#2      expectLater (package:matcher/src/expect/expect.dart:91:7)\n#3      expectLater (package:flutter_test/src/widget_tester.dart:507:8)\n#4      main.shoot (file:///home/u/.gld/tmp/owner/app_a/1938/mutation-proof-1/mutation-tree/test/features/kanji_detail_modal/hanzi_modal_golden_test.dart:151:11)\n<asynchronous suspension>\n#5      main.<anonymous closure>.<anonymous closure> (file:///home/u/.gld/tmp/owner/app_a/1938/mutation-proof-1/mutation-tree/test/features/kanji_detail_modal/hanzi_modal_golden_test.dart:244:7)\n<asynchronous suspension>\n#6      testWidgets.<anonymous closure>.<anonymous closure> (package:flutter_test/src/widget_tester.dart:192:15)\n<asynchronous suspension>\n#7      TestWidgetsFlutterBinding._runTestBody (package:flutter_test/src/binding.dart:1953:5)\n<asynchronous suspension>\n<asynchronous suspension>\n(elided one frame from package:stack_trace)\n\nThe test description was:\n  여러 급수에 걸친 글자 다크\n════════════════════════════════════════════════════════════════════════════════════════════════════\n00:40 +3819 -1: /home/u/.gld/tmp/owner/app_a/1938/mutation-proof-1/mutation-tree/test/features/kanji_detail_modal/data/hanzi_data_integration_test.dart: hskwords 번들 한자 데이터 전수 모든 글자 파일이 문법 예외 없이 파싱되고 획 수가 정보와 같다\nhanzi-parse-all app=hskwords chars=3227 total=6205ms worst=影 26.357ms\n01:11 +3819 -1: /home/u/.gld/tmp/owner/app_a/1938/mutation-proof-1/mutation-tree/test/features/kanji_detail_modal/controller/related_words_query_test.dart: 관련 단어 조회 동치 이전 쿼리와 표본 전체에서 같은 단어·순서·단원을 낸다 - did not complete [E]\n01:11 +3819 -1: /home/u/.gld/tmp/owner/app_a/1938/mutation-proof-1/mutation-tree/test/features/kanji_detail_modal/data/hanzi_data_integration_test.dart: hskwords 번들 한자 데이터 전수 모든 글자 파일이 문법 예외 없이 파싱되고 획 수가 정보와 같다 - did not complete [E]\n01:11 +3819 -1: /home/u/.gld/tmp/owner/app_a/1938/mutation-proof-1/mutation-tree/test/features/kanji_detail_modal/widgets/kanji_strokes_section_source_test.dart: 획순 자산이 없는 한자는 획순 섹션을 그리지 않는다 - did not complete [E]\n01:11 +3819 -1: /home/u/.gld/tmp/owner/app_a/1938/mutation-proof-1/mutation-tree/test/features/kanji_detail_modal/kanji_detail_modal_chinese_test.dart: 중국어 한자 모달 내용 24획 글자도 넘침 없이 그려지고 모든 스텝에 닿는다 - did not complete [E]\n01:11 +3819 -1: /home/u/.gld/tmp/owner/app_a/1938/mutation-proof-1/mutation-tree/test/features/kanji_detail_modal/hanzi_modal_golden_test.dart: 중국어 한자 모달 기준 이미지 여러 급수에 걸친 글자 다크 - did not complete [E]\n01:11 +3819 -1: /home/u/.gld/tmp/owner/app_a/1938/mutation-proof-1/mutation-tree/test/features/kanji_detail_modal/widgets/kanji_strokes_section_blur_test.dart: 미결제 획순 블러 폭 800 에서 24획도 보이는 만큼만 카드를 만든다 - did not complete [E]\n01:11 +3819 -1: /home/u/.gld/tmp/owner/app_a/1938/mutation-proof-1/mutation-tree/test/features/kanji_detail_modal/widgets/kanji_section_test.dart: kunReading이 있을 때 잘 표시된다 - did not complete [E]\n01:11 +3819 -1: /home/u/.gld/tmp/owner/app_a/1938/mutation-proof-1/mutation-tree/test/controller/iap_controller_test.dart: 구독 해제 판단과 자동 복구 시작 시 조용한 복원 재설치로 저장 상태가 없어도 상품 조회가 성공하면 시작 시 복원을 한 번 호출한다 - did not complete [E]\n01:11 +3819 -1: /home/u/.gld/tmp/owner/app_a/1938/mutation-proof-1/mutation-tree/test/features/kanji_detail_modal/widgets/hanzi_section_test.dart: 중국어 라벨 세트 en 에서 일본어 한자 라벨이 없고 제목이 Hanzi Info 이다 - did not complete [E]\n01:11 +3819 -1: /home/u/.gld/tmp/owner/app_a/1938/mutation-proof-1/mutation-tree/test/features/kanji_detail_modal/kanji_detail_modal_test.dart: koreanHanja가 없어도 잘 표시된다 - did not complete [E]\n01:11 +3819 -1: Some tests failed.\n\nFailing tests:\n  /home/u/.gld/tmp/owner/app_a/1938/mutation-proof-1/mutation-tree/test/controller/iap_controller_test.dart: 구독 해제 판단과 자동 복구 시작 시 조용한 복원 재설치로 저장 상태가 없어도 상품 조회가 성공하면 시작 시 복원을 한 번 호출한다 (did not complete)\n  /home/u/.gld/tmp/owner/app_a/1938/mutation-proof-1/mutation-tree/test/features/kanji_detail_modal/controller/related_words_query_test.dart: 관련 단어 조회 동치 이전 쿼리와 표본 전체에서 같은 단어·순서·단원을 낸다 (did not complete)\n  /home/u/.gld/tmp/owner/app_a/1938/mutation-proof-1/mutation-tree/test/features/kanji_detail_modal/data/hanzi_data_integration_test.dart: hskwords 번들 한자 데이터 전수 모든 글자 파일이 문법 예외 없이 파싱되고 획 수가 정보와 같다 (did not complete)\n  /home/u/.gld/tmp/owner/app_a/1938/mutation-proof-1/mutation-tree/test/features/kanji_detail_modal/hanzi_modal_golden_test.dart: 중국어 한자 모달 기준 이미지 여러 급수에 걸친 글자 다크 (did not complete)\n  ... and 7 more"
+    }
+  ],
+  "at": "2026-11-26T10:18:54Z"
+}

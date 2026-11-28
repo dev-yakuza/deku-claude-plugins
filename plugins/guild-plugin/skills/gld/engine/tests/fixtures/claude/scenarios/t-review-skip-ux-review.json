@@ -1,0 +1,38 @@
+{
+  "format": 1,
+  "description": "Stage 3: a review asks to skip a catalog step → step-removal-request (TC8).",
+  "stream": "../f2/r4.jsonl",
+  "init_from_argv": true,
+  "role": {
+    "example": "result-review-s3",
+    "expect": "done"
+  },
+  "structured_output": {
+    "status": "done",
+    "outputs": [],
+    "requests": [
+      {
+        "op": "skip",
+        "step": "ux-review",
+        "trigger": "no-user-facing-text",
+        "note": "fixture"
+      }
+    ],
+    "blocked_by": null,
+    "discoveries": [],
+    "irreversible": [],
+    "note": "fixture",
+    "verdict": "pass",
+    "reviewed": [
+      "src/a.py"
+    ],
+    "checks": [
+      {
+        "id": "diff-review",
+        "result": "pass",
+        "note": ""
+      }
+    ],
+    "findings": []
+  }
+}

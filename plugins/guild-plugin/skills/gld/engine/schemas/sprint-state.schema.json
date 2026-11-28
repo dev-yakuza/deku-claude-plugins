@@ -1,0 +1,419 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "gld/sprint-state",
+  "title": "sprint.json — the sprint supervisor's state (stage-4 scope §2.2)",
+  "description": "records/<owner>/<repo>/sprints/<tracker>/sprint.json, written by the supervisor only (store.save_sprint, atomic). The original; the tracker marker is a copy. A re-run decides from the Issues' state.json and GitHub, not from this file (window is the one value it inherits). A NEW file: not part of state.json's fixed core.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "format",
+    "repo",
+    "tracker",
+    "run",
+    "plan_hash",
+    "state",
+    "halt",
+    "plugin_version",
+    "engine_sha256",
+    "host",
+    "pid",
+    "started",
+    "ended",
+    "window",
+    "allow_red_base",
+    "stack_reason",
+    "base_check",
+    "quota_reset_at",
+    "order",
+    "members"
+  ],
+  "properties": {
+    "format": {
+      "const": 1
+    },
+    "repo": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$"
+    },
+    "tracker": {
+      "$ref": "#/$defs/issue"
+    },
+    "run": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "1 = the first supervisor run of this tracker; a re-run writes a new object with run + 1 (the sprint log keeps every run)."
+    },
+    "plan_hash": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{12}$",
+      "description": "sprintdag.plan_hash of the tracker body this run follows."
+    },
+    "state": {
+      "enum": [
+        "starting",
+        "checking-base",
+        "running",
+        "waiting-for-window",
+        "waiting-for-quota",
+        "finished",
+        "halted"
+      ]
+    },
+    "halt": {
+      "enum": [
+        "base-red",
+        "boundary",
+        "marker-unwritable",
+        "plan-hash-mismatch",
+        "other-host",
+        "signal",
+        "engine-error",
+        null
+      ],
+      "description": "Set exactly when state = halted."
+    },
+    "plugin_version": {
+      "type": "string",
+      "minLength": 1
+    },
+    "engine_sha256": {
+      "$ref": "#/$defs/sha256",
+      "description": "sprint.engine_sha256 at the run's start (risk R8): compared before every member; different → halted engine-error."
+    },
+    "host": {
+      "type": "string",
+      "minLength": 1
+    },
+    "pid": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "started": {
+      "$ref": "#/$defs/ts"
+    },
+    "ended": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "$ref": "#/$defs/ts"
+        }
+      ]
+    },
+    "window": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "pattern": "^([01][0-9]|2[0-3]):[0-5][0-9]-([01][0-9]|2[0-3]):[0-5][0-9]$",
+      "description": "HH:MM-HH:MM (24h, zero-padded), end exclusive; null = none."
+    },
+    "allow_red_base": {
+      "type": "boolean"
+    },
+    "stack_reason": {
+      "enum": [
+        "config",
+        "squash-sync",
+        "merge-commit-forbidden",
+        "human-override",
+        null
+      ],
+      "description": "The tracker's stack-cap reason token checked against the repository's merge settings; null = not known → dep-unmerged (§2.4)."
+    },
+    "base_check": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "sha",
+            "config_sha256",
+            "ok",
+            "record"
+          ],
+          "properties": {
+            "sha": {
+              "$ref": "#/$defs/sha"
+            },
+            "config_sha256": {
+              "$ref": "#/$defs/sha256"
+            },
+            "ok": {
+              "type": "boolean"
+            },
+            "record": {
+              "type": "string",
+              "description": "File name of the base-green record."
+            }
+          }
+        }
+      ]
+    },
+    "quota_reset_at": {
+      "type": [
+        "number",
+        "null"
+      ],
+      "description": "Epoch seconds: no new member before it (§2.5)."
+    },
+    "order": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/$defs/issue"
+      }
+    },
+    "members": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "issue",
+          "base_dep",
+          "kind",
+          "outcome",
+          "block",
+          "cause",
+          "stop_reason",
+          "stop_detail",
+          "base",
+          "pr",
+          "draft",
+          "rc",
+          "started",
+          "ended",
+          "cost_usd"
+        ],
+        "properties": {
+          "issue": {
+            "$ref": "#/$defs/issue"
+          },
+          "base_dep": {
+            "anyOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/$defs/issue"
+              }
+            ]
+          },
+          "kind": {
+            "enum": [
+              "goal",
+              "other",
+              "slot",
+              null
+            ],
+            "description": "null = a table without the kind column."
+          },
+          "outcome": {
+            "enum": [
+              "done",
+              "closed",
+              "stopped",
+              "blocked",
+              "skipped-locked",
+              "refused",
+              "failed",
+              null
+            ],
+            "description": "null = not looked at yet in this run."
+          },
+          "block": {
+            "enum": [
+              "dep-stopped",
+              "dep-failed",
+              "upstream",
+              "dep-not-done",
+              "dep-pr-closed",
+              "dep-pr-ambiguous",
+              "dep-not-planned",
+              "dep-unmerged",
+              "base-unresolved",
+              "quota",
+              "repo-busy",
+              "remote-branch-exists",
+              "unsupported-epic",
+              "attended-run",
+              null
+            ],
+            "description": "Set exactly when outcome = blocked."
+          },
+          "cause": {
+            "anyOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/$defs/issue"
+              }
+            ],
+            "description": "The member that is the root cause (dep-stopped / dep-failed / upstream)."
+          },
+          "stop_reason": {
+            "enum": [
+              "plan-gate",
+              "blocked",
+              "output-format-twice",
+              "session-limit",
+              "on-fail-exceeded",
+              "soft-budget",
+              "new-collaborator-comment",
+              "done-gate",
+              "rule-unfillable",
+              "base-red",
+              "control-file",
+              "judge-wrote-outside-outputs",
+              "canary-failed",
+              "self-check-failed",
+              "unsafe-path",
+              "secret-detected",
+              "close-keyword",
+              "remote-diverged",
+              "absolute-limit",
+              "infra-stop",
+              "engine-error",
+              "format-mismatch",
+              "stable-label",
+              "step-add-limit",
+              "step-removal-request",
+              "pr-review",
+              "irreversible-change",
+              "not-reproduced",
+              "unsupported-epic",
+              "open-closing-pr",
+              "done-unconfirmed",
+              null
+            ],
+            "description": "outcome stopped / refused: the engine's code."
+          },
+          "stop_detail": {
+            "enum": [
+              "quota",
+              "api",
+              "auth",
+              "op-failed",
+              "fact-collection",
+              "wall-clock",
+              "no-output",
+              null
+            ]
+          },
+          "base": {
+            "anyOf": [
+              {
+                "type": "null"
+              },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "branch",
+                  "sha",
+                  "stacked_on"
+                ],
+                "properties": {
+                  "branch": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "sha": {
+                    "$ref": "#/$defs/sha"
+                  },
+                  "stacked_on": {
+                    "anyOf": [
+                      {
+                        "type": "null"
+                      },
+                      {
+                        "$ref": "#/$defs/issue"
+                      }
+                    ]
+                  }
+                }
+              }
+            ]
+          },
+          "pr": {
+            "anyOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/$defs/issue"
+              }
+            ]
+          },
+          "draft": {
+            "type": "boolean"
+          },
+          "rc": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "started": {
+            "anyOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/$defs/ts"
+              }
+            ]
+          },
+          "ended": {
+            "anyOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/$defs/ts"
+              }
+            ]
+          },
+          "cost_usd": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "minimum": 0
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "sha": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}([0-9a-f]{24})?$"
+    },
+    "ts": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]+)?Z$"
+    },
+    "issue": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "name": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*$",
+      "maxLength": 64
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    }
+  }
+}

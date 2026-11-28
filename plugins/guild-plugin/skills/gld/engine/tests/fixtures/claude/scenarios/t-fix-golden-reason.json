@@ -1,0 +1,48 @@
+{
+  "format": 1,
+  "description": "Stage 3: a golden change with its reason (TG1).",
+  "stream": "../f2/r4.jsonl",
+  "init_from_argv": true,
+  "role": {
+    "example": "result-work-s3",
+    "expect": "done"
+  },
+  "structured_output": {
+    "status": "done",
+    "outputs": [],
+    "requests": [],
+    "blocked_by": null,
+    "discoveries": [],
+    "irreversible": [],
+    "golden_reasons": [
+      {
+        "path": "test/goldens/a.png",
+        "reason": "bug-fix"
+      }
+    ],
+    "note": "fixture"
+  },
+  "actions": [
+    {
+      "op": "write",
+      "path": "test/goldens/a.png",
+      "content": "x\n"
+    },
+    {
+      "op": "git",
+      "args": [
+        "add",
+        "-A"
+      ]
+    },
+    {
+      "op": "git",
+      "args": [
+        "commit",
+        "-q",
+        "-m",
+        "work"
+      ]
+    }
+  ]
+}

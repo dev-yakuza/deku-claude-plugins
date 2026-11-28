@@ -1,0 +1,215 @@
+{
+  "format": 1,
+  "version": "exp-1",
+  "entries": [
+    {
+      "id": "product-review",
+      "role": "product-owner",
+      "class": "design-time",
+      "inputs": [
+        "in:issue.md",
+        "docs/specs/{issue}/analysis.md",
+        "in:leader-decision.md"
+      ],
+      "outputs": [
+        "docs/specs/{issue}/product.md"
+      ],
+      "checks": [],
+      "on_fail": null,
+      "summary": "product owner settles a scope or value question before the design: what is in, what is out, and why"
+    },
+    {
+      "id": "ux-design",
+      "role": "designer",
+      "class": "design-time",
+      "inputs": [
+        "in:issue.md",
+        "docs/specs/{issue}/analysis.md",
+        "in:leader-decision.md"
+      ],
+      "outputs": [
+        "docs/specs/{issue}/ux.md"
+      ],
+      "checks": [],
+      "on_fail": null,
+      "summary": "designer specifies the screens, states, flows and accessibility of a user-interface change before it is built"
+    },
+    {
+      "id": "threat-model",
+      "role": "security",
+      "class": "design-time",
+      "inputs": [
+        "in:issue.md",
+        "docs/specs/{issue}/analysis.md",
+        "in:leader-decision.md"
+      ],
+      "outputs": [
+        "docs/specs/{issue}/threat-model.md"
+      ],
+      "checks": [],
+      "on_fail": null,
+      "summary": "security engineer models the threats of a change to authentication, secrets, permissions or exposed surface, with the required mitigations"
+    },
+    {
+      "id": "data-design",
+      "role": "dba",
+      "class": "design-time",
+      "inputs": [
+        "in:issue.md",
+        "docs/specs/{issue}/analysis.md",
+        "in:leader-decision.md"
+      ],
+      "outputs": [
+        "docs/specs/{issue}/data.md"
+      ],
+      "checks": [],
+      "on_fail": null,
+      "summary": "database engineer designs a schema, storage-format or migration change: shape, migration order, rollback and data safety"
+    },
+    {
+      "id": "i18n-plan",
+      "role": "i18n",
+      "class": "design-time",
+      "inputs": [
+        "in:issue.md",
+        "docs/specs/{issue}/analysis.md",
+        "in:leader-decision.md"
+      ],
+      "outputs": [
+        "docs/specs/{issue}/i18n.md"
+      ],
+      "checks": [],
+      "on_fail": null,
+      "summary": "localisation engineer plans the user-facing texts of a change: keys, every supported language, plural and format rules"
+    },
+    {
+      "id": "ux-review",
+      "role": "designer",
+      "class": "diff-review",
+      "inputs": [
+        "in:review.diff",
+        "docs/specs/{issue}/analysis.md",
+        "in:leader-decision.md"
+      ],
+      "outputs": [],
+      "checks": [
+        "ux-conformance"
+      ],
+      "on_fail": {
+        "back_to": "@developer",
+        "max": 2
+      },
+      "summary": "designer reviews a user-interface change: states, layout, accessibility and conformance to the UX spec when one exists"
+    },
+    {
+      "id": "security-review",
+      "role": "security",
+      "class": "diff-review",
+      "inputs": [
+        "in:review.diff",
+        "docs/specs/{issue}/analysis.md",
+        "in:leader-decision.md"
+      ],
+      "outputs": [],
+      "checks": [
+        "security-review"
+      ],
+      "on_fail": {
+        "back_to": "@developer",
+        "max": 2
+      },
+      "summary": "security engineer reviews the diff adversarially: authentication, authorisation, secrets, injection, exposure (also the mandatory risk-area gate)"
+    },
+    {
+      "id": "data-review",
+      "role": "dba",
+      "class": "diff-review",
+      "inputs": [
+        "in:review.diff",
+        "docs/specs/{issue}/analysis.md",
+        "in:leader-decision.md"
+      ],
+      "outputs": [],
+      "checks": [
+        "data-integrity"
+      ],
+      "on_fail": {
+        "back_to": "@developer",
+        "max": 2
+      },
+      "summary": "database engineer reviews schema, migration and data-handling changes for integrity, reversibility and data loss (also the data-migration gate)"
+    },
+    {
+      "id": "i18n-review",
+      "role": "i18n",
+      "class": "diff-review",
+      "inputs": [
+        "in:review.diff",
+        "docs/specs/{issue}/analysis.md",
+        "in:leader-decision.md"
+      ],
+      "outputs": [],
+      "checks": [
+        "i18n-completeness"
+      ],
+      "on_fail": {
+        "back_to": "@developer",
+        "max": 2
+      },
+      "summary": "localisation engineer reviews that every new or changed user-facing text exists in every supported language, with no hard-coded string"
+    },
+    {
+      "id": "performance-review",
+      "role": "performance",
+      "class": "diff-review",
+      "inputs": [
+        "in:review.diff",
+        "docs/specs/{issue}/analysis.md",
+        "in:leader-decision.md"
+      ],
+      "outputs": [],
+      "checks": [
+        "performance-regression"
+      ],
+      "on_fail": {
+        "back_to": "@developer",
+        "max": 2
+      },
+      "summary": "performance engineer reviews hot paths, rendering, queries and payloads of the diff for a regression"
+    },
+    {
+      "id": "infra-review",
+      "role": "infra",
+      "class": "diff-review",
+      "inputs": [
+        "in:review.diff",
+        "docs/specs/{issue}/analysis.md",
+        "in:leader-decision.md"
+      ],
+      "outputs": [],
+      "checks": [
+        "infra-safety"
+      ],
+      "on_fail": {
+        "back_to": "@developer",
+        "max": 2
+      },
+      "summary": "infrastructure engineer reviews build, CI, deployment and configuration changes for safety and reproducibility"
+    },
+    {
+      "id": "fix-discovery",
+      "role": "developer",
+      "class": "fix",
+      "inputs": [
+        "in:blocking-discoveries.md",
+        "docs/specs/{issue}/analysis.md",
+        "in:failure-summary.md",
+        "in:leader-decision.md"
+      ],
+      "outputs": [],
+      "checks": [],
+      "on_fail": null,
+      "summary": "developer fixes a discovery that blocks an acceptance criterion, found after the developer step was done (engine only, never requested)"
+    }
+  ]
+}

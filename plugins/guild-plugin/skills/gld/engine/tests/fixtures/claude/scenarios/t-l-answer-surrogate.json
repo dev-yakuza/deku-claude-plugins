@@ -1,0 +1,22 @@
+{
+  "format": 1,
+  "description": "Stage 3: leader, a lone surrogate in the note (review-q0 D9).",
+  "stream": "../leader/real-2.1.323/plan-gate-plan.jsonl",
+  "init_from_argv": true,
+  "leader": {
+    "example": "leader-answer-s3",
+    "expect": "answer-schema"
+  },
+  "structured_output": {
+    "answer": "rerun",
+    "reason": "repeated-failure",
+    "step": "implement",
+    "note": "bad \ud800 text",
+    "recommendation": null,
+    "defer": null,
+    "session": {
+      "model": "opus",
+      "effort": "high"
+    }
+  }
+}

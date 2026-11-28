@@ -1,0 +1,24 @@
+{
+  "fill": {
+    "{answers}": ["approve", "rerun", "escalate"],
+    "{rerun_steps}": ["analyze", "ac-format", "design", "test-cases", "implement", "test"],
+    "{human_answers}": ["approve", "rerun", "escalate"],
+    "{human_rerun_steps}": ["analyze", "ac-format", "design", "test-cases", "implement", "test"],
+    "{ac_ids}": [1, 2],
+    "{discovery_ids}": ["D1"]
+  },
+  "answer": {
+    "answer": "approve",
+    "reason": "acceptance-met",
+    "step": null,
+    "note": "AC 1 is covered by the unit test; AC 2 is a manual check on a device.",
+    "recommendation": null,
+    "ac_verdicts": [
+      {"ac": 1, "status": "met", "evidence": "test/settings_test.dart: review types selectable"},
+      {"ac": 2, "status": "manual", "evidence": "manual-test-checklist.md item 1"}
+    ],
+    "discoveries": [
+      {"id": "D1", "disposition": "followup"}
+    ]
+  }
+}

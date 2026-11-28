@@ -1,0 +1,54 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "gld/result-work",
+  "title": "Role result — work (design §6.2, §7.5)",
+  "description": "Passed verbatim to `claude --json-schema` for steps without `checks`, and used by the engine to re-check runs/<step>/<attempt>/result.json. Keeps to type/properties/required/additionalProperties/items/enum so the CLI's structured output accepts it; the engine adds the rules a schema cannot say (outputs exist, request step names are catalog names — §4, §6.2 engine table). status is done or blocked only; concerns go to note.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["status", "outputs", "requests", "blocked_by", "discoveries", "note"],
+  "properties": {
+    "status": {"enum": ["done", "blocked"], "description": "done = the step's outputs are written. blocked = cannot continue; say why in blocked_by."},
+    "outputs": {"type": "array", "items": {"type": "string"}, "description": "Paths of the declared output files you wrote."},
+    "requests": {
+      "type": "array",
+      "description": "Procedure change requests (recorded only in stages 0–2, §6). Never put a command in a request.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["op", "step", "trigger", "note"],
+        "properties": {
+          "op": {"enum": ["add", "remove", "skip"]},
+          "step": {"type": "string", "description": "A plugin step-catalog name."},
+          "trigger": {"enum": ["ui-change", "new-dependency", "schema-change", "security-surface", "no-user-facing-text", "other"]},
+          "note": {"type": "string"}
+        }
+      }
+    },
+    "blocked_by": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "required": ["kind", "note"],
+      "description": "Required (not null) when status is blocked.",
+      "properties": {
+        "kind": {"enum": ["missing-input", "ambiguous", "env", "other"]},
+        "note": {"type": "string"}
+      }
+    },
+    "discoveries": {
+      "type": "array",
+      "description": "Out-of-scope problems found while working (§7.5).",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["kind", "where", "note", "blocks_current_ac"],
+        "properties": {
+          "kind": {"enum": ["bug", "debt", "security", "test-gap", "doc"]},
+          "where": {"type": "string"},
+          "note": {"type": "string"},
+          "blocks_current_ac": {"type": "boolean"}
+        }
+      }
+    },
+    "note": {"type": "string", "description": "Free text for humans and evolve. The engine never branches on it."}
+  }
+}

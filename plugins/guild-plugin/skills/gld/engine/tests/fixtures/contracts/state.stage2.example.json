@@ -1,0 +1,32 @@
+{
+  "format": 1,
+  "issue": 42,
+  "revision": 2,
+  "last_head": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "steps": [
+    {"id": "analyze", "status": "done", "latest_attempt": 1},
+    {"id": "ac-format", "status": "done", "latest_attempt": 1},
+    {"id": "plan", "status": "done", "latest_attempt": 1},
+    {"id": "design", "status": "needs_human", "latest_attempt": 1},
+    {"id": "implement", "status": "pending", "latest_attempt": null}
+  ],
+  "repo": "acme/app",
+  "mode": "attended",
+  "totals": {"attempts": 4, "cost_usd": 3.2, "leader_calls": 1, "warnings": 0},
+  "stop": {
+    "status": "needs_human",
+    "reason": "blocked",
+    "step": "design",
+    "attempt": 1,
+    "allowed_answers": ["rerun", "replan", "escalate"],
+    "at": "2026-11-23T02:00:00Z",
+    "recommendation": {"answer": "rerun", "step": "design", "note": "Run design again after the owner decides the screens.", "reason": "needs-human-decision"},
+    "leader_failed": null
+  },
+  "leader_calls": [
+    {"kind": "check", "k": 1, "sessions": [1], "situation": "plan-gate", "step": null, "answer": "plan", "reason": "fits-template", "cost_usd": 0.41, "counted": false, "failed": null},
+    {"kind": "leader", "k": 1, "sessions": [1], "situation": "blocked", "step": null, "answer": "escalate", "reason": "needs-human-decision", "cost_usd": 0.22, "counted": true, "failed": null}
+  ],
+  "counters": {"plan_rerun": 0, "done_rerun": 0},
+  "closed": null
+}

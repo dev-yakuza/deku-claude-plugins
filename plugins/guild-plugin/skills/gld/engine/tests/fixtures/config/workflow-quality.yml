@@ -1,0 +1,37 @@
+# fixture: a pull-request quality workflow in the YAML subset real workflows use
+name: Check and test the source code
+on:
+  pull_request:
+    types: [labeled]
+permissions:
+  contents: read
+env:
+  TURBO_TELEMETRY_DISABLED: "1"
+jobs:
+  lint:
+    name: Check code format   # trailing comment
+    runs-on: ubuntu-latest
+    if: github.event.label.name == 'unit-test'
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@abc123 # v7
+      - name: Install dependencies
+        uses: ./.github/actions/install_dependencies
+      - name: Linter
+        run: flutter analyze
+      - name: Goldens
+        run: flutter test --fail-fast --concurrency=$(nproc --all) --tags golden
+          --update-goldens
+      - name: Test without golden
+        run: |
+          mkdir -p build
+          flutter test --exclude-tags golden --file-reporter json:build/ci.json
+          scripts/verify_test_coverage.sh build/ci.json
+      - name: Folded
+        run: >-
+          python3 tool/check.py
+          --strict
+      - name: Needs secrets
+        env:
+          TOKEN: ${{ secrets.TOKEN }}
+        run: ./deploy.sh

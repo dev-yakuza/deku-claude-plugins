@@ -1,0 +1,248 @@
+#!/usr/bin/env -S python3 -I
+"""Fake `claude` for engine tests — replays a scenario fixture (scope §6.2 test method).
+
+Put tests/fakes/bin first on PATH. Environment:
+  GLD_FAKE_CLAUDE_SCENARIOS  os.pathsep-separated scenario files; call k (0-based) plays the
+                            k-th. (GLD_FAKE_CLAUDE_SCENARIO: a single file.) No scenario for
+                            a call → exit 97 (fail-closed).
+  GLD_FAKE_CLAUDE_LOG        directory; every call writes call-<k>.json {argv, cwd, env, scenario}
+                            and the call counter is the number of such files.
+  GLD_FAKE_CLAUDE_VERSION    `claude --version` text (default "2.1.323 (Claude Code)").
+  GLD_FAKE_CLAUDE_INIT       JSON object merged into every system/init (e.g. a new claude_code_version).
+  GLD_FAKE_CLAUDE_CANARY     JSON {"wrong": [probe ids], "cost": usd}: a role-canary prompt is answered like
+                            a correct boundary (`wrong` the opposite way) from the items.json the canary
+                            wrote — no scenario is used, the call is logged as canary-<k>.json. Unset: a
+                            canary prompt is a call like any other.
+
+Scenario (JSON, see tests/fixtures/claude/README.md):
+  {"stream": "<path relative to the scenario file>" | "events": [ … ],
+   "init_from_argv": false,       set init tools from --tools, cwd, model from --model
+                                  (with --json-schema, init tools also get "StructuredOutput",
+                                  and a 2020-12 `$schema` in it is refused — both as the real
+                                  CLI 2.1.323 does, P4 canary)
+   "init": {…},                   merged into the system/init event
+   "result": {…},                 merged into the result event
+   "structured_output": {…},      put at result["structured_output"] (absent = none)
+   "drop_result": false,          omit the result event
+   "truncate_after": null,        emit only the first N events
+   "line_delay_s": 0, "hang_after": null, "hang_s": 0,   no output for hang_s after N lines
+   "actions": [{"at": "start"|"before_result"|"end", "op": "write"|"append"|"delete"|
+                "mkdir"|"symlink"|"git", "path", "content", "target", "args"}],
+   "stderr": "", "exit_code": 0}
+Paths in actions are relative to the process cwd (the worktree) unless absolute.
+"""
+
+import json
+import os
+import re
+import subprocess
+import sys
+import time
+import uuid
+
+
+def _calls_dir():
+    d = os.environ.get("GLD_FAKE_CLAUDE_LOG")
+    if d:
+        os.makedirs(d, exist_ok=True)
+    return d
+
+
+def _call_index(log_dir):
+    if not log_dir:
+        return 0
+    return len([f for f in os.listdir(log_dir) if f.startswith("call-") and f.endswith(".json")])
+
+
+def _scenarios():
+    many = os.environ.get("GLD_FAKE_CLAUDE_SCENARIOS")
+    if many:
+        return [p for p in many.split(os.pathsep) if p]
+    one = os.environ.get("GLD_FAKE_CLAUDE_SCENARIO")
+    return [one] if one else []
+
+
+def _arg_value(argv, flag):
+    if flag in argv:
+        i = argv.index(flag)
+        if i + 1 < len(argv):
+            return argv[i + 1]
+    return None
+
+
+def _load_events(scn, scn_path):
+    if "events" in scn:
+        return [dict(e) for e in scn["events"]]
+    path = scn["stream"]
+    if not os.path.isabs(path):
+        path = os.path.join(os.path.dirname(os.path.abspath(scn_path)), path)
+    with open(path, encoding="utf-8") as f:
+        return [json.loads(line) for line in f if line.strip()]
+
+
+def _do(action):
+    op = action["op"]
+    path = action.get("path")
+    if path is not None and not os.path.isabs(path):
+        path = os.path.join(os.getcwd(), path)
+    if op in ("write", "append"):
+        os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+        with open(path, "a" if op == "append" else "w", encoding="utf-8") as f:
+            f.write(action.get("content", ""))
+    elif op == "delete":
+        if os.path.lexists(path):
+            os.unlink(path)
+    elif op == "mkdir":
+        os.makedirs(path, exist_ok=True)
+    elif op == "symlink":
+        os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+        os.symlink(action["target"], path)
+    elif op == "git":
+        subprocess.run(["git", *action["args"]], check=True, stdout=subprocess.DEVNULL)
+    else:
+        raise SystemExit(f"fake claude: unknown action op {op!r}")
+
+
+CANARY_FIRST_LINE = "This is an automated security-boundary check of this session, not a task."
+
+
+def _probe_key(tool, inp):
+    """What identifies a probe whatever its attempt folder (the own in/ probes move with the attempt)."""
+    if tool in ("Bash", "srt"):
+        text = inp["command"]
+    elif tool == "Write":
+        text = inp["file_path"]
+    else:
+        text = json.dumps(inp, sort_keys=True)
+    return tool, re.sub(r"/runs/canary/[0-9]+/in/", "/runs/canary/N/in/", text)
+
+
+def _canary(argv, prompt, conf):
+    log_dir = _calls_dir()
+    if log_dir:
+        k = len([f for f in os.listdir(log_dir) if f.startswith("canary-")])
+        with open(os.path.join(log_dir, f"canary-{k}.json"), "w", encoding="utf-8") as f:
+            json.dump({"argv": argv, "cwd": os.getcwd()}, f, indent=1)
+    runs = os.path.join(os.environ["GLD_ENGINE_HOME"], "canary", "runs")
+    newest = max((os.path.join(runs, d) for d in os.listdir(runs)
+                  if os.path.isfile(os.path.join(runs, d, "items.json"))), key=os.path.getmtime)
+    with open(os.path.join(newest, "items.json"), encoding="utf-8") as f:
+        items = {_probe_key(i["tool"], i["input"]): i for i in json.load(f)}
+    tools = [t for t in _arg_value(argv, "--tools").replace(" ", ",").split(",") if t]
+    here = os.path.dirname(os.path.abspath(__file__))
+    with open(os.path.join(here, "..", "..", "fixtures", "claude", "canary", "sample.jsonl"), encoding="utf-8") as f:
+        init = json.loads(f.readline())
+    init.update({"tools": sorted(tools + ["StructuredOutput"]), "cwd": os.getcwd()})
+    init.update(json.loads(os.environ.get("GLD_FAKE_CLAUDE_INIT") or "{}"))
+    out = [init]
+    for m in re.finditer(r"^(\d+)\. (\w+) tool: (.*)$", prompt, re.M):
+        n, tool = m.group(1), m.group(2)
+        inp = {p.group(1): json.loads(p.group(2)) for p in re.finditer(r'(\w+) = ("(?:[^"\\]|\\.)*")', m.group(3))}
+        item = items[_probe_key(tool, inp)]
+        allowed = (item["expect"] == "allowed") != (item["id"] in conf.get("wrong", ()))
+        out.append({"type": "assistant", "message": {"content": [
+            {"type": "tool_use", "id": "toolu_" + n, "name": tool, "input": inp}]}})
+        out.append({"type": "user", "message": {"content": [{
+            "type": "tool_result", "tool_use_id": "toolu_" + n, "is_error": not allowed,
+            "content": f"ok {item['token'] or ''}" if allowed else "Operation not permitted"}]}})
+    out.append({"type": "result", "subtype": "success", "is_error": False, "session_id": str(uuid.uuid4()),
+                "total_cost_usd": conf.get("cost", 0.01), "structured_output": {
+                    "status": "done", "outputs": [], "requests": [], "blocked_by": None, "discoveries": [],
+                    "note": "canary"}})
+    for e in out:
+        sys.stdout.write(json.dumps(e) + "\n")
+    return 0
+
+
+def main(argv):
+    if "--version" in argv or "-v" in argv:
+        print(os.environ.get("GLD_FAKE_CLAUDE_VERSION", "2.1.323 (Claude Code)"))
+        return 0
+    prompt = _arg_value(argv, "-p") or ""
+    if os.environ.get("GLD_FAKE_CLAUDE_CANARY") and prompt.startswith(CANARY_FIRST_LINE):
+        return _canary(argv, prompt, json.loads(os.environ["GLD_FAKE_CLAUDE_CANARY"]))
+    log_dir = _calls_dir()
+    k = _call_index(log_dir)
+    scns = _scenarios()
+    scn_path = scns[k] if k < len(scns) else None
+    if log_dir:
+        with open(os.path.join(log_dir, f"call-{k}.json"), "w", encoding="utf-8") as f:
+            json.dump({"argv": argv, "cwd": os.getcwd(), "env": dict(os.environ), "scenario": scn_path}, f, indent=1)
+    schema_text = _arg_value(argv, "--json-schema")
+    if schema_text is not None and "json-schema.org/draft/2020-12/schema" in schema_text:
+        # recorded from the real CLI 2.1.323 (P4 canary): it refuses the 2020-12 meta-schema
+        # reference before system/init, with an empty stdout
+        sys.stderr.write('Error: --json-schema is not a valid JSON Schema: no schema with key or ref '
+                         '"https://json-schema.org/draft/2020-12/schema"\n')
+        return 1
+    if scn_path is None:
+        sys.stderr.write(f"fake claude: no scenario for call {k}\n")
+        return 97
+    with open(scn_path, encoding="utf-8") as f:
+        scn = json.load(f)
+
+    events = _load_events(scn, scn_path)
+    session_id = _arg_value(argv, "--resume") or str(uuid.uuid4())
+    for e in events:
+        if e.get("type") == "system" and e.get("subtype") == "init":
+            if scn.get("init_from_argv"):
+                tools = _arg_value(argv, "--tools")
+                if tools is not None:
+                    e["tools"] = [t for t in tools.replace(" ", ",").split(",") if t]
+                e["cwd"] = os.getcwd()
+                model = _arg_value(argv, "--model")
+                if model:
+                    e["model"] = model
+                e["session_id"] = session_id
+            e.update(json.loads(os.environ.get("GLD_FAKE_CLAUDE_INIT") or "{}"))
+            e.update(scn.get("init", {}))
+            if schema_text is not None and isinstance(e.get("tools"), list) and "StructuredOutput" not in e["tools"]:
+                # the real CLI 2.1.323 adds its structured-output tool to init when --json-schema is given (P4)
+                e["tools"] = sorted(e["tools"] + ["StructuredOutput"])
+        if e.get("type") == "result":
+            e.update(scn.get("result", {}))
+            if "structured_output" in scn:
+                e["structured_output"] = scn["structured_output"]
+    if scn.get("drop_result"):
+        events = [e for e in events if e.get("type") != "result"]
+    if scn.get("truncate_after") is not None:
+        events = events[: scn["truncate_after"]]
+
+    actions = scn.get("actions", [])
+    for a in actions:
+        if a.get("at") == "start":
+            _do(a)
+    delay = float(scn.get("line_delay_s", 0))
+    hang_after = scn.get("hang_after")
+    before_done = False
+    for i, e in enumerate(events):
+        if e.get("type") == "result" and not before_done:
+            for a in actions:
+                if a.get("at", "before_result") == "before_result":
+                    _do(a)
+            before_done = True
+        if hang_after is not None and i == hang_after:
+            time.sleep(float(scn.get("hang_s", 0)))
+        line = json.dumps(e, ensure_ascii=False)
+        try:
+            line.encode("utf-8")
+        except UnicodeEncodeError:      # a lone surrogate leaves as its \\u escape, like the real CLI
+            line = json.dumps(e)
+        sys.stdout.write(line + "\n")
+        sys.stdout.flush()
+        if delay:
+            time.sleep(delay)
+    if not before_done:
+        for a in actions:
+            if a.get("at", "before_result") == "before_result":
+                _do(a)
+    for a in actions:
+        if a.get("at") == "end":
+            _do(a)
+    if scn.get("stderr"):
+        sys.stderr.write(scn["stderr"])
+    return int(scn.get("exit_code", 0))
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

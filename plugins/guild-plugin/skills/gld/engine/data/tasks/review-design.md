@@ -1,0 +1,5 @@
+Review the implementation on the current branch against the design. The diff of the whole branch is in `review.diff` (engine folder); the intent is `skeleton.md` and `analysis.md`, plus `docs/standards/architecture.md` when present. You are reviewing the developer's output, not your own.
+
+Read the skeleton whole, in one read: you are checking against the whole intent, so a clause you did not read is one this change passes silently, and an empty finding list is what clean work looks like, so that failure is invisible. A read returns at most 2000 lines and does not say when it stopped: compare the last line number you got against the file's length and page from there when they differ; say so in `note` if you still cannot get all of it.
+
+Check: did the change honour the module boundaries, seams, technical direction and design intent? Name the specific non-conformance — which file, which design decision it breaks — not a general impression. Check id `design-conformance`: `pass` when conformant, `fail` when a non-conformance exists (then also give it as a finding).

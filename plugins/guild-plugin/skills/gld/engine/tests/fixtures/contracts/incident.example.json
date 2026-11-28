@@ -1,0 +1,38 @@
+{
+  "format": 1,
+  "signature": "escalate:env-problem @ done-gate",
+  "slug": "escalate-env-problem-done-gate-0f3c5d2a",
+  "kind": "suspect",
+  "first_seen": "2026-11-26T05:21:08Z",
+  "last_seen": "2026-11-26T10:20:12Z",
+  "count": 2,
+  "evidence": {
+    "occurrence": 1,
+    "files": [
+      {"path": "log.jsonl", "source": "/home/u/.gld/records/owner/app_a/1938/log.jsonl", "bytes": 48211, "redacted": 0},
+      {"path": "sessions/done-gate-2/stream.jsonl", "source": "/home/u/.gld/records/owner/app_a/1938/runs/done-gate/2/stream.jsonl", "bytes": 311204, "redacted": 1},
+      {"path": "sessions/done-gate-2/transcript.jsonl", "source": "/home/u/.claude/projects/-home-u-projects--gld-app-a-1938/29d840ac-2ca0-4370-9d6b-970239fd091b.jsonl", "bytes": 402117, "redacted": 1}
+    ],
+    "withheld": [{"source": "/home/u/.gld/records/owner/app_a/1938/runs/test/2/stream.jsonl", "why": "size-cap"}]
+  },
+  "occurrences": [
+    {
+      "n": 1, "at": "2026-11-26T05:21:02Z", "recorded": "2026-11-26T05:21:08Z",
+      "repo": "owner/app_a", "issue": 1938, "tracker": 1979,
+      "step": "done-gate", "reason": "done-gate", "detail": null, "escalate_reason": "env-problem", "leader_failed": null,
+      "engine": {"version": "1.0.0-exp.3", "commit": "0cf27b5c5d2cb56b4e0d9d0c8abdf91c19d583ad", "dirty": false, "fixes": []},
+      "records": "/home/u/.gld/records/owner/app_a/1938",
+      "note": null,
+      "log": ["{\"format\":1,\"ts\":\"2026-11-26T05:21:02Z\",\"issue\":1938,\"who\":\"engine\",\"event\":\"stop\",\"step\":\"done-gate\",\"attempt\":2,\"to\":\"needs_human\",\"code\":\"done-gate\"}"]
+    },
+    {
+      "n": 2, "at": "2026-11-26T10:20:07Z", "recorded": "2026-11-26T10:20:12Z",
+      "repo": "owner/app_a", "issue": 1938, "tracker": 1986,
+      "step": "done-gate", "reason": "done-gate", "detail": null, "escalate_reason": "env-problem", "leader_failed": null,
+      "engine": {"version": "1.0.0-exp.3", "commit": "6757d26d8cbe60c9cc49fda574bbc27bd71fd46c", "dirty": false, "fixes": ["E1"]},
+      "records": "/home/u/.gld/records/owner/app_a/1938",
+      "note": null,
+      "log": []
+    }
+  ]
+}

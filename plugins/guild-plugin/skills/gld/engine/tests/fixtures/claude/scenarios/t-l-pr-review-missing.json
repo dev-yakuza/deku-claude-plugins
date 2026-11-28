@@ -1,0 +1,23 @@
+{
+  "format": 1,
+  "description": "Stage 3: leader, pr-review: one review item is not judged.",
+  "stream": "../leader/real-2.1.323/plan-gate-plan.jsonl",
+  "init_from_argv": true,
+  "leader": {
+    "example": "leader-answer-pr-review",
+    "expect": "reviews-not-covering"
+  },
+  "structured_output": {
+    "answer": "rerun",
+    "reason": "real-defect",
+    "step": "implement",
+    "note": "Handle the empty list.",
+    "recommendation": null,
+    "reviews": [
+      {
+        "id": "review:5001",
+        "effect": "change-request"
+      }
+    ]
+  }
+}

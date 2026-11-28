@@ -1,0 +1,149 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "gld/leader-answer-s3",
+  "title": "Leader answer — common envelope (stage 3, scope §2.0, §2.4, §2.7, §2.9)",
+  "description": "The stage-2 envelope + defer + session: blocked, output-format-twice, session-limit, on-fail-exceeded, soft-budget, and step-add-limit (where both fields are dropped: {requirement_rows}, {models} and {efforts} are filled with []) + close (K8-3: blocked before any developer step — elsewhere {close_reasons} is [] and the field is dropped). ENUM TEMPLATE: values like \"{answers}\" are placeholders that schema.fill_enums replaces for each call (codes.LEADER_SCHEMA_TOKENS); an enum that comes out empty drops the nearest array or nullable property (read as [] / null). Keeps to type/properties/required/additionalProperties/items/enum (the CLI's structured-output subset). Rules a schema cannot say are checked by gxengine/leader.py (codes.LeaderFormatReason).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "answer",
+    "reason",
+    "step",
+    "note",
+    "recommendation",
+    "defer",
+    "session",
+    "close"
+  ],
+  "properties": {
+    "answer": {
+      "enum": [
+        "{answers}"
+      ],
+      "description": "One of the answers the engine allows for this call (rendered per call). The engine acts on this field only."
+    },
+    "reason": {
+      "enum": [
+        "fits-template",
+        "analysis-gap",
+        "assumption-corrected",
+        "comment-no-effect",
+        "real-defect",
+        "upstream-gap",
+        "transient",
+        "env-problem",
+        "needs-human-decision",
+        "already-decided",
+        "acceptance-met",
+        "high-complexity",
+        "repeated-failure",
+        "other"
+      ],
+      "description": "Leader-decision reason code (§4.2, scope D20). Pick `other` only when no code fits."
+    },
+    "step": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "enum": [
+        "{rerun_steps}",
+        null
+      ],
+      "description": "The step to run again — set exactly when answer is rerun, otherwise null."
+    },
+    "note": {
+      "type": "string",
+      "description": "Free text for the next role (leader-decision.md), the human and evolve. The engine never branches on it."
+    },
+    "recommendation": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": false,
+      "required": [
+        "answer",
+        "step",
+        "note"
+      ],
+      "description": "Set exactly when answer is escalate: what you recommend the human answers (scope D15). Otherwise null.",
+      "properties": {
+        "answer": {
+          "enum": [
+            "{human_answers}"
+          ]
+        },
+        "step": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "enum": [
+            "{human_rerun_steps}",
+            null
+          ],
+          "description": "Set exactly when the recommended answer is rerun."
+        },
+        "note": {
+          "type": "string"
+        }
+      }
+    },
+    "defer": {
+      "type": [
+        "array",
+        "null"
+      ],
+      "items": {
+        "enum": [
+          "{requirement_rows}"
+        ]
+      },
+      "description": "E30: requirement rows to leave out of this Issue. Only with answer replan (else null); never every row, never one twice, once per Issue."
+    },
+    "session": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": false,
+      "required": [
+        "model",
+        "effort"
+      ],
+      "properties": {
+        "model": {
+          "enum": [
+            "{models}"
+          ]
+        },
+        "effort": {
+          "enum": [
+            "{efforts}"
+          ]
+        }
+      },
+      "description": "§7.9 layer 5 (E28): model and effort of the rerun step. Only with answer rerun (else null); `reason` must then be high-complexity, repeated-failure or other. null = keep them."
+    },
+    "close": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": false,
+      "required": [
+        "reason"
+      ],
+      "properties": {
+        "reason": {
+          "enum": [
+            "{close_reasons}"
+          ],
+          "description": "completed = already achieved; not-planned = decided not to do it."
+        }
+      },
+      "description": "K8-3: set exactly when answer is close-as-decided. Otherwise null."
+    }
+  }
+}

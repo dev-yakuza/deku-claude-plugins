@@ -1,0 +1,234 @@
+{
+  "format": 1,
+  "issue": 42,
+  "revision": 2,
+  "last_head": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "steps": [
+    {
+      "id": "analyze",
+      "status": "done",
+      "latest_attempt": 1
+    },
+    {
+      "id": "ac-format",
+      "status": "done",
+      "latest_attempt": 1
+    },
+    {
+      "id": "plan",
+      "status": "done",
+      "latest_attempt": 1
+    },
+    {
+      "id": "design",
+      "status": "needs_human",
+      "latest_attempt": 1,
+      "returns": 2,
+      "return_sources": [
+        {
+          "step": "review-audit",
+          "attempt": 1,
+          "cause": "leader-rerun"
+        }
+      ]
+    },
+    {
+      "id": "implement",
+      "status": "pending",
+      "latest_attempt": null
+    }
+  ],
+  "repo": "acme/app",
+  "mode": "attended",
+  "totals": {
+    "attempts": 4,
+    "cost_usd": 3.2,
+    "leader_calls": 1,
+    "warnings": 0
+  },
+  "stop": {
+    "status": "needs_human",
+    "reason": "irreversible-change",
+    "step": "design",
+    "attempt": 1,
+    "allowed_answers": [
+      "continue",
+      "rerun"
+    ],
+    "at": "2026-11-24T01:02:03Z"
+  },
+  "leader_calls": [
+    {
+      "kind": "check",
+      "k": 1,
+      "sessions": [
+        1
+      ],
+      "situation": "plan-gate",
+      "step": null,
+      "answer": "plan",
+      "reason": "fits-template",
+      "cost_usd": 0.41,
+      "counted": false,
+      "failed": null
+    },
+    {
+      "kind": "leader",
+      "k": 1,
+      "sessions": [
+        1
+      ],
+      "situation": "blocked",
+      "step": null,
+      "answer": "escalate",
+      "reason": "needs-human-decision",
+      "cost_usd": 0.22,
+      "counted": true,
+      "failed": null
+    }
+  ],
+  "counters": {
+    "plan_rerun": 0,
+    "done_rerun": 0
+  },
+  "closed": null,
+  "github": {
+    "pr_number": 7,
+    "is_private": null
+  },
+  "requests": [
+    {
+      "from_step": "analyze",
+      "from_attempt": 1,
+      "op": "add",
+      "step": "product-review",
+      "trigger": "scope-question",
+      "note": "",
+      "outcome": "deferred-to-plan",
+      "reason": null
+    },
+    {
+      "from_step": "design",
+      "from_attempt": 1,
+      "op": "add",
+      "step": "ux-review",
+      "trigger": "ui-change",
+      "note": "a dialog",
+      "outcome": "applied",
+      "reason": null
+    },
+    {
+      "from_step": "design",
+      "from_attempt": 1,
+      "op": "add",
+      "step": "data-review",
+      "trigger": "schema-change",
+      "note": "",
+      "outcome": "declined",
+      "reason": "role-unavailable"
+    }
+  ],
+  "catalog_adds": [
+    {
+      "step": "ux-review",
+      "source": "role-request",
+      "from_step": "design",
+      "revision": 3
+    }
+  ],
+  "included_fixes": [
+    {
+      "id": "F1",
+      "from_step": "design",
+      "from_attempt": 1,
+      "role": "tech-lead",
+      "kind": "bug",
+      "where": "src/a.py",
+      "note": "blocks AC 1",
+      "handled_by": "implement",
+      "verdict": null
+    }
+  ],
+  "followups": [
+    {
+      "key": "D1:0a1b2c3d",
+      "kind": "debt",
+      "disposition": "followup",
+      "number": null,
+      "comment_id": null,
+      "dry_run": true,
+      "private_path": false,
+      "at": "2026-11-24T01:02:03Z"
+    },
+    {
+      "key": "deferred:0a1b2c3d",
+      "kind": "deferred-requirement",
+      "disposition": "followup",
+      "number": 90,
+      "comment_id": null,
+      "dry_run": false,
+      "private_path": false,
+      "at": "2026-11-24T01:02:03Z"
+    }
+  ],
+  "model_overrides": {
+    "implement": {
+      "model": "opus",
+      "effort": "high",
+      "layer": "plan",
+      "reason": "high-complexity"
+    }
+  },
+  "irreversible": {
+    "detected": [
+      {
+        "category": "external-side-effect",
+        "level": "human-decision",
+        "default_level": "human-decision",
+        "lowered": false,
+        "source": "role-code",
+        "code": "deploy-or-release",
+        "path": null,
+        "step": "design",
+        "attempt": 1
+      }
+    ],
+    "approved": [
+      {
+        "category": "hard-to-revert",
+        "code": null,
+        "path": "migrations/1.sql",
+        "at": "2026-11-24T01:02:03Z",
+        "who": "human"
+      }
+    ]
+  },
+  "deferred_rows": [
+    {
+      "row": "R2",
+      "text": "The choice is kept after a restart",
+      "at": "2026-11-24T01:02:03Z"
+    }
+  ],
+  "dismissed": [
+    {
+      "step": "review-audit",
+      "attempt": 2,
+      "head": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "findings": [
+        "blocker: src/a.py: x"
+      ],
+      "reason": "accepted risk",
+      "who": "human",
+      "at": "2026-11-24T01:02:03Z"
+    }
+  ],
+  "pr_review": {
+    "last_seen_ids": {
+      "review": 5001,
+      "review-comment": null,
+      "comment": 900
+    },
+    "rounds": 1
+  }
+}

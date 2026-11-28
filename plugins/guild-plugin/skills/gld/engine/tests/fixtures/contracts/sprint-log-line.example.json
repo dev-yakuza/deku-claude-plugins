@@ -1,0 +1,11 @@
+{
+  "format": 1,
+  "ts": "2026-11-25T01:02:03Z",
+  "tracker": 700,
+  "run": 1,
+  "event": "member-blocked",
+  "issue": 103,
+  "outcome": "blocked",
+  "block": "dep-stopped",
+  "cause": 102
+}

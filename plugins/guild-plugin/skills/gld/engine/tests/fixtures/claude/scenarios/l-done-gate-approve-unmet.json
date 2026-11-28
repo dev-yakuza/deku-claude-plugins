@@ -1,0 +1,19 @@
+{
+  "format": 1,
+  "description": "Stage 2 leader, done-gate: approve with AC 2 unmet — schema-valid, refused by D6 (L16, approve-with-unmet).",
+  "stream": "../leader/real-2.1.323/done-gate-rerun.jsonl",
+  "init_from_argv": true,
+  "leader": {"example": "leader-answer-done-gate", "expect": "approve-with-unmet"},
+  "structured_output": {
+    "answer": "approve",
+    "reason": "acceptance-met",
+    "step": null,
+    "note": "Good enough.",
+    "recommendation": null,
+    "ac_verdicts": [
+      {"ac": 1, "status": "met", "evidence": "test/settings_test.dart"},
+      {"ac": 2, "status": "unmet", "evidence": "no restart test"}
+    ],
+    "discoveries": [{"id": "D1", "disposition": "followup"}]
+  }
+}

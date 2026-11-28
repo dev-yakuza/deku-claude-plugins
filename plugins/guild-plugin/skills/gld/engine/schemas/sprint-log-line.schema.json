@@ -1,0 +1,116 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "gld/sprint-log-line",
+  "title": "One line of a sprint's log.jsonl (stage-4 scope §2.0)",
+  "description": "Append only, engine-local. Codes and numbers; `note` is for humans and never branched on. `data`: base-check {sha, ok, red, flaky}; member-start {base, draft, resumed, rerun}; member-end / member-blocked {rc, cost_usd (what this run's child engines of the member spent: its state.json totals.cost_usd after minus before; null when none ran — never the Issue's total, so runs add up), pr, stop_reason, stop_detail, log_code}; wait {for: window|quota|repo-lock, until}; sprint-end {counts}. VB7 (collect.py) reads sprint-start, member-end, member-blocked, halt, sprint-end.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "format",
+    "ts",
+    "tracker",
+    "run",
+    "event"
+  ],
+  "properties": {
+    "format": {
+      "const": 1
+    },
+    "ts": {
+      "$ref": "#/$defs/ts"
+    },
+    "tracker": {
+      "$ref": "#/$defs/issue"
+    },
+    "run": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "event": {
+      "enum": [
+        "sprint-start",
+        "base-check",
+        "member-start",
+        "member-end",
+        "member-blocked",
+        "wait",
+        "halt",
+        "sprint-end",
+        "warning"
+      ]
+    },
+    "issue": {
+      "$ref": "#/$defs/issue"
+    },
+    "outcome": {
+      "enum": [
+        "done",
+        "closed",
+        "stopped",
+        "blocked",
+        "skipped-locked",
+        "refused",
+        "failed"
+      ]
+    },
+    "block": {
+      "enum": [
+        "dep-stopped",
+        "dep-failed",
+        "upstream",
+        "dep-not-done",
+        "dep-pr-closed",
+        "dep-pr-ambiguous",
+        "dep-not-planned",
+        "dep-unmerged",
+        "base-unresolved",
+        "quota",
+        "repo-busy",
+        "remote-branch-exists",
+        "unsupported-epic",
+        "attended-run"
+      ]
+    },
+    "cause": {
+      "$ref": "#/$defs/issue"
+    },
+    "halt": {
+      "enum": [
+        "base-red",
+        "boundary",
+        "marker-unwritable",
+        "plan-hash-mismatch",
+        "other-host",
+        "signal",
+        "engine-error"
+      ]
+    },
+    "state": {
+      "enum": [
+        "starting",
+        "checking-base",
+        "running",
+        "waiting-for-window",
+        "waiting-for-quota",
+        "finished",
+        "halted"
+      ]
+    },
+    "note": {
+      "type": "string"
+    },
+    "data": {
+      "type": "object"
+    }
+  },
+  "$defs": {
+    "issue": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "ts": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]+)?Z$"
+    }
+  }
+}

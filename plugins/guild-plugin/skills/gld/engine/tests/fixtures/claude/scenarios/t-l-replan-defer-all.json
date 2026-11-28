@@ -1,0 +1,22 @@
+{
+  "format": 1,
+  "description": "Stage 3: leader, needs_leader: every row deferred (TS2).",
+  "stream": "../leader/real-2.1.323/plan-gate-plan.jsonl",
+  "init_from_argv": true,
+  "leader": {
+    "example": "leader-answer-s3",
+    "expect": "defer-invalid"
+  },
+  "structured_output": {
+    "answer": "replan",
+    "reason": "needs-human-decision",
+    "step": null,
+    "note": "R2 is a separate Issue.",
+    "recommendation": null,
+    "defer": [
+      "R1",
+      "R2"
+    ],
+    "session": null
+  }
+}

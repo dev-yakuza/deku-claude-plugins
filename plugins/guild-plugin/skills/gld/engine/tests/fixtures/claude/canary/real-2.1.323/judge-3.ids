@@ -1,0 +1,7 @@
+Write:write:home-ssh
+Write:write:claude-config-w
+Write:write:main-file
+Write:write:other-wt:0
+Write:write:other-repo-w:0
+Write:write:not-an-output
+Write:write-ok:output

@@ -6,6 +6,35 @@
 
 ---
 
+## Section 0 — Engine guard (every stage command, FIRST — before any tier item)
+
+**The stage commands — `analyze` · `design` · `implement` · `debug` · `refactor` · `test` · `qa` · `rollback` — never
+touch an Issue the engine works on.** The engine owns that Issue's labels, comments and branch: a stage label this
+command removes or adds breaks the engine's state, one comment stops a running engine (`new-collaborator-comment`),
+and an analyze can even close the Issue under it. So before Item 1, before reading a label, before anything that
+writes, run the guard for the Issue number `<N>` (rollback: see its step 0):
+
+1. Resolve `<owner>/<repo>` (`_handoff.md` Section F) — its own Bash call.
+2. Ask the engine — read only, inside the sandbox is fine (its own Bash call):
+   ```bash
+   python3 -I <<SKILL_DIR>>/engine/engine.py owned --repo <owner>/<repo> --issue <N>
+   ```
+   It looks for the three marks of an engine Issue: engine records on this machine (`engine.py status --json`
+   `exists`), the branch `gld/<N>` on the remote (or its pull request), and the engine's summary comment
+   (`<!-- guild:summary -->`) on the Issue.
+   - **exit 0** (`not an engine Issue`) → go on with the stage.
+   - **exit 4** → **stop here.** Report the line it printed and this one, in `config.language`, then return
+     `FAIL: engine Issue` — change no label, post no comment, switch no branch:
+     `REFUSED: #<N> is run by the engine (<the marks the line names>) — continue it with /gld resume <N> (state: /gld status <N>).`
+     (ko: `거부: #<N> 은 엔진이 맡은 Issue 입니다 (<표시>) — /gld resume <N> 으로 이어 가세요 (상태: /gld status <N>).`)
+     The same exit 4 with `cannot tell whether the engine works on …` (GitHub did not answer) also stops — the
+     guard could not judge, so it never passes.
+   - **any other exit** → stop the same way: the guard did not answer.
+
+**Unattended** (`GLD_UNATTENDED=1`): the same — the stage returns `FAIL: engine Issue` and touches nothing.
+
+---
+
 ## Section A — Tiers
 
 Each stage runs only the items matching its tier. Lower tiers are subsets of higher.
@@ -30,7 +59,7 @@ budget only holds with the Grep. Skip it and you must Read all five.
 ## Section B — Items
 
 ### Item 1: Guild config + role definitions (always)
-1. Read `.claude/guild/config.json` — note `language`, active `roles`, and any `gates`/automation flags. **`language` governs all human-readable output** this stage emits — its comments, discuss questions, narration, RESULT summaries, and artifact prose — **and every sub-agent prompt the leader spawns must carry that output-language instruction** (`_handoff.md` Section K; machine tokens stay ASCII).
+1. Read `.claude/guild/harness.json` — note `language`, active `roles`, and any `gates`/automation flags. **`language` governs all human-readable output** this stage emits — its comments, discuss questions, narration, RESULT summaries, and artifact prose — **and every sub-agent prompt the leader spawns must carry that output-language instruction** (`_handoff.md` Section K; machine tokens stay ASCII).
 2. Read the role agent file(s) for the roles participating in this stage (`.claude/agents/<role>.md`). Read **both** local sections: the project-specialization section (`## 프로젝트 특화`, or its localized equivalent) carries stack/convention/hotspot facts, and the section below `<!-- guild:persona:habits -->` carries the habits `/gld evolve` has grown for that role. Habits used to sit mixed into the body; they now have their own place, and a stage that reads only the specialization section would silently stop seeing them.
 
 **Failure**: config or agent files absent → this repo may not be initialized. Log "Guild not initialized (run /gld init)" and return that as a stage-level `FAIL` if the stage cannot proceed without them.
@@ -149,7 +178,7 @@ directory at Step 0 **because it is there**, before knowing which parts this sta
 
 ### Item 6: ⑥ knowledge retrieval (always — relevant slices only)
 Semantic memory — discovered codebase facts (`_knowledge.md`). **Retrieve, do not whole-load.**
-1. Read `.claude/guild/knowledge/index.md` — the finite always-loaded map (absent/empty → this repo hasn't accumulated facts yet; that is normal, skip the rest).
+1. Read `.claude/guild/knowledge/index.md` — the finite always-loaded map (absent/empty → this repo hasn't accumulated facts yet; that is normal, skip the rest). <!-- promote: literal; rename-exception: K2 shared knowledge -->
 2. Determine the paths/areas this stage touches (analyze: the Issue's area; design: the planned structure; execute: the target directory from Item 5).
 3. Match those against the index keys (path prefix / area tag / symbol — plain string/glob) and **Read only the matched `facts/<area>.md` slice(s)**. No match → load nothing further (normal for a well-scoped task).
 4. Treat each fact as **advisory** — verify against current code before relying on it (facts can go stale; `_knowledge.md` Section C).
@@ -178,7 +207,7 @@ After Step 0, record a short trace for the stage output's `<details>` block:
 <details>
 <summary>Pre-flight context (Step 0)</summary>
 
-- [x] config.json + role defs loaded
+- [x] harness.json + role defs loaded
 - [x] CLAUDE.md read; docs/standards/: verification confirmed (hard) · charter/architecture/conventions/quality-bar draft (advisory)
 - [x] git log -20 (prefix: `feat:`/`fix:`)
 - [ ] prior design output: N/A (analyze stage)

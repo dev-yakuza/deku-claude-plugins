@@ -1,0 +1,68 @@
+{
+  "format": 1,
+  "about": "Data of the init draft (convert_config.py --init, stage-4 H14 / H15, review-q0 D10). Ecosystems and package managers only: never a repository, an organisation or a project path. A command text is never made from this file except `<package manager> run <script name>` for a script the repository's own manifest defines; everything else a human answers.",
+  "manifest_names": ["test", "lint", "typecheck", "build"],
+  "manifests": [
+    {
+      "id": "package.json",
+      "file": "package.json",
+      "kind": "json-scripts",
+      "key": "scripts",
+      "runners": [
+        {"lock": "pnpm-lock.yaml", "cmd": "pnpm run {name}"},
+        {"lock": "package-lock.json", "cmd": "npm run {name}"},
+        {"lock": "yarn.lock", "cmd": "yarn run {name}"}
+      ],
+      "not_a_command": ["no test specified"]
+    },
+    {
+      "id": "make",
+      "file": "Makefile",
+      "kind": "make-targets",
+      "runners": [{"lock": null, "cmd": "make {name}"}],
+      "not_a_command": []
+    }
+  ],
+  "program_names": {
+    "test": [
+      ["flutter", "test"], ["dart", "test"], ["pytest"], ["python", "-m", "pytest"], ["python3", "-m", "pytest"],
+      ["python", "-m", "unittest"], ["python3", "-m", "unittest"], ["tox"], ["nox"], ["cargo", "test"], ["go", "test"],
+      ["pnpm", "test"], ["pnpm", "run", "test"], ["npm", "test"], ["npm", "run", "test"], ["yarn", "test"], ["yarn", "run", "test"],
+      ["npx", "vitest"], ["npx", "jest"], ["vitest"], ["jest"], ["turbo", "run", "test"], ["make", "test"], ["mvn", "test"], ["./gradlew", "test"],
+      ["bundle", "exec", "rspec"], ["rspec"]
+    ],
+    "lint": [
+      ["flutter", "analyze"], ["dart", "analyze"], ["ruff", "check"], ["flake8"], ["pylint"], ["eslint"], ["npx", "eslint"],
+      ["pnpm", "lint"], ["pnpm", "run", "lint"], ["npm", "run", "lint"], ["yarn", "lint"], ["yarn", "run", "lint"],
+      ["cargo", "clippy"], ["golangci-lint", "run"], ["rubocop"], ["turbo", "run", "lint"], ["make", "lint"]
+    ],
+    "typecheck": [
+      ["mypy"], ["pyright"], ["tsc"], ["npx", "tsc"], ["pnpm", "typecheck"], ["pnpm", "run", "typecheck"],
+      ["npm", "run", "typecheck"], ["yarn", "typecheck"], ["yarn", "run", "typecheck"], ["turbo", "run", "typecheck"], ["make", "typecheck"]
+    ],
+    "build": [
+      ["flutter", "build"], ["pnpm", "build"], ["pnpm", "run", "build"], ["npm", "run", "build"], ["yarn", "build"],
+      ["yarn", "run", "build"], ["cargo", "build"], ["go", "build"], ["turbo", "run", "build"], ["make", "build"]
+    ]
+  },
+  "toolchains": [
+    {
+      "id": "flutter-sdk",
+      "ecosystem": "flutter",
+      "pinned": ["{home}/fvm/versions/{version}"],
+      "sources": ["{home}/flutter", "{home}/development/flutter", "/opt/homebrew/share/flutter", "/usr/local/share/flutter"],
+      "to": "flutter-sdk"
+    }
+  ],
+  "host_patterns": [
+    {"file": "package-lock.json", "pattern": "\"resolved\":\\s*\"https?://([A-Za-z0-9.-]+)"},
+    {"file": "pnpm-lock.yaml", "pattern": "tarball:\\s*https?://([A-Za-z0-9.-]+)"},
+    {"file": "yarn.lock", "pattern": "^\\s*resolved\\s+\"https?://([A-Za-z0-9.-]+)"},
+    {"file": ".npmrc", "pattern": "^\\s*(?:@[^:\\s]+:)?registry\\s*=\\s*https?://([A-Za-z0-9.-]+)"},
+    {"file": ".yarnrc.yml", "pattern": "npmRegistryServer:\\s*\"?https?://([A-Za-z0-9.-]+)"},
+    {"file": "pubspec.lock", "pattern": "^\\s*url:\\s*\"?https?://([A-Za-z0-9.-]+)"},
+    {"file": "requirements.txt", "pattern": "--(?:extra-)?index-url[= ]\\s*https?://([A-Za-z0-9.-]+)"},
+    {"file": "pip.conf", "pattern": "index-url\\s*=\\s*https?://([A-Za-z0-9.-]+)"},
+    {"file": "poetry.lock", "pattern": "^\\s*url\\s*=\\s*\"https?://([A-Za-z0-9.-]+)"}
+  ]
+}

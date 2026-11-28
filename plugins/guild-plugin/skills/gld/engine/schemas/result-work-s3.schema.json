@@ -1,0 +1,206 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "gld/result-work-s3",
+  "title": "Role result — work (design §6.2, §7.5) (stage 3)",
+  "description": "Passed verbatim to `claude --json-schema` for steps without `checks`, and used by the engine to re-check runs/<step>/<attempt>/result.json. Keeps to type/properties/required/additionalProperties/items/enum so the CLI's structured output accepts it; the engine adds the rules a schema cannot say (outputs exist, request step names are catalog names — §4, §6.2 engine table). status is done or blocked only; concerns go to note. Stage 3 (E16, E22, E33). ENUM TEMPLATE: \"{catalog_steps}\" is filled by schema.fill_enums with every requestable catalog id (codes.RESULT_SCHEMA_TOKENS); stages 1–2 keep result-work / result-review.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "status",
+    "outputs",
+    "requests",
+    "blocked_by",
+    "discoveries",
+    "note",
+    "irreversible",
+    "golden_reasons"
+  ],
+  "properties": {
+    "status": {
+      "enum": [
+        "done",
+        "blocked"
+      ],
+      "description": "done = the step's outputs are written. blocked = cannot continue; say why in blocked_by."
+    },
+    "outputs": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Paths of the declared output files you wrote."
+    },
+    "requests": {
+      "type": "array",
+      "description": "Procedure change requests (§6): the engine adds a catalog step itself, remove / skip goes to the leader. Never a command.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "op",
+          "step",
+          "trigger",
+          "note"
+        ],
+        "properties": {
+          "op": {
+            "enum": [
+              "add",
+              "remove",
+              "skip"
+            ]
+          },
+          "step": {
+            "enum": [
+              "{catalog_steps}"
+            ],
+            "description": "A plugin step-catalog name."
+          },
+          "trigger": {
+            "enum": [
+              "ui-change",
+              "new-dependency",
+              "schema-change",
+              "security-surface",
+              "no-user-facing-text",
+              "user-facing-text",
+              "performance-risk",
+              "infra-change",
+              "blocking-discovery",
+              "scope-question",
+              "other"
+            ]
+          },
+          "note": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "blocked_by": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "note"
+      ],
+      "description": "Required (not null) when status is blocked.",
+      "properties": {
+        "kind": {
+          "enum": [
+            "missing-input",
+            "ambiguous",
+            "env",
+            "other"
+          ]
+        },
+        "note": {
+          "type": "string"
+        }
+      }
+    },
+    "discoveries": {
+      "type": "array",
+      "description": "Out-of-scope problems found while working (§7.5).",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "kind",
+          "where",
+          "note",
+          "blocks_current_ac"
+        ],
+        "properties": {
+          "kind": {
+            "enum": [
+              "bug",
+              "debt",
+              "security",
+              "test-gap",
+              "doc"
+            ]
+          },
+          "where": {
+            "type": "string"
+          },
+          "note": {
+            "type": "string"
+          },
+          "blocks_current_ac": {
+            "type": "boolean"
+          }
+        }
+      }
+    },
+    "irreversible": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "code",
+          "where",
+          "note"
+        ],
+        "properties": {
+          "code": {
+            "enum": [
+              "deploy-or-release",
+              "external-api-effect",
+              "shared-db-execution",
+              "iac-apply",
+              "resource-deletion",
+              "destructive-migration",
+              "data-transform",
+              "breaking-api",
+              "storage-format-change",
+              "major-dependency-upgrade",
+              "migration-file"
+            ]
+          },
+          "where": {
+            "type": "string"
+          },
+          "note": {
+            "type": "string"
+          }
+        }
+      },
+      "description": "Changes that are hard or impossible to revert, or effects outside this repository, that this step made or that the Issue needs (empty if none). Reporting only ever raises the handling level (§7.4)."
+    },
+    "golden_reasons": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "path",
+          "reason"
+        ],
+        "properties": {
+          "path": {
+            "type": "string"
+          },
+          "reason": {
+            "enum": [
+              "intended-change",
+              "bug-fix",
+              "new-case",
+              "moved",
+              "needs-regeneration"
+            ]
+          }
+        }
+      },
+      "description": "One reason per baseline image / comparison config this attempt added, changed or deleted (§7.11). The engine builds the ledger from git; needs-regeneration = an image you could not regenerate here."
+    },
+    "note": {
+      "type": "string",
+      "description": "Free text for humans and evolve. The engine never branches on it."
+    }
+  }
+}

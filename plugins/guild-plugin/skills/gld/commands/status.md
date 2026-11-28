@@ -1,6 +1,9 @@
 # STATUS
 
-> **0.102 (engine)**: run `python3 <<SKILL_DIR>>/engine/gld_engine.py status show --issue $1` (one call) and print its output **verbatim**. The *Process* below is the 0.101.x reference; it is **not executed**.
+> **Stage-1 engine (guild-plugin redesign) — this is the path that runs.** `/gld status` now drives the
+> gld engine: read `<<SKILL_DIR>>/commands/engine/status.md` and follow it instead of the sections
+> below. The sections below are the 0.98.7 conversation-driven flow, kept unchanged as the
+> reference the stage-1 templates and role files were derived from — do not execute them.
 
 Show the current progress of an Issue. **Read-only**: never posts comments, never sets labels. State source = GitHub labels + stage-output markers (`_handoff.md` Sections A/B).
 

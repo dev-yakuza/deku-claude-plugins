@@ -1,0 +1,224 @@
+{
+  "format": 1,
+  "template": "refactor",
+  "version": "exp-1",
+  "description": "Refactor template (stage 3, scope §2.3; the 0.98.7 refactor flow, `safety_net: none`): change the internal structure toward the target in `skeleton.md` without changing behaviour; the existing tests are the safety net. The plugin run `verification-frozen` fails when any verification file of the base (tests, goldens, snapshots, test config, runner wrappers, CI) is modified or deleted — only an exact rename and new files pass (a justified test change goes to a human, E9-2). The developer step (E5) is `transform`. Named commands it needs in the repository settings: setup, lint, typecheck, test, build, e2e, plus the plugin commands ac-coverage, verification-frozen and verify-gate. A repository without lint, typecheck, build or e2e drops that step in its own copy (the conversion script does it).",
+  "steps": [
+    {
+      "id": "test-cases",
+      "role": "tester",
+      "inputs": [
+        "docs/specs/{issue}/analysis.md",
+        "in:failure-summary.md",
+        "in:leader-decision.md"
+      ],
+      "outputs": [
+        "docs/specs/{issue}/test-cases.md"
+      ]
+    },
+    {
+      "id": "ac-coverage",
+      "run": "ac-coverage",
+      "inputs": [
+        "docs/specs/{issue}/analysis.md",
+        "docs/specs/{issue}/test-cases.md"
+      ],
+      "on_fail": {
+        "back_to": "test-cases",
+        "max": 2
+      }
+    },
+    {
+      "id": "design",
+      "role": "tech-lead",
+      "inputs": [
+        "docs/specs/{issue}/analysis.md",
+        "docs/specs/{issue}/test-cases.md",
+        "in:failure-summary.md",
+        "in:leader-decision.md"
+      ],
+      "outputs": [
+        "docs/specs/{issue}/skeleton.md"
+      ]
+    },
+    {
+      "id": "setup",
+      "run": "setup"
+    },
+    {
+      "id": "transform",
+      "role": "developer",
+      "inputs": [
+        "docs/specs/{issue}/analysis.md",
+        "docs/specs/{issue}/skeleton.md",
+        "docs/specs/{issue}/test-cases.md",
+        "in:failure-summary.md",
+        "in:leader-decision.md",
+        "in:pr-review.md",
+        "in:blocking-discoveries.md"
+      ],
+      "outputs": [],
+      "on_fail": {
+        "back_to": "transform",
+        "max": 2
+      }
+    },
+    {
+      "id": "verification-frozen",
+      "run": "verification-frozen",
+      "on_fail": {
+        "back_to": "transform",
+        "max": 2
+      }
+    },
+    {
+      "id": "lint",
+      "run": "lint",
+      "on_fail": {
+        "back_to": "transform",
+        "max": 2
+      }
+    },
+    {
+      "id": "typecheck",
+      "run": "typecheck",
+      "on_fail": {
+        "back_to": "transform",
+        "max": 2
+      }
+    },
+    {
+      "id": "test",
+      "run": "test",
+      "on_fail": {
+        "back_to": "transform",
+        "max": 2
+      }
+    },
+    {
+      "id": "build",
+      "run": "build",
+      "on_fail": {
+        "back_to": "transform",
+        "max": 2
+      }
+    },
+    {
+      "id": "e2e",
+      "run": "e2e",
+      "on_fail": {
+        "back_to": "transform",
+        "max": 2
+      }
+    },
+    {
+      "id": "review-design",
+      "role": "tech-lead",
+      "inputs": [
+        "in:review.diff",
+        "docs/specs/{issue}/skeleton.md",
+        "docs/specs/{issue}/analysis.md",
+        "in:leader-decision.md"
+      ],
+      "outputs": [],
+      "checks": [
+        "structure-improved",
+        "behavior-preserved"
+      ],
+      "on_fail": {
+        "back_to": "transform",
+        "max": 2
+      }
+    },
+    {
+      "id": "review-tests",
+      "role": "tester",
+      "inputs": [
+        "in:review.diff",
+        "docs/specs/{issue}/test-cases.md",
+        "docs/specs/{issue}/analysis.md",
+        "in:leader-decision.md"
+      ],
+      "outputs": [],
+      "checks": [
+        "test-quality"
+      ],
+      "on_fail": {
+        "back_to": "transform",
+        "max": 2
+      }
+    },
+    {
+      "id": "review-audit",
+      "role": "auditor",
+      "inputs": [
+        "in:review.diff",
+        "docs/specs/{issue}/analysis.md",
+        "docs/specs/{issue}/skeleton.md",
+        "docs/specs/{issue}/test-cases.md",
+        "in:leader-decision.md"
+      ],
+      "outputs": [],
+      "checks": [
+        "diff-review"
+      ],
+      "on_fail": {
+        "back_to": "transform",
+        "max": 2
+      }
+    },
+    {
+      "id": "qa",
+      "role": "qa",
+      "inputs": [
+        "in:review.diff",
+        "docs/specs/{issue}/analysis.md",
+        "docs/specs/{issue}/skeleton.md",
+        "docs/specs/{issue}/test-cases.md",
+        "in:leader-decision.md"
+      ],
+      "outputs": [
+        "docs/specs/{issue}/manual-test-checklist.md"
+      ],
+      "checks": [
+        "qa-acceptance"
+      ],
+      "on_fail": {
+        "back_to": "transform",
+        "max": 2
+      }
+    },
+    {
+      "id": "verify-gate",
+      "run": "verify-gate",
+      "on_fail": {
+        "back_to": "transform",
+        "max": 2
+      }
+    },
+    {
+      "id": "done-gate",
+      "check": "done-gate",
+      "inputs": [
+        "docs/specs/{issue}/analysis.md",
+        "docs/specs/{issue}/test-cases.md",
+        "docs/specs/{issue}/skeleton.md",
+        "docs/specs/{issue}/manual-test-checklist.md",
+        "in:review.diff",
+        "in:leader-decision.md"
+      ]
+    },
+    {
+      "id": "pr",
+      "op": "create-pr",
+      "inputs": [
+        "docs/specs/{issue}/analysis.md",
+        "docs/specs/{issue}/manual-test-checklist.md"
+      ]
+    },
+    {
+      "id": "followups",
+      "op": "create-followups"
+    }
+  ]
+}

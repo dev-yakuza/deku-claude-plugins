@@ -1,0 +1,90 @@
+{
+  "format": 1,
+  "issue": 1938,
+  "step": "done-gate",
+  "attempt": 2,
+  "kind": "check",
+  "started_at": "2026-11-26T05:20:11Z",
+  "ended_at": "2026-11-26T05:21:00Z",
+  "duration_s": 49.328,
+  "base_sha": "a0bb96001b31f175c1c520eb5197d85b9c171818",
+  "merge_base": "a0bb96001b31f175c1c520eb5197d85b9c171818",
+  "start_head": "183a96145725f096ef4cc838e58137ce206f2b64",
+  "end_head": "183a96145725f096ef4cc838e58137ce206f2b64",
+  "start_tree": {
+    "clean": true,
+    "dirty_files": []
+  },
+  "end_tree": {
+    "clean": true,
+    "dirty_files": []
+  },
+  "exit_code": 0,
+  "changed_files": [
+    {
+      "path": "docs/specs/1938/analysis.md",
+      "change": "added",
+      "from": null,
+      "where": "committed"
+    },
+    {
+      "path": "docs/specs/1938/mutations.json",
+      "change": "added",
+      "from": null,
+      "where": "committed"
+    },
+    {
+      "path": "docs/specs/1938/procedure.yaml",
+      "change": "added",
+      "from": null,
+      "where": "committed"
+    },
+    {
+      "path": "docs/specs/1938/test-cases.md",
+      "change": "added",
+      "from": null,
+      "where": "committed"
+    },
+    {
+      "path": "test/features/kanji_detail_modal/widgets/kanji_strokes_section_probe_safety_net_test.dart",
+      "change": "added",
+      "from": null,
+      "where": "committed"
+    }
+  ],
+  "commits": [],
+  "outputs": [],
+  "control_files": {
+    "ok": true,
+    "changed": []
+  },
+  "ownership": null,
+  "judge_writes_outside": [],
+  "reentry": null,
+  "session": {
+    "session_id": "27f802c9-7943-4811-b5fe-6640e906f127",
+    "cli_version": "2.1.326",
+    "init": {
+      "ok": true,
+      "mismatches": []
+    },
+    "end": "completed",
+    "structured_output": true,
+    "stream_file": "/home/u/.gld/records/owner/app_a/1938/runs/done-gate/2/stream.jsonl",
+    "model": "claude-opus-5-5",
+    "effort": "high",
+    "cost_usd": 0.3961754,
+    "cache_read_input_tokens": 70217,
+    "cache_creation_input_tokens": 37595,
+    "num_turns": 8,
+    "permission_denials": []
+  },
+  "run": null,
+  "outcome": {
+    "status": "done",
+    "code": null,
+    "detail": null,
+    "stop": null
+  },
+  "warnings": []
+}

@@ -1,0 +1,65 @@
+{
+ "situation": "plan-gate",
+ "kind": "check",
+ "step": "plan",
+ "allowed": {
+  "answers": [
+   "plan",
+   "rerun",
+   "close-as-decided",
+   "escalate"
+  ],
+  "rerun_steps": [
+   "analyze"
+  ],
+  "human_answers": [
+   "plan",
+   "rerun",
+   "close-as-decided",
+   "escalate"
+  ],
+  "human_rerun_steps": [
+   "analyze"
+  ],
+  "narrowed": []
+ },
+ "ids": {
+  "requirement_rows": [
+   "R1",
+   "R2"
+  ],
+  "templates": [
+   "feature"
+  ]
+ },
+ "checklist_acs": null,
+ "engine": {
+  "answer": "rerun",
+  "step": "analyze",
+  "reason": "analysis-gap",
+  "failed": null,
+  "stop": null,
+  "cost_usd": 0.003276
+ },
+ "argv_flags": [
+  "--output-format",
+  "--verbose",
+  "--setting-sources",
+  "--disable-slash-commands",
+  "--strict-mcp-config",
+  "--mcp-config",
+  "--permission-mode",
+  "--permission-prompts",
+  "--settings",
+  "--tools",
+  "--model",
+  "--effort",
+  "--max-budget-usd",
+  "--json-schema",
+  "--append-system-prompt"
+ ],
+ "model_effort": [
+  "haiku",
+  "low"
+ ]
+}

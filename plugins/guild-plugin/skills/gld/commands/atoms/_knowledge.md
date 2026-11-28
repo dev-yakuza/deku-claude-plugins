@@ -10,7 +10,7 @@
 
 | Memory | Store | This file? |
 |---|---|---|
-| semantic — **codebase facts** ("auth is coupled to session", "X co-changes with Y", "`disabledColor` token isn't mode-branched") | `.claude/guild/knowledge/` (⑥) | ✅ |
+| semantic — **codebase facts** ("auth is coupled to session", "X co-changes with Y", "`disabledColor` token isn't mode-branched") | `.claude/guild/knowledge/` (⑥ — shared by both channels) | ✅ | <!-- promote: literal; rename-exception: K2 shared knowledge -->
 | procedural — **habits** ("type-check before commit") | `.claude/agents/<role>.md` (③) — **below `<!-- guild:persona:habits -->`**, never between the `persona:start`/`end` pair (that region is central-owned and `update` replaces it) | ❌ |
 | episodic — **raw events** ("this run failed, human fixed") | `.claude/guild/memory/` (④, gitignored) | ❌ |
 | curated authority — charter, architecture, conventions | `docs/standards/` (②) | ❌ |
@@ -19,8 +19,10 @@ A ⑥ fact is a **discovered property of the code** an agent would otherwise red
 
 ## Section B — Layout & formats
 
+⑥ lives in **one folder both Guild channels share** (readiness T2, R4-13 K2) — `.claude/guild/knowledge/`, the same path in the development and the stable channel (it is not this channel's settings folder, and promotion does not rename it). <!-- promote: literal; rename-exception: K2 shared knowledge -->
+
 ```
-.claude/guild/knowledge/
+knowledge/
 ├── index.md          # ALWAYS loaded. Finite pointer map, keyed by path/area/symbol.
 └── facts/
     ├── <area>.md     # Retrieved ONLY when a task touches <area>.
@@ -70,6 +72,7 @@ Deterministic, no embeddings (v1 — invariant 1). At a stage's pre-flight (`_pr
 
 ## Section E — Write discipline (who writes, when)
 
+- **Only the stable channel writes ⑥** (channel value `writes_knowledge`: `engine.py channel show --json` → `values.writes_knowledge`). Both channels read it; where the value is off (the development channel) init seeds nothing and evolve proposes no ⑥ edit — it names the fact in its report for the stable channel's evolve instead.
 - **init** seeds a **baseline** from the P1 scans (hotspots, strong co-change groups, layer/coupling boundaries) — a solid starting map, not an exhaustive dump. Direct write (bootstrap).
 - **evolve** proposes ⑥ facts and their `index.md` pointer; **evolve writes the approved edit directly** (Phase 6 Apply — Edit/Write, schema-validated, auto-rollback on failure, provenance-stamped, committed), but only **per-item after explicit human approval** (Phase 5 — never auto-applied unattended, INV1). An `agent-friction`/`tool-error`/`co-change` signal that maps to a *fact* (not a habit or a decided rule) routes here.
 - **No stage writes ⑥ inline.** Stages only *read* it (Section C). Facts are committed (semantic, team-shared).

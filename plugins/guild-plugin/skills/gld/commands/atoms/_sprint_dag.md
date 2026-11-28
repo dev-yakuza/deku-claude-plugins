@@ -10,6 +10,12 @@ and (4) how a PR base is decided at run time. Read the section the calling file 
 > disagree, **the script wins and this file is the bug** — the calculations were pushed into
 > code precisely so they could be tested rather than re-derived per run.
 >
+> **Who runs what.** `sprint run` is the engine (`commands/engine/sprint.md`): it reads the member
+> table itself and computes order, hash and base in `engine/gxengine/sprintdag.py` — order and hash
+> are tested to equal this script's. `sprint_dag.py` serves the LLM commands (`plan`, `daily`). Where
+> Sections C, D and F speak of "the supervisor", they describe the run of an **older** tracker; the
+> engine's own rules for a dependency are the block codes of `commands/engine/sprint.md`.
+>
 > **Bash**: simple calls only (`<<SKILL_DIR>>/commands/atoms/_bash_rules.md`) — with the
 > generated-script carve-out noted in Section F. State/labels: `_handoff.md`.
 
@@ -267,10 +273,10 @@ Use a form that completes on that line (`|| RC=$?`) and judge after the terminat
 
 ## Section G — Stacks on a squash/rebase-only repo (`squash-sync`)
 
-상한 근거 `squash-sync` (`plan.md` Phase 0 step 5) → `run` opens stacked PRs as **drafts**
-(`GLD_SPRINT_DRAFT=1`); after the human merges a lower PR, **`/gld sprint sync`**
+상한 근거 `squash-sync` (`plan.md` Phase 0 step 5) → the engine opens stacked PRs as **drafts**
+(recorded in the member's engine state; the PR body carries the stack block); after the human merges a lower PR, **`/gld sprint sync`**
 (`stack_sync.py`; statuses in its docstring and `sprint/sync.md`) merges `origin/<default>` into
-each upper branch, verifies (`config.commands` test/lint/typecheck), pushes without force,
+each upper branch, verifies (`harness.json` `commands` test/lint/typecheck), pushes without force,
 retargets and readies. Design: `design/guild/09-squash-stack.md`.
 
 - **Sync is not catch-up.** Automatic only when the member already holds the dependency's final
@@ -279,8 +285,9 @@ retargets and readies. Design: `design/guild/09-squash-stack.md`.
   `stale` / `diverged`: the human catches up, then `/gld dev <n>`.
 - **The merge base is the member's cut point on the dependency**, not git's own (which, after a
   squash, predates the dependency and makes every dependency file the member edited conflict).
-- **Only finished, idle members**: `guild:done` without `guild:needs-human`, branch checked out
-  nowhere, remote head = PR head (`--check` applies the same gates). Conflict, failed
+- **Only finished, idle members**: the engine's own facts (`engine.py status --json`: every step
+  done, no stop, a PR, no engine running — on this machine) without `guild:needs-human`, branch checked out
+  nowhere but the member's own clean engine worktree, remote head = PR head (`--check` applies the same gates). Conflict, failed
   verification or a verification that rewrote a tracked file → nothing pushed. Readies a draft
   with `<!-- guild:sprint:stack -->` only when its own merge (trailers `Guild-Sync: #<dep>` and
   `Guild-Sync-Base: <cut>`) or a merge-commit landing brought it level and no human's edited

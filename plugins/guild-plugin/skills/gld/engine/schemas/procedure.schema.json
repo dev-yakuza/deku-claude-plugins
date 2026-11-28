@@ -1,0 +1,108 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "gld/procedure",
+  "title": "procedure.yaml — one Issue's plan (design §4, §4.3, §6.1)",
+  "description": "Written only by the engine (§6.1) at docs/specs/<N>/procedure.yaml and committed on the Issue branch. The file is JSON text (JSON is a YAML 1.2 subset), so the standard library reads it. Plan only: no state, no change history (§4.3 — history goes to log.jsonl). A step carries exactly one of role/run/check/op; no when:, loops or variables (§4).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["format", "issue", "revision", "origin", "steps"],
+  "properties": {
+    "format": {"const": 1},
+    "issue": {"type": "integer", "minimum": 1},
+    "revision": {"type": "integer", "minimum": 1, "description": "Bumped only when the step structure changes (§4.3)."},
+    "origin": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["template", "version", "start"],
+      "properties": {
+        "template": {"$ref": "#/$defs/name", "description": "Starting template name (§3), e.g. feature."},
+        "version": {"type": "string", "minLength": 1, "description": "The template's version string."},
+        "start": {"type": "string", "minLength": 1, "description": "Version of the plugin-fixed start procedure (§3.1)."}
+      }
+    },
+    "new_template_candidate": {"type": "boolean", "description": "§3 — marked when the template was changed a lot (evolve input). Stage 1 never sets it."},
+    "steps": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/step"}}
+  },
+  "$defs": {
+    "name": {"type": "string", "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*$", "maxLength": 64},
+    "relpath": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 300,
+      "pattern": "^(?!/)(?!in:)(?!.*\\{path:)(?!.*(^|/)\\.\\.(/|$))[^\\s\\\\]+$",
+      "description": "Worktree-relative path or glob. No leading /, no .. segment, no whitespace (a command string cannot be one)."
+    },
+    "path_token": {"enum": ["{path:test-code}", "{path:safety-net}"], "description": "Stage 3 (E4), templates only: a whole item the engine replaces by the globs of the repository's path rules of that kind. procedure.py refuses it in a procedure and before stage 3."},
+    "input": {
+      "anyOf": [
+        {"$ref": "#/$defs/relpath"},
+        {"$ref": "#/$defs/path_token"},
+        {"type": "string", "pattern": "^in:(issue\\.md|leader-decision\\.md|failure-summary\\.md|review\\.diff|leader-input\\.json|repro-evidence\\.md|blocking-discoveries\\.md|pr-review\\.md|git-history\\.md)$", "description": "An engine-made input in the attempt's in/ folder (§6.2, §7.12 S7)."}
+      ]
+    },
+    "inputs": {"type": "array", "items": {"$ref": "#/$defs/input"}, "uniqueItems": true},
+    "outputs": {"type": "array", "items": {"anyOf": [{"$ref": "#/$defs/relpath"}, {"$ref": "#/$defs/path_token"}]}, "uniqueItems": true},
+    "checks": {"type": "array", "items": {"$ref": "#/$defs/name"}, "uniqueItems": true, "description": "Non-empty = a review step (§4): the review result schema is used."},
+    "on_fail": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["back_to", "max"],
+      "properties": {
+        "back_to": {"$ref": "#/$defs/name"},
+        "max": {"type": "integer", "minimum": 1, "maximum": 10}
+      }
+    },
+    "role_step": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "role", "outputs"],
+      "properties": {
+        "id": {"$ref": "#/$defs/name"},
+        "role": {"$ref": "#/$defs/name"},
+        "inputs": {"$ref": "#/$defs/inputs"},
+        "outputs": {"$ref": "#/$defs/outputs"},
+        "on_fail": {"$ref": "#/$defs/on_fail"},
+        "checks": {"$ref": "#/$defs/checks"}
+      }
+    },
+    "run_step": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "run"],
+      "properties": {
+        "id": {"$ref": "#/$defs/name"},
+        "run": {"$ref": "#/$defs/name", "description": "A named command of the repository settings (§7.10) — never a command string."},
+        "inputs": {"$ref": "#/$defs/inputs"},
+        "on_fail": {"$ref": "#/$defs/on_fail"}
+      }
+    },
+    "check_step": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "check"],
+      "properties": {
+        "id": {"$ref": "#/$defs/name"},
+        "check": {"enum": ["plan-gate", "done-gate"]},
+        "inputs": {"$ref": "#/$defs/inputs"}
+      }
+    },
+    "op_step": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "op"],
+      "properties": {
+        "id": {"$ref": "#/$defs/name"},
+        "op": {"enum": ["create-pr", "create-followups", "create-children", "run-children"]},
+        "inputs": {"$ref": "#/$defs/inputs"}
+      }
+    },
+    "step": {
+      "oneOf": [
+        {"$ref": "#/$defs/role_step"},
+        {"$ref": "#/$defs/run_step"},
+        {"$ref": "#/$defs/check_step"},
+        {"$ref": "#/$defs/op_step"}
+      ]
+    }
+  }
+}

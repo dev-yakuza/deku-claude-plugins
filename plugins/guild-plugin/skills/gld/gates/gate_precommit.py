@@ -12,12 +12,10 @@ Runs in **two modes**, from one source of truth:
      `git commit`, checks what it can *before* the command runs, so the agent gets an
      immediate, specific reason instead of burning a turn on a commit the git hook will
      reject anyway.
-     2b. (no args, every call, before the commit check) — **Bash text guard** (0.98.6). Refuses four
+     2b. (no args, every call, before the commit check) — **Bash text guard** (0.98.6). Refuses two
      narrow, measured shapes: a backtick the shell will run as a command inside the call's
-     text (`shell-text`), an Issue-body bundle from `gh issue list --json …body…` saved
-     to a file (`bodies-save`), and (0.99.2) a read of the unmarked comments that slices their
-     bodies (`directive-slice`) and — unattended only — a comment posted from a body file whose
-     first line is no `<!-- guild:` marker (`unmarked-comment`). Every other call goes on (to the commit check, or allowed) after one string scan.
+     text (`shell-text`), and an Issue-body bundle from `gh issue list --json …body…` saved
+     to a file (`bodies-save`). Every other call goes on (to the commit check, or allowed) after one string scan.
 
 ⚠ **Why two layers.** A `PreToolUse` hook fires *before* the command executes, so a
 compound command that creates or mutates content and commits it in one call
@@ -140,9 +138,9 @@ def _iso_epoch(ts):
 
 
 class _FiringsLock:
-    """Serialise every read-modify-write of the firing files. Sprint worktrees symlink their
-    memory dir to the human's (`sprint-supervisor.sh` link_memory) while the human keeps
-    committing, so two gate processes can touch the same files at once — an unlocked rewrite
+    """Serialise every read-modify-write of the firing files. Two gate processes can touch the same
+    files at once (measured with the 0.98.7 sprint worktrees, whose generated supervisor symlinked
+    their memory dir to the human's while the human kept committing) — an unlocked rewrite
     loses the other process's append, and two promoters double-count the same rows.
     `fcntl.flock` has no timeout argument, so poll LOCK_NB for up to 2 s. `fcntl` is imported
     lazily: a module-level import would take the whole gate down where it does not exist.
@@ -221,6 +219,12 @@ def _row_line(r):
     return json.dumps(r, ensure_ascii=False) + "\n"
 
 
+# `--no-records` (gld engine role sessions): the hook still judges and blocks, but writes no
+# ledger (findings.json / firings) into the worktree — those are control files there, and a
+# hook-written file would stop the Issue as a control-file change (P5 real run).
+NO_RECORDS = "--no-records" in sys.argv[1:]
+
+
 def flush_firings(root, mode, pending=False):
     """Record this run's firings. Best-effort throughout — a logging failure never affects the
     gate verdict.
@@ -229,6 +233,8 @@ def flush_firings(root, mode, pending=False):
     Every call, even with nothing queued, first promotes pending rows older than
     PENDING_PROMOTE_S, and the git hook then discards the rest (they are this commit's, and its
     own rows replace them)."""
+    if NO_RECORDS:
+        return
     p = os.path.join(root, FIRINGS_REL)
     pp = os.path.join(root, PENDING_REL)
     try:
@@ -299,7 +305,7 @@ SECRET_PATH_ALLOW_RE = re.compile(
     r")$", re.IGNORECASE)
 # high-signal inline secrets (value never printed)
 INLINE_SECRET_RES = [
-    re.compile(r"-----BEGIN [A-Z0-9 ]*(?:PRIVATE|SECRET) KEY(?: BLOCK)?-----"),  # PEM + PGP (`… PRIVATE KEY BLOCK-----`)
+    re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----"),
     re.compile(r"AKIA[0-9A-Z]{16}"),          # AWS long-term access key
     re.compile(r"ASIA[0-9A-Z]{16}"),          # AWS STS temporary credential
     re.compile(r"AIza[0-9A-Za-z_\-]{35}"),    # Google API key
@@ -400,21 +406,10 @@ def is_git_repo(root):
         return False
 
 
-def config_path(root):
-    """The config the gate obeys. `GUILD_GATE_CONFIG` (an absolute file, set by the Guild engine
-    for its role sessions) wins over the checkout's own `.claude/guild/config.json`: the engine
-    exports the BASE branch's config next to the base's gate scripts, so a branch cannot switch
-    its own gate off. Unset → the checkout's file (interactive use, unchanged)."""
-    p = os.environ.get("GUILD_GATE_CONFIG")
-    if p and os.path.isabs(p):
-        return p
-    return os.path.join(root, ".claude", "guild", "config.json")
-
-
 def gates_enabled(root):
     """Off-switch: config.gates.enabled == false → gate disabled. Default enabled."""
     try:
-        with open(config_path(root), encoding="utf-8") as fh:
+        with open(os.path.join(root, ".claude", "guild", "config.json"), encoding="utf-8") as fh:
             cfg = json.load(fh)
         g = cfg.get("gates") or {}
         return g.get("enabled", True) is not False
@@ -927,7 +922,7 @@ _VISUAL_DROP = []          # B4 warnings, collected by check_verification, emitt
 
 def _visual_cfg(root):
     try:
-        with open(config_path(root), encoding="utf-8") as fh:
+        with open(os.path.join(root, ".claude", "guild", "config.json"), encoding="utf-8") as fh:
             cfg = json.load(fh)
         v = cfg.get("visual") if isinstance(cfg, dict) else None
         return v if isinstance(v, dict) else {}
@@ -1297,6 +1292,8 @@ def write_findings(root, findings):
     """Always rewrite findings.json so it reflects THIS commit's gate state, not a stale
     snapshot: writing only when blocking left the last-blocked findings fossilised, and
     other readers (evolve/audit) misread that as an unresolved open item."""
+    if NO_RECORDS:
+        return
     try:
         # Not a git repository → write nothing (0.98.2 S2 — see flush_firings).
         if not is_git_repo(root):
@@ -1392,9 +1389,7 @@ def deny_pre_tool_use(reasons, warn=()):
 
 # --- mode 2b: Bash text guard (0.98.6 Y1 · Y2) ------------------------------------------
 # The PreToolUse hook already sees EVERY Bash call (settings.json `matcher: "Bash"`); a call
-# that is not a commit used to return at once. Narrow shapes are now refused there — on every call, a commit too —
-# (two in 0.98.6, below; two more in 0.99.2 — `directive-slice` and the unattended-only
-# `unmarked-comment`, at their functions) —
+# that is not a commit used to return at once. Two narrow shapes are now refused there — on every call, a commit too —
 # both measured, both missed by the prompt rules alone, and a deny is honoured unattended and
 # inside sub-agents (word_app #1117: `PreToolUse:Bash hook error` stopped a sub-agent commit).
 # Measured over 71,590 real Bash calls from Guild sessions (word_app · one-man-company):
@@ -1654,125 +1649,6 @@ def bodies_save(cmd):
     return False
 
 
-DIRECTIVE_SLICE_MSG = ("🚫 Guild 게이트: 사람 지시(마커 없는 댓글)는 잘라 읽지 마세요 — 범위를 좁히는 문장이 뒤에 "
-                       "있습니다(#244 실측). 명령을 그대로 실행하고, 길면 도구가 옮긴 파일을 Read offset/limit 로 읽으세요.")
-UNMARKED_COMMENT_MSG = ("🚫 Guild 게이트: 무인 실행의 댓글은 <!-- guild:note --> 같은 마커로 시작해야 합니다 — "
-                        "마커 없는 댓글은 사람 지시로 읽힙니다(Section M).")
-
-GH_READ_RE = re.compile(r"\bgh\s+(?:(?:-R|--repo)[\s=]+\S+\s+)?(?:api|issue\s+view|pr\s+view)\b")
-# The `| not` must negate the MARKER test itself — `test("<!-- guild:")) | not`,
-# `contains("<!-- guild:") | not` — not some later filter (`select(.user.login|test("bot")|not)`
-# after a marker SELECT is not a directive read). A `\"` (jq inside a double-quoted shell
-# string) is the same quote.
-UNMARKED_FILTER_RE = re.compile(r'<!-- guild:[^"]*\\?"\s*\)\s*\)?\s*\|\s*not\b')
-# A cut of the body: `.body[n:m]`, `.body | .[n:m]`, `(.body // "")[n:m]`, and a `.body` pipe chain
-# ending in `| .[n:m]` (`((.body // "") | .[0:300])`, `(.body | gsub("\n";" ") | .[0:300])`) — the
-# chain stays inside one object field (no `{`, `}` or `,` between).
-_SL = r"\[\s*-?\d*\s*:\s*-?\d*\s*\]"
-BODY_SLICE_RE = re.compile(r"\.body\s*(?:\|\s*\.)?" + _SL
-                           + r'|\(\s*\.body\s*//\s*\\?"\\?"\s*\)\s*(?:\|\s*\.)?' + _SL
-                           + r"|\.body\b[^{},]*?\|\s*\." + _SL)
-# …or the whole output cut by the shell, outside the quotes: `… {id, body}' | head -c 2000`.
-SHELL_CUT_RE = re.compile(r"\|\s*(?:head|cut)\s+(?:-\w+\s+)*-c")
-
-
-def directive_slice(cmd):
-    """0.99.2 A10 (D1) — True when ONE pipeline piece reads comments/bodies with `gh` (`api`,
-    `issue view`, `pr view`), keeps only the UNMARKED ones (`<!-- guild:` with `| not` / `) not`
-    — Section M's directive read) and slices the body (`.body[<n>:<m>]`, `.body | .[<n>:<m>]`,
-    `.body[:<m>]`). A directive's scope exclusion sits after its first sentence: measured #244
-    (425 chars) cut at 300 lost `잡이 실행된 뒤 실패한 red는 이 지시의 대상이 아니다` — the
-    directive read wider than it was. Measured: 10 of 77,194 real Bash calls had this shape, all
-    of them Section M reads (#648 · #649 `.body[0:300]`/`[0:400]`, #161 · #511 `(.body | .[0:300])`,
-    #630 · #620 `(.body | .[0:600])`). The `gh` command is found in the quote-blanked piece (a
-    commit message or an echo that only mentions it runs nothing); the marker, the filter and
-    the slice are read from the same span of the original (they live inside the jq string).
-    Out of scope (recorded): a cut read with no marker filter (not a directive read — Section M
-    has its own command), a script file that does it."""
-    u = _blank_quoted(cmd)
-    start = 0
-    for m in list(PIECE_SEP_RE.finditer(u)) + [None]:
-        end = m.start() if m else len(u)
-        seg_u, seg_raw = u[start:end], cmd[start:end]
-        start = m.end() if m else len(u)
-        if not GH_READ_RE.search(seg_u):
-            continue
-        if (UNMARKED_FILTER_RE.search(seg_raw)
-                and (BODY_SLICE_RE.search(seg_raw) or SHELL_CUT_RE.search(seg_u))):
-            return True
-    return False
-
-
-# `gh issue comment` / `gh pr comment` with a body file; `gh api` comment create (POST to
-# `…/issues/<n>/comments`) or update (`…/issues/comments/<id>` with PATCH) with `-F`/`--field
-# body=@<file>`. Review comments (`…/pulls/<n>/comments`) and inline `--body` are outside.
-GH_COMMENT_RE = re.compile(r"\bgh\s+(?:(?:-R|--repo)[\s=]+\S+\s+)?(?:issue|pr)\s+comment\b")
-BODY_FILE_FLAG_RE = re.compile(r"(?:^|\s)(?:--body-file|-F)(?=[\s=])")
-GH_API_RE = re.compile(r"\bgh\s+api\b")
-API_CREATE_PATH_RE = re.compile(r"(?:^|[\s/])repos/[^/\s]+/[^/\s]+/issues/\d+/comments(?=[\s?]|$)")
-API_UPDATE_PATH_RE = re.compile(r"(?:^|[\s/])repos/[^/\s]+/[^/\s]+/issues/comments/\d+(?=[\s?]|$)")
-API_PATCH_RE = re.compile(r"(?:^|\s)(?:-X\s*|--method[\s=]+)PATCH\b", re.I)   # `-XPATCH` too
-FIELD_FLAG_RE = re.compile(r"(?:^|\s)(?:-F|--field)(?=[\s=])")
-
-
-def _arg_at(raw, pos):
-    """The shell word starting at `pos` (after spaces or one `=`), unquoted; "" when none."""
-    rest = raw[pos:]
-    rest = rest[1:] if rest[:1] == "=" else rest.lstrip(" \t")
-    if not rest:
-        return ""
-    if rest[0] in "'\"":
-        end = rest.find(rest[0], 1)
-        return rest[1:end if end > 0 else len(rest)]
-    return re.match(r"[^\s;&|<>]*", rest).group(0)
-
-
-def _first_line_marked(path):
-    """True/False for the file's first non-empty line opening with `<!-- guild:`; None when the
-    file cannot be read (a path typo — gh fails on it; the gate does not refuse what it cannot
-    see)."""
-    try:
-        with open(os.path.expanduser(path), encoding="utf-8", errors="replace") as f:
-            for line in f:
-                if line.strip():
-                    return line.lstrip().startswith("<!-- guild:")
-    except OSError:
-        return None
-    return None
-
-
-def unmarked_comment(cmd):
-    """0.99.2 A11 (D1) — unattended only (`GLD_UNATTENDED=1`, checked by the caller): True when a
-    piece posts or updates an Issue/PR comment from a file whose first non-empty line is not a
-    `<!-- guild:` marker. Unattended there is no human, so an unmarked comment is always a defect
-    — Section M reads it as the human's directive (measured: 64 of 1,554 `--body-file` posts in
-    sprint worktree sessions had no marker, all Guild-written — a PR CI note, a merge-order
-    note). Attended is never checked: a comment the human asked Claude to write as theirs
-    (`## 사람 지시 — …`) is rightly unmarked. Out of scope (recorded): inline `--body`, a body
-    written by a heredoc or a script file, `-f/--raw-field body=@F` (gh sends the text `@F` —
-    a defect of its own, A18)."""
-    u = _blank_quoted(cmd)
-    start = 0
-    for m in list(PIECE_SEP_RE.finditer(u)) + [None]:
-        end = m.start() if m else len(u)
-        seg_u, seg_raw = u[start:end], cmd[start:end]
-        start = m.end() if m else len(u)
-        paths = []
-        if GH_COMMENT_RE.search(seg_u):
-            paths += [_arg_at(seg_raw, f.end()) for f in BODY_FILE_FLAG_RE.finditer(seg_u)]
-        elif GH_API_RE.search(seg_u) and (
-                API_CREATE_PATH_RE.search(seg_raw)
-                or (API_UPDATE_PATH_RE.search(seg_raw) and API_PATCH_RE.search(seg_u))):
-            for f in FIELD_FLAG_RE.finditer(seg_u):
-                v = _arg_at(seg_raw, f.end())
-                if v.startswith("body=@"):
-                    paths.append(v[len("body=@"):])
-        for pth in paths:
-            if pth and pth != "-" and _first_line_marked(pth) is False:
-                return True
-    return False
-
-
 def deny_pre_tool_use_text(msg):
     """Deny a Bash call for its text (every Bash call, a commit too): the same deny JSON + stderr + exit 2 as a commit block, but
     with `msg` alone — `block_message`'s `커밋 거부` header and HUMAN_NOTE (dismissed.md, key
@@ -1800,10 +1676,6 @@ def main_text_guard(cmd):
         rule, msg = "shell-text", SHELL_TEXT_MSG
     elif bodies_save(cmd):
         rule, msg = "bodies-save", BODIES_SAVE_MSG
-    elif directive_slice(cmd):
-        rule, msg = "directive-slice", DIRECTIVE_SLICE_MSG
-    elif os.environ.get("GLD_UNATTENDED") == "1" and unmarked_comment(cmd):
-        rule, msg = "unmarked-comment", UNMARKED_COMMENT_MSG
     if rule is None:
         return 0
     root = os.environ.get("CLAUDE_PROJECT_DIR") or repo_root()
@@ -2029,6 +1901,47 @@ def main_git_hook():
     return 0
 
 
+def _within(path, top):
+    p = os.path.realpath(path)
+    return p == top or p.startswith(top.rstrip(os.sep) + os.sep)
+
+
+def outside_project(cmd, m):
+    """True when this PreToolUse hook must leave the commit alone because its repository lies
+    OUTSIDE the session's project folder (`CLAUDE_PROJECT_DIR`, gld P3-B).
+
+    The hook runs OUTSIDE the sandbox. For `git -C <dir> commit` it would treat `<dir>` as the
+    repository: import `<dir>/.claude/guild/gates/scripts/local/*.py`, run git with that
+    repository's own config, and write its findings / firing log there (session 2: a role that
+    can create a repository in a writable folder escapes the sandbox through this hook). So,
+    when CLAUDE_PROJECT_DIR is set, a commit whose target is not inside it is passed through
+    with NO import, NO git call and NO write. The target is resolved WITHOUT git: the `-C`
+    token (quotes removed, `~` only when unquoted) or the hook's cwd, through realpath — a
+    symlink inside the project that points outside counts as outside; a token holding `$` or
+    a backtick, or one that does not parse, cannot be resolved and is treated as outside (the
+    in-sandbox git hook still judges a commit of the project's own repository).
+    Unset CLAUDE_PROJECT_DIR (a plain 0.98.7 setup, the tests) → False: unchanged behaviour."""
+    proj = os.environ.get("CLAUDE_PROJECT_DIR")
+    if not proj:
+        return False
+    top = os.path.realpath(proj)
+    if m is None:
+        return not _within(os.getcwd(), top)
+    import shlex
+    try:
+        lex = shlex.shlex(cmd[m.start(1):], posix=True)
+        lex.whitespace_split = True
+        lex.commenters = ""
+        tok = lex.get_token()
+    except ValueError:
+        return True
+    if not tok or "$" in tok or "`" in tok:
+        return True
+    if tok.startswith("~") and m.group(1) == tok:
+        tok = os.path.expanduser(tok)
+    return not _within(os.path.join(os.getcwd(), tok), top)
+
+
 def main_pre_tool_use():
     """Mode 2 — early warning. Catches the common single-command case before the turn is
     spent. The git hook is the backstop for everything this cannot see."""
@@ -2047,6 +1960,8 @@ def main_pre_tool_use():
     # ⚠ A `-C` argument that cannot be resolved skips the early warning (0.98.2 S2 — see
     # early_c_root); `repo_root`'s cwd fallback stays for the no-`-C` case and the git hook.
     m = GIT_C_FLAG_RE.search(cmd)
+    if outside_project(cmd, m):
+        return 0  # a repository outside the session's project: no import, no git, no write
     if m:
         root = early_c_root(cmd, m)
         if root is None:
@@ -2082,7 +1997,8 @@ def main_pre_tool_use():
 # no Bash hook fires. That makes the enforcement layer only as strong as the agent's
 # willingness to leave it alone.
 #
-# This does NOT block: `/gld config --gates=off` is a legitimate, documented action, and a
+# This does NOT block: a human turning the gate off by hand is a legitimate action (this edition's
+# `/gld config` refuses `--gates`, review-q0 D7, so editing the file is the only way), and a
 # gate that cannot be turned off is its own hazard. It asks — so disabling the gate becomes
 # a decision a human makes on the record, never a side effect the agent takes on its own.
 GATE_CONTROL_RE = re.compile(
@@ -2394,8 +2310,9 @@ def main_scan_text(args):
 # instead: the manager keeps owning the hook file, and (because its config is committed) the gate
 # then travels with a clone, which the .git/hooks path never does.
 #
-# `--detect-hook-manager <hook-path>` reads the hook file itself (the path from
-# `git rev-parse --git-path hooks/pre-commit`). Prints exactly one word:
+# `--detect-hook-manager <hook-path> [--checkout DIR]` reads the hook file itself (the path from
+# `git rev-parse --git-path hooks/pre-commit`); with no hook file, the checkout's committed manager config
+# (MANAGER_CONFIGS). Prints exactly one word:
 #   absent · guild · none (present, hand-written) · or the manager's name.
 # Exit 0 with one of those words; anything else (no path given → 64, unreadable → 2) is NOT a
 # verdict — never install a hook on it.
@@ -2408,13 +2325,42 @@ HOOK_MANAGERS = [
 ]
 
 
+# FC M3: a fresh clone of a managed repo has the manager's COMMITTED config but no hook yet (`lefthook install`
+# never ran there). "absent" would make init take the plain install path and write a Guild hook that the next
+# `lefthook install` silently replaces — so with no hook file, a committed config names the manager. The checkout
+# is `--checkout DIR`, else the folder above `<top>/.git/hooks/pre-commit` (a linked worktree's hook path is the
+# main checkout's, which has the same committed config).
+MANAGER_CONFIGS = [
+    ("lefthook", ("lefthook.yml", ".lefthook.yml", "lefthook.yaml", ".lefthook.yaml", "lefthook.toml",
+                  ".lefthook.toml", "lefthook.json", ".lefthook.json")),
+    ("husky", (".husky/pre-commit",)),
+    ("pre-commit", (".pre-commit-config.yaml",)),
+    ("overcommit", (".overcommit.yml",)),
+]
+
+
+def _manager_of_config(top):
+    if not top or not os.path.isdir(top):
+        return None
+    for name, files in MANAGER_CONFIGS:
+        for rel in files:
+            p = os.path.join(top, rel)
+            if os.path.isfile(p) and not os.path.islink(p):
+                return name
+    return None
+
+
 def main_detect_manager(args):
     path = _arg_after(args, "--detect-hook-manager")
     if not path:
         return _usage("--detect-hook-manager needs the hook path "
                       "(git rev-parse --git-path hooks/pre-commit)")
     if not os.path.exists(path):
-        print("absent")         # nothing to move aside: the plain install path applies
+        top = _arg_after(args, "--checkout")
+        tail = os.path.join(".git", "hooks", "pre-commit")
+        if not top and os.path.abspath(path).endswith(os.sep + tail):
+            top = os.path.abspath(path)[:-len(tail) - 1]
+        print(_manager_of_config(top) or "absent")   # absent: nothing to move aside, the plain install path applies
         return 0
     try:
         with open(path, "rb") as fh:

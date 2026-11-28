@@ -1,0 +1,154 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "gld/base-green",
+  "title": "Base check record (stage-4 scope §2.7, H12, R1-36)",
+  "description": "records/<owner>/<repo>/base-green/<sha>-<config sha256, 16>.json, written by basecheck.check. A green record of the same pair is never run again; a red one is checked again at the next start. Not an Issue's facts: the cost is outside every Issue.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "format",
+    "repo",
+    "sha",
+    "config_sha256",
+    "ok",
+    "commands",
+    "red",
+    "flaky",
+    "problem",
+    "plugin_version",
+    "at"
+  ],
+  "properties": {
+    "format": {
+      "const": 1
+    },
+    "repo": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$"
+    },
+    "sha": {
+      "$ref": "#/$defs/sha"
+    },
+    "config_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "ok": {
+      "type": "boolean",
+      "description": "Every command green (after at most one second run on the same clean tree) and no problem."
+    },
+    "commands": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "name",
+          "ok",
+          "runs",
+          "dirty_files"
+        ],
+        "properties": {
+          "name": {
+            "$ref": "#/$defs/name"
+          },
+          "ok": {
+            "type": "boolean"
+          },
+          "runs": {
+            "type": "array",
+            "maxItems": 2,
+            "description": "The first run and, when it was red on a clean tree, the second (the K8-2 rule). Empty = not run (an earlier prepare / setup was red).",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "exit_code",
+                "timed_out",
+                "duration_s",
+                "log_file"
+              ],
+              "properties": {
+                "exit_code": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ]
+                },
+                "timed_out": {
+                  "type": "boolean"
+                },
+                "duration_s": {
+                  "type": [
+                    "number",
+                    "null"
+                  ],
+                  "minimum": 0
+                },
+                "log_file": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "dirty_files": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "red": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/name"
+      },
+      "description": "Names of the commands counted red."
+    },
+    "flaky": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/name"
+      },
+      "description": "Red, then green on the same tree."
+    },
+    "problem": {
+      "enum": [
+        "worktree",
+        "prepare",
+        "config",
+        "srt-canary",
+        "engine-error",
+        null
+      ],
+      "description": "A fact that could not be collected — refused exactly like red."
+    },
+    "plugin_version": {
+      "type": "string",
+      "minLength": 1
+    },
+    "at": {
+      "$ref": "#/$defs/ts"
+    }
+  },
+  "$defs": {
+    "sha": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}([0-9a-f]{24})?$"
+    },
+    "ts": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]+)?Z$"
+    },
+    "name": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*$",
+      "maxLength": 64
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    }
+  }
+}

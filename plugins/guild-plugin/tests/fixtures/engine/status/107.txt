@@ -1,9 +1,0 @@
-Issue #107: entry-point slice  (child)
-Parent: #105
-Stage: not started
-- [ ] Analyze: not started
-- [ ] Design: not started
-- [ ] Execute: not started
-- [ ] Test: not started
-- [ ] QA: not started
-PR: none

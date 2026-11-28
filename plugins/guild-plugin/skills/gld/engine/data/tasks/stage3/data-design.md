@@ -1,0 +1,5 @@
+The engine added this step from the plugin step catalog because the change touches a schema, a storage format or a migration. Design the data change and write it to `docs/specs/<issue>/data.md`, before the developer builds it: read `issue.md`, `analysis.md`, the current schema / models / migrations the Issue touches and `docs/standards/` data rules when present.
+
+Write: the new shape (tables, fields, keys, indexes, or the stored format) next to the old one; the migration in order, and whether each step is reversible; what happens to existing data (kept, transformed, dropped) and how a reader of the old format behaves during the change; the rollback path. Mark every step a human must run or approve outside this pull request (running a migration on a shared database, a data backfill) — the engine treats those as changes that are hard to revert. State the checks the data review will look for as checkable items.
+
+You design; you do not change code. Write prose in the language of the Issue, follow the repository's document rules (its markdown lint), and never use square brackets for a tag or a reference. Write only that one file.

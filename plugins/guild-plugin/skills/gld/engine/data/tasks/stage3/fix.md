@@ -1,0 +1,8 @@
+Fix the bug on the current branch with the smallest change that removes its root cause. Your inputs are `analysis.md`, `diagnosis.md` (root cause and blast radius), `test-cases.md`, and `repro-evidence.md` in the engine folder: the regression test the previous step wrote and the facts of its red run (the end of the runner output, verbatim).
+
+- **Cause, not symptom.** Fix the code the diagnosis names as the cause. A guard, a retry or a catch that only hides the failure is a symptom patch; the design review sends it back (`root-cause-addressed`). When your reading of the code shows the diagnosis is wrong, fix the real cause and say so in `note`.
+- **The regression test is fixed.** Never change, move or delete a file the reproduce step wrote (the engine checks ownership and fails the step). Make that test green by fixing the code. If the test itself is wrong, return `status: blocked` with `blocked_by.kind: other` and say why — the leader decides.
+- **Other tests.** Keep every existing test green. Change another test only when the fix really changes the behaviour it pinned, and say why in `note`; new tests for the blast radius are welcome.
+- **Show it.** Run the regression test and the tests of the files you touched: red → green. Put the raw summary line(s) in `note`.
+
+When this step was returned (see "Returned" and "Re-entry" below), find the cause of the listed failure, fix it, and keep the work unrelated to it. When `blocking-discoveries.md` lists items (`F1`, …), they are problems another role found that block an acceptance criterion: fix them too, each in its own small commit with the item id in its message.

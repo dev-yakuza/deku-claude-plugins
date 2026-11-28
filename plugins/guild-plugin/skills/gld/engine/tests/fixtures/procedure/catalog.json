@@ -1,0 +1,30 @@
+{
+  "format": 1,
+  "version": "fixture-1",
+  "entries": [
+    {"id": "product-review", "role": "product-owner", "class": "design-time",
+     "inputs": ["docs/specs/{issue}/analysis.md", "in:leader-decision.md"],
+     "outputs": ["docs/specs/{issue}/product.md"], "checks": [], "on_fail": null, "summary": "Scope question."},
+    {"id": "ux-design", "role": "designer", "class": "design-time",
+     "inputs": ["docs/specs/{issue}/analysis.md", "in:leader-decision.md"],
+     "outputs": ["docs/specs/{issue}/ux.md"], "checks": [], "on_fail": null, "summary": "Interaction design."},
+    {"id": "threat-model", "role": "security", "class": "design-time",
+     "inputs": ["docs/specs/{issue}/analysis.md", "in:leader-decision.md"],
+     "outputs": ["docs/specs/{issue}/threat-model.md"], "checks": [], "on_fail": null, "summary": "Threat model."},
+    {"id": "ux-review", "role": "designer", "class": "diff-review",
+     "inputs": ["in:review.diff", "docs/specs/{issue}/analysis.md", "in:leader-decision.md"],
+     "outputs": [], "checks": ["ux-conformance"], "on_fail": {"back_to": "@developer", "max": 2}, "summary": "UX review."},
+    {"id": "security-review", "role": "security", "class": "diff-review",
+     "inputs": ["in:review.diff", "docs/specs/{issue}/analysis.md", "in:leader-decision.md"],
+     "outputs": [], "checks": ["security-review"], "on_fail": {"back_to": "@developer", "max": 2}, "summary": "Security review."},
+    {"id": "data-review", "role": "dba", "class": "diff-review",
+     "inputs": ["in:review.diff", "docs/specs/{issue}/analysis.md", "in:leader-decision.md"],
+     "outputs": [], "checks": ["data-integrity"], "on_fail": {"back_to": "@developer", "max": 2}, "summary": "Data review."},
+    {"id": "i18n-review", "role": "i18n", "class": "diff-review",
+     "inputs": ["in:review.diff", "docs/specs/{issue}/analysis.md", "in:leader-decision.md"],
+     "outputs": [], "checks": ["i18n-completeness"], "on_fail": {"back_to": "@developer", "max": 2}, "summary": "i18n review."},
+    {"id": "fix-discovery", "role": "developer", "class": "fix",
+     "inputs": ["in:blocking-discoveries.md", "docs/specs/{issue}/analysis.md", "in:failure-summary.md", "in:leader-decision.md"],
+     "outputs": [], "checks": [], "on_fail": {"back_to": "@developer", "max": 2}, "summary": "Fix a blocking discovery."}
+  ]
+}

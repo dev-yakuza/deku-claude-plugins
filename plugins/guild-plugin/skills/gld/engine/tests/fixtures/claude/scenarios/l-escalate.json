@@ -1,0 +1,14 @@
+{
+  "format": 1,
+  "description": "Stage 2 leader, needs_leader (blocked): escalate with a recommendation (L6).",
+  "stream": "../leader/real-2.1.323/blocked-escalate.jsonl",
+  "init_from_argv": true,
+  "leader": {"example": "leader-answer", "expect": "accepted"},
+  "structured_output": {
+    "answer": "escalate",
+    "reason": "needs-human-decision",
+    "step": null,
+    "note": "The design step is blocked on a product decision (which screens get the setting).",
+    "recommendation": {"answer": "rerun", "step": "design", "note": "After the owner decides the screens, run design again with that decision."}
+  }
+}

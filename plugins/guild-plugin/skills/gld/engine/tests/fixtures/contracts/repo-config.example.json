@@ -1,0 +1,109 @@
+{
+  "format": 1,
+  "commands": {
+    "setup": {
+      "cmd": "pnpm install --frozen-lockfile"
+    },
+    "test": {
+      "cmd": "pnpm test -- --ci",
+      "timeout_min": 30
+    },
+    "e2e": {
+      "cmd": "pnpm e2e --ci",
+      "timeout_min": 45
+    },
+    "ac-format": {
+      "plugin": "ac-format"
+    },
+    "ac-coverage": {
+      "plugin": "ac-coverage"
+    },
+    "verify-gate": {
+      "plugin": "verify-gate"
+    }
+  },
+  "run_timeout_min": 30,
+  "toolchain_prepare": [
+    {
+      "name": "flutter-sdk",
+      "sync": {
+        "from": [
+          "{home}/fvm/versions/3.47.7",
+          "/opt/flutter"
+        ],
+        "to": "flutter-sdk"
+      }
+    },
+    {
+      "name": "flutter-precache",
+      "cmd": "flutter precache"
+    }
+  ],
+  "path_rules": [
+    {
+      "kind": "verification",
+      "globs": [
+        "test/**",
+        "**/*_test.dart",
+        "package.json",
+        ".github/workflows/**"
+      ]
+    },
+    {
+      "kind": "risk",
+      "area": "auth",
+      "gate": "security-review",
+      "globs": [
+        "src/auth/**"
+      ]
+    },
+    {
+      "kind": "irreversible",
+      "category": "hard-to-revert",
+      "globs": [
+        "migrations/**"
+      ]
+    }
+  ],
+  "registry_hosts": [
+    "registry.npmjs.org",
+    "repo.yarnpkg.com"
+  ],
+  "cache_env": {
+    "npm_config_cache": "{cache}/npm",
+    "COREPACK_HOME": "{cache}/corepack"
+  },
+  "run_env": {
+    "TURBO_TELEMETRY_DISABLED": "1"
+  },
+  "secret_paths": [
+    ".env*",
+    "*.pem",
+    "*.p12"
+  ],
+  "worktree_prepare": [
+    {
+      "copy": "lib/generated/**",
+      "note": "ignored codegen output"
+    }
+  ],
+  "sandbox_exceptions": {
+    "allow_local_binding": false
+  },
+  "quarantine": [
+    {
+      "test": "test/flaky_clock_test.dart",
+      "note": "red on base since 2026-11-01"
+    }
+  ],
+  "not_checked_locally": [
+    {
+      "name": "deploy-preview",
+      "note": "needs secrets"
+    }
+  ],
+  "source": {
+    "converted_from": "0.98.7 config.json",
+    "at": "2026-11-23T01:02:03Z"
+  }
+}

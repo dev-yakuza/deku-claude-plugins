@@ -1,0 +1,54 @@
+{
+  "format": 1,
+  "description": "Stage 3: four requests → step-add-limit (TC5).",
+  "stream": "../f2/r4.jsonl",
+  "init_from_argv": true,
+  "role": {
+    "example": "result-work-s3",
+    "expect": "done"
+  },
+  "structured_output": {
+    "status": "done",
+    "outputs": [
+      "docs/specs/42/skeleton.md"
+    ],
+    "requests": [
+      {
+        "op": "add",
+        "step": "ux-review",
+        "trigger": "ui-change",
+        "note": "fixture"
+      },
+      {
+        "op": "add",
+        "step": "i18n-review",
+        "trigger": "ui-change",
+        "note": "fixture"
+      },
+      {
+        "op": "add",
+        "step": "security-review",
+        "trigger": "ui-change",
+        "note": "fixture"
+      },
+      {
+        "op": "add",
+        "step": "infra-review",
+        "trigger": "ui-change",
+        "note": "fixture"
+      }
+    ],
+    "blocked_by": null,
+    "discoveries": [],
+    "irreversible": [],
+    "golden_reasons": [],
+    "note": "fixture"
+  },
+  "actions": [
+    {
+      "op": "write",
+      "path": "docs/specs/42/skeleton.md",
+      "content": "# design\n"
+    }
+  ]
+}

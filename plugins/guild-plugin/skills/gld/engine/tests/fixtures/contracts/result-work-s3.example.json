@@ -1,0 +1,54 @@
+{
+  "fill": {
+    "{catalog_steps}": [
+      "product-review",
+      "ux-design",
+      "threat-model",
+      "data-design",
+      "i18n-plan",
+      "ux-review",
+      "security-review",
+      "data-review",
+      "i18n-review",
+      "performance-review",
+      "infra-review"
+    ]
+  },
+  "answer": {
+    "status": "done",
+    "outputs": [
+      "docs/specs/42/skeleton.md"
+    ],
+    "requests": [
+      {
+        "op": "add",
+        "step": "ux-review",
+        "trigger": "ui-change",
+        "note": "a new dialog"
+      }
+    ],
+    "blocked_by": null,
+    "discoveries": [
+      {
+        "kind": "debt",
+        "where": "src/a.py",
+        "note": "duplicated code",
+        "blocks_current_ac": false
+      }
+    ],
+    "irreversible": [
+      {
+        "code": "storage-format-change",
+        "where": "src/store.py",
+        "note": "new cache format"
+      }
+    ],
+    "golden_reasons": [
+      {
+        "path": "test/goldens/dialog.png",
+        "reason": "intended-change"
+      }
+    ],
+    "note": "fixture"
+  }
+}

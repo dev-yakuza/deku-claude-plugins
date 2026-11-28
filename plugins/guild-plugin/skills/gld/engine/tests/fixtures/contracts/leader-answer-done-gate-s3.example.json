@@ -1,0 +1,96 @@
+{
+  "fill": {
+    "{answers}": [
+      "approve",
+      "rerun",
+      "escalate"
+    ],
+    "{rerun_steps}": [
+      "analyze",
+      "ac-format",
+      "design",
+      "test-cases",
+      "implement",
+      "test"
+    ],
+    "{human_answers}": [
+      "approve",
+      "rerun",
+      "escalate"
+    ],
+    "{human_rerun_steps}": [
+      "analyze",
+      "ac-format",
+      "design",
+      "test-cases",
+      "implement",
+      "test"
+    ],
+    "{ac_ids}": [
+      1,
+      2
+    ],
+    "{discovery_ids}": [
+      "D1",
+      "D2"
+    ],
+    "{fix_ids}": [
+      "F1"
+    ],
+    "{dispositions}": [
+      "followup",
+      "ignore",
+      "include",
+      "duplicate"
+    ],
+    "{candidate_issues}": [
+      77,
+      81
+    ]
+  },
+  "answer": {
+    "answer": "approve",
+    "reason": "acceptance-met",
+    "step": null,
+    "note": "Both ACs are proven.",
+    "recommendation": null,
+    "ac_verdicts": [
+      {
+        "ac": 1,
+        "status": "met",
+        "evidence": "test/settings_test.dart",
+        "why_not_automated": null
+      },
+      {
+        "ac": 2,
+        "status": "manual",
+        "evidence": "manual-test-checklist.md item 1",
+        "why_not_automated": "The setting is a colour on the device screen; the design documents proposed no automated check for it."
+      }
+    ],
+    "discoveries": [
+      {
+        "id": "D1",
+        "disposition": "followup",
+        "title": "Duplicate parsing code in src/a.py",
+        "duplicate_of": null
+      },
+      {
+        "id": "D2",
+        "disposition": "duplicate",
+        "title": null,
+        "duplicate_of": 77
+      }
+    ],
+    "included_fixes": [
+      {
+        "id": "F1",
+        "verdict": "keep"
+      }
+    ],
+    "summary": [
+      "src/settings.ts adds the quiz-type row to the settings sheet.",
+      "test/settings_test.dart covers the new row."
+    ]
+  }
+}

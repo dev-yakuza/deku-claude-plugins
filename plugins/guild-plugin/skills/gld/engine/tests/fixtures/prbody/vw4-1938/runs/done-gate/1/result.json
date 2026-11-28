@@ -1,0 +1,1 @@
+{"answer": "rerun", "reason": "real-defect", "step": "safety-net", "note": "AC #3(플래그 제거 뮤테이션에서 테스트 실패, 러너 원문 기록)에 대한 증거가 없다: done_gate.mutations 가 null 이고, 뮤테이션 선언도 실행 결과도 없다.\n(VW4 runs/done-gate/1 note, cut)"}

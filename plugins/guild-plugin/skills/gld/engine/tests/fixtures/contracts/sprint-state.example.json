@@ -1,0 +1,109 @@
+{
+  "format": 1,
+  "repo": "acme/app",
+  "tracker": 700,
+  "run": 1,
+  "plan_hash": "0123456789ab",
+  "state": "running",
+  "halt": null,
+  "plugin_version": "1.0.0-exp.3",
+  "engine_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+  "host": "mac",
+  "pid": 4321,
+  "started": "2026-11-25T01:02:03Z",
+  "ended": null,
+  "window": "22:00-10:00",
+  "allow_red_base": false,
+  "stack_reason": "squash-sync",
+  "base_check": {
+    "sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "config_sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+    "ok": true,
+    "record": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-dddddddddddddddd.json"
+  },
+  "quota_reset_at": null,
+  "order": [
+    101,
+    102,
+    103,
+    104
+  ],
+  "members": [
+    {
+      "issue": 101,
+      "base_dep": null,
+      "kind": "goal",
+      "outcome": "done",
+      "block": null,
+      "cause": null,
+      "stop_reason": null,
+      "stop_detail": null,
+      "base": {
+        "branch": "main",
+        "sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "stacked_on": null
+      },
+      "pr": 900,
+      "draft": false,
+      "rc": 0,
+      "started": "2026-11-25T01:02:03Z",
+      "ended": "2026-11-25T01:02:03Z",
+      "cost_usd": 7.4
+    },
+    {
+      "issue": 102,
+      "base_dep": 101,
+      "kind": "goal",
+      "outcome": "stopped",
+      "block": null,
+      "cause": null,
+      "stop_reason": "infra-stop",
+      "stop_detail": "api",
+      "base": {
+        "branch": "gld/101",
+        "sha": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "stacked_on": 101
+      },
+      "pr": null,
+      "draft": true,
+      "rc": 10,
+      "started": "2026-11-25T01:02:03Z",
+      "ended": "2026-11-25T01:02:03Z",
+      "cost_usd": 1.1
+    },
+    {
+      "issue": 103,
+      "base_dep": 102,
+      "kind": "other",
+      "outcome": "blocked",
+      "block": "dep-stopped",
+      "cause": 102,
+      "stop_reason": null,
+      "stop_detail": null,
+      "base": null,
+      "pr": null,
+      "draft": false,
+      "rc": null,
+      "started": null,
+      "ended": null,
+      "cost_usd": null
+    },
+    {
+      "issue": 104,
+      "base_dep": null,
+      "kind": null,
+      "outcome": null,
+      "block": null,
+      "cause": null,
+      "stop_reason": null,
+      "stop_detail": null,
+      "base": null,
+      "pr": null,
+      "draft": false,
+      "rc": null,
+      "started": null,
+      "ended": null,
+      "cost_usd": null
+    }
+  ]
+}

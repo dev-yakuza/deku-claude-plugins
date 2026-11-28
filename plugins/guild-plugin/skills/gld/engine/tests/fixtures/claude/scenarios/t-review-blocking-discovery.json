@@ -1,0 +1,38 @@
+{
+  "format": 1,
+  "description": "Stage 3: a review finds a problem that blocks an AC → fix-discovery (TF2).",
+  "stream": "../f2/r4.jsonl",
+  "init_from_argv": true,
+  "role": {
+    "example": "result-review-s3",
+    "expect": "done"
+  },
+  "structured_output": {
+    "status": "done",
+    "outputs": [],
+    "requests": [],
+    "blocked_by": null,
+    "discoveries": [
+      {
+        "kind": "bug",
+        "where": "src/a.py",
+        "note": "fixture",
+        "blocks_current_ac": true
+      }
+    ],
+    "irreversible": [],
+    "note": "fixture",
+    "verdict": "pass",
+    "reviewed": [
+      "src/a.py"
+    ],
+    "checks": [
+      {
+        "id": "diff-review",
+        "result": "pass",
+        "note": ""
+      }
+    ],
+    "findings": []
+  }
+}

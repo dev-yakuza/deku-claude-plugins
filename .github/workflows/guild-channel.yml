@@ -1,0 +1,39 @@
+# DRAFT (readiness T4, R4-5) — for the public repository dev-yakuza/deku-claude-plugins:
+#   copy to .github/workflows/guild-channel.yml when the first promotion (guild-plugin 1.0.0) lands.
+# What it checks on every change of the stable Guild plugin or the marketplace file:
+#   1. the version rule (R4-5): plugins/guild-plugin/.claude-plugin/plugin.json is X.Y.Z, equal to the
+#      guild-plugin entry of .claude-plugin/marketplace.json, and equal to the development version it was
+#      promoted from (PROMOTED.md) without -exp.N — catches a hand edit of one file and a hand-made version;
+#   2. the channel names (V2, this side): the stable tree names the development channel only on tagged lines;
+#   3. the version rule test and the tool's own test (standard library Python + bash, no install step).
+# Not here: the full engine test (about 95 minutes on the maintainer's Mac — run before the promotion, V3).
+name: guild channel
+on:
+  pull_request:
+    paths:
+      - 'plugins/guild-plugin/**'
+      - '.claude-plugin/marketplace.json'
+  push:
+    branches: [main]
+    paths:
+      - 'plugins/guild-plugin/**'
+      - '.claude-plugin/marketplace.json'
+permissions:
+  contents: read
+jobs:
+  channel:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: version rule (R4-5)
+        run: python3 -I plugins/guild-plugin/tools/promote/promote.py check-version plugins/guild-plugin --marketplace .claude-plugin/marketplace.json
+      - name: channel names (V2)
+        run: python3 -I plugins/guild-plugin/tools/promote/promote.py check-names plugins/guild-plugin
+      - name: version rule test
+        run: bash plugins/guild-plugin/tests/version_rule_test.sh
+      - name: promote tool test
+        run: bash plugins/guild-plugin/tests/promote_test.sh

@@ -13,7 +13,6 @@ sync, but nothing else moves those cards once the run has ended (`retro.md` Phas
 
 > **Bash**: `<<SKILL_DIR>>/commands/atoms/_bash_rules.md`. **Output language**: `config.language`;
 > statuses, `#N` and paths stay ASCII.
-> **Checkout**: never move the human's branch or history — `_checkout.md` (a pull/sync/switch request: show the commands and which commits change hash, then ask).
 
 1. **Attended only.** `printenv GLD_UNATTENDED` → `1` → `OK: unattended — sprint sync runs after a
    human merge`. It pushes to member branches; the human triggers it.
@@ -49,10 +48,13 @@ sync, but nothing else moves those cards once the run has ended (`retro.md` Phas
      pushed for `conflict`·`verify-failed`·`push-rejected`. An `error` naming `config.commands`
      (no verification command, or a metacharacter in one) means that member needs a merge and
      will not get one unverified — fix the config with `/gld config`; so does `cannot read
-     …/config.json`. Members that need no merge and step 5 are unaffected
+     …/harness.json`. Members that need no merge and step 5 are unaffected
    - `ambiguous` → which PRs/branch to sort out
-   - `skipped` → `not-done` (still in the spine — sync after it finishes) · `branch-checked-out`
-     (the path follows — remove that preserved worktree or switch it away, then re-run) · `head-moved` (someone pushed — re-run)
+   - `skipped` → `not-done` (the engine's facts on THIS machine do not say finished — stopped, running, no
+     state here, or no PR; sync after it finishes, where it ran) · `branch-checked-out`
+     (the path follows — it is not the member's own engine worktree: switch it away, then re-run) · `head-moved` (someone pushed — re-run).
+     The member's own engine worktree is left as it is: after a sync its local branch is behind the remote until
+     `/gld resume <n>` with `--pr-review` fast-forwards it
    - `draft-held` → *"sync가 아닌 머지로 맞춰진 브랜치입니다 — `/gld dev <n>` 통과 후 `gh pr ready <pr>`"*
    - `worktree-kept` → the path; inspect and remove it (no `--force` was used)
    - `synced` → what was done (`none` = already level); `clean` → nothing needed;
@@ -91,11 +93,10 @@ sync, but nothing else moves those cards once the run has ended (`retro.md` Phas
      P5 attribution with the Issue half added, so these cards are a **subset** of the ones P5
      moves to `Done`, never more.
      A member with **no PR at all** reaches the list one other way (0.98.7): closed as decided
-     (`analyze.md` Step 1 item 0b) — one `gh issue view <n> --json state,stateReason,labels,comments` read finds
-     it `CLOSED`, `guild:done` and carrying a `<!-- guild:closed-as-decided -->` comment (any
-     `stateReason` — a decision not to do it is still finished). The marker is what tells it from a
-     split parent, which this script cannot see — and the same read finds the third source (0.99.2):
-     a split parent whose integration passed and the human closed (`guild:done` · `CLOSED`/`COMPLETED` · an `<!-- guild:integration:output -->` comment · no PR of its own) — measured #161: Done by hand, `Needs human` left on the card.
+     (the engine's close-as-decided answer) — one `gh issue view <n> --json state,labels,comments` read finds
+     it `CLOSED` and carrying a `<!-- guild:closed-as-decided -->` comment (any
+     `stateReason` — a decision not to do it is still finished), and the engine's own state on this
+     machine says it was closed as decided.
      ⚠ **`"read": false`, unlike `--reset`.** A read is `item-list` at the board's size —
      ~500 GraphQL points on a 500-card board, every sync — while `read: false` costs one
      idempotent `item-add` (~5 points) per listed card. A sync lists a handful.
@@ -132,7 +133,6 @@ When step 5 wrote, append ` · board done <k − col_failed>`; when it listed (`
 ## Hard rules
 
 - **Never catch up a `stale` member**, never rebase, never force — the script refuses all three.
-- **A request to resolve a `conflict` is worked in a Guild worktree, never in the human's checkout** — `review.md`'s worktree for that member's PR; the `conflict` line names the conflicted paths, not a worktree (stack_sync stops before creating one) (measured #1889: `git switch` + `git merge` in the human's checkout).
 - **No hand-made edits around the script**: no manual retarget or `gh pr ready` — except the
   human's own `gh pr ready` on a `draft-held` PR after `/gld dev <n>`.
 - **The board gets `Done` and nothing else** — only for the `done-cards` members, only the column

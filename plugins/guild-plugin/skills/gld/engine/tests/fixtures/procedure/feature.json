@@ -1,0 +1,17 @@
+{
+  "format": 1,
+  "template": "feature",
+  "version": "fixture-1",
+  "description": "TEST FIXTURE: a feature template with two reviews; the real one is U15's.",
+  "steps": [
+    {"id": "design", "role": "tech-lead", "inputs": ["docs/specs/{issue}/analysis.md"], "outputs": ["docs/specs/{issue}/design.md"]},
+    {"id": "test-cases", "role": "tester", "inputs": ["docs/specs/{issue}/design.md"], "outputs": ["docs/specs/{issue}/test-cases.md"]},
+    {"id": "setup", "run": "setup"},
+    {"id": "developer", "role": "developer", "inputs": ["docs/specs/{issue}/design.md", "docs/specs/{issue}/test-cases.md"], "outputs": []},
+    {"id": "test", "run": "test", "on_fail": {"back_to": "developer", "max": 3}},
+    {"id": "review", "role": "auditor", "inputs": ["in:review.diff", "docs/specs/{issue}/design.md"], "outputs": ["docs/specs/{issue}/review-auditor.md"], "checks": ["diff-review"], "on_fail": {"back_to": "developer", "max": 2}},
+    {"id": "review-tests", "role": "tester", "inputs": ["in:review.diff"], "outputs": ["docs/specs/{issue}/review-tester.md"], "checks": ["diff-review"], "on_fail": {"back_to": "developer", "max": 2}},
+    {"id": "verify-gate", "run": "verify-gate", "on_fail": {"back_to": "developer", "max": 2}},
+    {"id": "pr", "op": "create-pr"}
+  ]
+}

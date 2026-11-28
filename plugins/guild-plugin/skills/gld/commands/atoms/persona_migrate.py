@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# guild-plugin (U0 note -> U15): writes .claude/agents/*.md (a stable-Guild path); the experimental
+# edition only READS role files until stage 6. Behaviour unchanged; U15 decides the replacement.
+# See RENAME_EXCEPTIONS.md.
 """Draw the central/local boundary in an existing persona file.
 
 `update` refreshes the region between `<!-- guild:persona:start -->` and

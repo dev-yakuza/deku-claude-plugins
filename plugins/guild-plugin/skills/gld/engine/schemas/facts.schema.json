@@ -1,0 +1,351 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "gld/facts",
+  "title": "facts.json — what the engine itself observed for one attempt (design §7.2-3, §9.3)",
+  "description": "runs/<step>/<attempt>/facts.json. Engine only. JUDGMENT facts (exit_code, changed_files, start_head, start_tree, end_tree, outputs, session.init) must be present: failing to collect one is an `infra` stop (§9.3) — so they are required keys. MEASUREMENT facts (duration, cost, tokens, model, effort, denials) may be null with a `warnings` entry (§9.3). Range for changed files: merge-base(base_sha, HEAD)..HEAD + uncommitted + untracked non-ignored; a rename lists both paths (§7.12 S5).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["format", "issue", "step", "attempt", "kind", "base_sha", "merge_base", "start_head", "end_head", "start_tree", "end_tree", "exit_code", "changed_files", "outputs", "session", "warnings"],
+  "properties": {
+    "format": {"const": 1},
+    "issue": {"type": "integer", "minimum": 1},
+    "step": {"$ref": "#/$defs/name"},
+    "attempt": {"type": "integer", "minimum": 1},
+    "kind": {"enum": ["role", "run", "check", "op", "leader"], "description": "codes.AttemptKind (leader = a stage-2 needs_leader call, leader/<k>/)."},
+    "started_at": {"anyOf": [{"$ref": "#/$defs/ts"}, {"type": "null"}]},
+    "ended_at": {"anyOf": [{"$ref": "#/$defs/ts"}, {"type": "null"}]},
+    "duration_s": {"type": ["number", "null"]},
+    "base_sha": {"$ref": "#/$defs/sha"},
+    "merge_base": {"$ref": "#/$defs/sha"},
+    "start_head": {"$ref": "#/$defs/sha"},
+    "end_head": {"$ref": "#/$defs/sha"},
+    "start_tree": {"$ref": "#/$defs/tree"},
+    "end_tree": {"$ref": "#/$defs/tree"},
+    "exit_code": {"type": ["integer", "null"], "description": "Process exit code (claude or the run command). null only for check/op steps with no process."},
+    "changed_files": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["path", "change", "from", "where"],
+        "properties": {
+          "path": {"type": "string", "minLength": 1},
+          "change": {"enum": ["added", "modified", "deleted", "renamed", "copied", "type-changed"]},
+          "from": {"type": ["string", "null"], "description": "Original path of a rename/copy (both paths count as changed)."},
+          "where": {"enum": ["committed", "worktree", "untracked"]}
+        }
+      }
+    },
+    "commits": {
+      "type": "array",
+      "description": "Commits made during this attempt (start_head..end_head).",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["sha", "subject"],
+        "properties": {"sha": {"$ref": "#/$defs/sha"}, "subject": {"type": "string"}}
+      }
+    },
+    "outputs": {
+      "type": "array",
+      "description": "One entry per declared output path (globs expanded).",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["path", "exists", "regular"],
+        "properties": {
+          "path": {"type": "string"},
+          "exists": {"type": "boolean"},
+          "regular": {"type": "boolean", "description": "Committed blob mode 100644/100755 (or a regular file before the engine commit)."},
+          "blob": {"anyOf": [{"$ref": "#/$defs/sha"}, {"type": "null"}]},
+          "schema_ok": {"type": ["boolean", "null"]}
+        }
+      }
+    },
+    "control_files": {
+      "anyOf": [
+        {"type": "null"},
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["ok", "changed"],
+          "description": "Cumulative comparison against base (procedure.yaml: against the engine's last commit), HEAD tree and worktree (§7.12 S3).",
+          "properties": {"ok": {"type": "boolean"}, "changed": {"type": "array", "items": {"type": "string"}}}
+        }
+      ]
+    },
+    "ownership": {
+      "anyOf": [
+        {"type": "null"},
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["ok", "foreign"],
+          "properties": {
+            "ok": {"type": "boolean"},
+            "foreign": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["path", "owner_step"],
+                "properties": {"path": {"type": "string"}, "owner_step": {"$ref": "#/$defs/name"}}
+              }
+            }
+          }
+        }
+      ]
+    },
+    "judge_writes_outside": {"type": ["array", "null"], "items": {"type": "string"}, "description": "Judge role: changed paths outside its outputs (security-boundary stop when non-empty)."},
+    "reentry": {
+      "anyOf": [
+        {"type": "null"},
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["forward_only", "dirty_files"],
+          "properties": {"forward_only": {"type": "boolean"}, "dirty_files": {"type": "array", "items": {"type": "string"}}}
+        }
+      ]
+    },
+    "session": {
+      "anyOf": [
+        {"type": "null"},
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["end", "structured_output", "stream_file"],
+          "description": "Role steps only (null otherwise). Parsed from the stream-json the engine recorded.",
+          "properties": {
+            "session_id": {"type": ["string", "null"]},
+            "cli_version": {"type": ["string", "null"]},
+            "init": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["ok", "mismatches"],
+              "description": "Earlier engines only: system/init compared with fixed CLI-specific lists (§7.6). Removed by FC decision D (2026-11-28) — never written now, allowed so that an earlier attempt's facts still read; nothing reads it.",
+              "properties": {"ok": {"type": "boolean"}, "mismatches": {"type": "array", "items": {"type": "string"}}}
+            },
+            "end": {"enum": ["completed", "budget", "wall-clock", "no-output", "error"]},
+            "structured_output": {"type": "boolean", "description": "Whether the result event carried a structured output."},
+            "stream_file": {"type": "string"},
+            "model": {"type": ["string", "null"]},
+            "effort": {"type": ["string", "null"]},
+            "escalation": {
+              "anyOf": [
+                {"type": "null"},
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["base", "returns", "raised", "capped"],
+                  "description": "Stage 3 (E26, ladder.raised): the retry raise of this session. null / absent = stage 1–2 or a step that is never raised.",
+                  "properties": {
+                    "base": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": ["model", "effort", "layer"],
+                      "properties": {"model": {"type": "string"}, "effort": {"type": "string"}, "layer": {"enum": ["plugin-default", "plan", "leader"]}}
+                    },
+                    "returns": {"type": "integer", "minimum": 0},
+                    "raised": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": ["effort", "model"],
+                      "properties": {
+                        "effort": {"type": ["array", "null"], "minItems": 2, "maxItems": 2, "items": {"type": "string"}, "description": "[from, to] or null."},
+                        "model": {"type": ["array", "null"], "minItems": 2, "maxItems": 2, "items": {"type": "string"}, "description": "[from, to] or null."}
+                      }
+                    },
+                    "capped": {"type": "boolean", "description": "A rung was due and the allow-list had none left (R1-38: no stop)."}
+                  }
+                }
+              ]
+            },
+            "cost_usd": {"type": ["number", "null"], "description": "result.total_cost_usd"},
+            "cache_read_input_tokens": {"type": ["integer", "null"]},
+            "cache_creation_input_tokens": {"type": ["integer", "null"]},
+            "num_turns": {"type": ["integer", "null"]},
+            "permission_denials": {
+              "type": ["array", "null"],
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["tool_name"],
+                "properties": {"tool_name": {"type": "string"}, "tool_input": {"type": "object"}}
+              }
+            }
+          }
+        }
+      ]
+    },
+    "run": {
+      "anyOf": [
+        {"type": "null"},
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["name", "exit_code", "timed_out", "log_file"],
+          "properties": {
+            "name": {"$ref": "#/$defs/name"},
+            "exit_code": {"type": ["integer", "null"], "description": "Stage 3 plugin runs judged by the engine (EVIDENCE_COMMANDS, GIT_FACT_COMMANDS): 0 = the step's condition holds, 1 = not; the commands' own exit codes are head / head_rerun / base_run."},
+            "timed_out": {"type": "boolean"},
+            "log_file": {"type": "string"},
+            "rerun": {"anyOf": [{"type": "null"}, {"$ref": "#/$defs/rerun"}], "description": "I8: the same tree once more after a failure (flaky mark)."},
+            "base_run": {"anyOf": [{"type": "null"}, {"$ref": "#/$defs/rerun"}], "description": "I8: once on a fresh worktree of the recorded base (base-red mark). Stage 3: repro-red always has it (the base must be green)."},
+            "base_rerun": {"anyOf": [{"type": "null"}, {"$ref": "#/$defs/rerun"}], "description": "Evidence runs (K8-2): the second run on the same base tree after a red or timed out base_run — base-red only when both are red. null = base_run was green, was not run, or left the base tree dirty."},
+            "head": {"anyOf": [{"type": "null"}, {"$ref": "#/$defs/rerun"}], "description": "Stage 3 evidence runs (codes.EVIDENCE_COMMANDS): the repository's `test` command on the OVERLAY tree (review-q0 D1). null = not run (the scope failed first)."},
+            "head_rerun": {"anyOf": [{"type": "null"}, {"$ref": "#/$defs/rerun"}], "description": "The second run on the same overlay tree. repro-red (review-q0 D10): after a red `test` — both must be red; a timeout is never red. safety-net-proof (VW4 O1, K8-2): after any run that was not green (red, timed out, or a red `setup`) on a clean tree — green the second time passes (head_flaky), else the first path decides. null = not run again (green, a dirty tree, or a repro timeout)."},
+            "head_flaky": {"type": "boolean", "description": "Evidence runs (VW4 O1): safety-net-proof was not green, then green on the same overlay tree, and passed. Shown to the done-gate leader (runs[].flaky), in the log (warning, attempt-end data.flaky) and in the PR body. Always false for repro-red; absent in facts of an older engine (= false)."},
+            "evidence": {"anyOf": [{"type": "null"}, {"$ref": "#/$defs/evidence"}]},
+            "paths_check": {"anyOf": [{"type": "null"}, {"$ref": "#/$defs/paths_check"}]},
+            "queue_wait_s": {"type": ["number", "null"], "minimum": 0, "description": "Stage 4 (H22, MEASUREMENT): seconds this step's repository commands waited for the machine-wide run lock (not part of any time limit). null / absent = no waiting measured."}
+          }
+        }
+      ]
+    },
+    "attempt_files": {
+      "type": ["array", "null"],
+      "description": "Stage 3 role steps: what THIS attempt changed (start_head..end_head + the end tree), docs/specs/<N>/ included, a rename as both paths. The owned files of a {path:…} step (review-q0 D2) and the scope of an evidence run (D1) are computed from it: net change of a path over the step's attempts = old_blob of the first vs new_blob of the last.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["path", "old_blob", "new_blob"],
+        "properties": {
+          "path": {"type": "string", "minLength": 1},
+          "old_blob": {"anyOf": [{"$ref": "#/$defs/sha"}, {"type": "null"}], "description": "null = the path did not exist."},
+          "new_blob": {"anyOf": [{"$ref": "#/$defs/sha"}, {"type": "null"}], "description": "null = the path is gone."}
+        }
+      }
+    },
+    "golden": {
+      "type": ["array", "null"],
+      "description": "Stage 3 (E33): baseline-image ledger rows, cumulative from base, engine-made. `reason` = the role's golden_reasons code carried over while path and blobs stay the same.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["row", "path", "from", "old_blob", "new_blob", "reason"],
+        "properties": {
+          "row": {"enum": ["A", "M", "D", "R", "C", "P"]},
+          "path": {"type": "string", "minLength": 1},
+          "from": {"type": ["string", "null"], "description": "R rows: the old path."},
+          "old_blob": {"anyOf": [{"$ref": "#/$defs/sha"}, {"type": "null"}]},
+          "new_blob": {"anyOf": [{"$ref": "#/$defs/sha"}, {"type": "null"}]},
+          "reason": {"enum": ["intended-change", "bug-fix", "new-case", "moved", "needs-regeneration", null]}
+        }
+      }
+    },
+    "outcome": {
+      "anyOf": [
+        {"type": "null"},
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["status", "code", "detail", "stop"],
+          "description": "The engine's decision for this attempt.",
+          "properties": {
+            "status": {"enum": ["pending", "ready", "running", "done", "failed", "skipped", "needs_leader", "needs_human"]},
+            "code": {"enum": ["output-format", "session-limit", "infra", "check-failed", "engine-error", null]},
+            "detail": {"type": ["string", "null"]},
+            "stop": {"type": ["string", "null"]}
+          }
+        }
+      ]
+    },
+    "warnings": {
+      "type": "array",
+      "description": "Measurement facts that could not be collected (§9.3).",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["fact", "note"],
+        "properties": {"fact": {"type": "string"}, "note": {"type": "string"}}
+      }
+    }
+  },
+  "$defs": {
+    "name": {"type": "string", "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*$", "maxLength": 64},
+    "sha": {"type": "string", "pattern": "^[0-9a-f]{40}([0-9a-f]{24})?$"},
+    "ts": {"type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]+)?Z$"},
+    "tree": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["clean", "dirty_files"],
+      "description": "clean = no tracked change and no untracked non-ignored file.",
+      "properties": {"clean": {"type": "boolean"}, "dirty_files": {"type": "array", "items": {"type": "string"}}}
+    },
+    "evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "globs", "scope", "overlay", "end_tree"],
+      "description": "Stage 3 (review-q0 D1): what an evidence run was judged on. repro-red passes when scope.ok, head and head_rerun are both red (D10) and base_run is green; safety-net-proof when scope.ok, head is green — or not green and head_rerun green on the same tree (head_flaky, VW4 O1) — and end_tree is clean.",
+      "properties": {
+        "kind": {"enum": ["repro-red", "safety-net-proof"]},
+        "globs": {"type": "array", "minItems": 1, "items": {"type": "string"}, "description": "The path rule globs (test-code / safety-net)."},
+        "scope": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["ok", "step", "attempts", "outside"],
+          "description": "The net change of the authoring step's own attempts (facts.attempt_files) stays inside the globs.",
+          "properties": {
+            "ok": {"type": "boolean"},
+            "step": {"$ref": "#/$defs/name", "description": "reproduce / safety-net."},
+            "attempts": {"type": "array", "items": {"type": "integer", "minimum": 1}},
+            "outside": {"type": "array", "items": {"type": "string"}, "description": "Paths changed outside the globs (docs/specs/<N>/ is never outside)."}
+          }
+        },
+        "overlay": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["base_sha", "head_sha", "files", "existed"],
+          "properties": {
+            "base_sha": {"$ref": "#/$defs/sha"},
+            "head_sha": {"$ref": "#/$defs/sha", "description": "Where the file blobs come from."},
+            "files": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["path", "blob", "base_blob"],
+                "properties": {
+                  "path": {"type": "string", "minLength": 1},
+                  "blob": {"anyOf": [{"$ref": "#/$defs/sha"}, {"type": "null"}], "description": "null = removed in the overlay."},
+                  "base_blob": {"anyOf": [{"$ref": "#/$defs/sha"}, {"type": "null"}]}
+                }
+              }
+            },
+            "existed": {"type": "array", "items": {"type": "string"}, "description": "safety-net-proof: overlay files that existed on base (non-empty → net-scope)."}
+          }
+        },
+        "end_tree": {"anyOf": [{"type": "null"}, {"$ref": "#/$defs/tree"}], "description": "The overlay tree after its last run, the overlay files themselves not counted (null = not run)."}
+      }
+    },
+    "paths_check": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["ok", "violations"],
+      "description": "Stage 3 verification-frozen / no-production-change: git facts only.",
+      "properties": {
+        "ok": {"type": "boolean"},
+        "violations": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["path", "change", "from"],
+            "properties": {
+              "path": {"type": "string", "minLength": 1},
+              "change": {"enum": ["added", "modified", "deleted", "renamed", "copied", "type-changed"]},
+              "from": {"type": ["string", "null"]}
+            }
+          }
+        }
+      }
+    },
+    "rerun": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["exit_code", "timed_out", "log_file"],
+      "properties": {"exit_code": {"type": ["integer", "null"]}, "timed_out": {"type": "boolean"}, "log_file": {"type": "string"}}
+    }
+  }
+}

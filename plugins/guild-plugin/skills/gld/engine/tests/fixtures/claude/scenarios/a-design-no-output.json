@@ -1,0 +1,17 @@
+{
+  "format": 1,
+  "description": "P3-A: the judge claims done but writes nothing → output-format missing-output.",
+  "stream": "../f2/r4.jsonl",
+  "init_from_argv": true,
+  "structured_output": {
+    "status": "done",
+    "outputs": [
+      "docs/specs/42/design.md"
+    ],
+    "requests": [],
+    "blocked_by": null,
+    "discoveries": [],
+    "note": "fixture"
+  },
+  "actions": []
+}

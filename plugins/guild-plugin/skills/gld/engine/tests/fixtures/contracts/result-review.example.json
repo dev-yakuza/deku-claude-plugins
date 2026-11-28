@@ -1,0 +1,29 @@
+{
+  "status": "done",
+  "outputs": [
+    "docs/specs/42/review-auditor.md"
+  ],
+  "requests": [],
+  "blocked_by": null,
+  "discoveries": [],
+  "note": "",
+  "verdict": "pass",
+  "reviewed": [
+    "src/a.py"
+  ],
+  "checks": [
+    {
+      "id": "diff-review",
+      "result": "pass",
+      "note": ""
+    }
+  ],
+  "findings": [
+    {
+      "severity": "major",
+      "file": "src/a.py",
+      "line": null,
+      "text": "naming"
+    }
+  ]
+}

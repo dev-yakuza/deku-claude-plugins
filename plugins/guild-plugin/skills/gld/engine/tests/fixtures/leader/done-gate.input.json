@@ -1,0 +1,286 @@
+{
+ "allowed": {
+  "answers": [
+   "approve",
+   "rerun",
+   "escalate"
+  ],
+  "human_answers": [
+   "approve",
+   "rerun",
+   "escalate"
+  ],
+  "human_rerun_steps": [
+   "analyze",
+   "ac-format",
+   "design",
+   "test-cases",
+   "implement",
+   "test",
+   "review",
+   "qa"
+  ],
+  "narrowed": [],
+  "rerun_steps": [
+   "analyze",
+   "ac-format",
+   "design",
+   "test-cases",
+   "implement",
+   "test",
+   "review",
+   "qa"
+  ]
+ },
+ "budget": null,
+ "call": {
+  "attempt": 1,
+  "errors": [],
+  "format_retry": 0,
+  "kind": "check",
+  "step": "done"
+ },
+ "comments": null,
+ "cost": {
+  "absolute_usd": 89.57,
+  "issue_usd": 1.5,
+  "soft_usd": 44.79
+ },
+ "counters": {
+  "done_rerun": 0,
+  "done_rerun_max": 2,
+  "leader_calls": 0,
+  "leader_calls_max": 5,
+  "on_fail_rerun_used": false,
+  "plan_rerun": 0,
+  "plan_rerun_max": 2,
+  "soft_budget_rerun_used": false
+ },
+ "docs": [
+  "docs/specs/42/analysis.md",
+  "docs/specs/42/test-cases.md",
+  "docs/specs/42/skeleton.md",
+  "docs/specs/42/manual-test-checklist.md"
+ ],
+ "done_gate": {
+  "acs": [
+   1,
+   2
+  ],
+  "comment_decisions": [
+   {
+    "answer": "continue",
+    "reason": "comment-no-effect",
+    "step": "design"
+   }
+  ],
+  "discoveries": [
+   {
+    "blocks_current_ac": false,
+    "id": "D1",
+    "kind": "bug",
+    "note": "null check missing",
+    "role": "tech-lead",
+    "where": "lib/a.dart:10"
+   }
+  ],
+  "not_checked_locally": [
+   "ios-ui — needs a simulator"
+  ],
+  "refused_writes": [
+   "implement attempt 1: Write /etc/hosts"
+  ],
+  "requests": [
+   {
+    "from_step": "design",
+    "note": "a settings screen changes",
+    "op": "add",
+    "step": "designer",
+    "trigger": "ui-change"
+   }
+  ],
+  "requirement_rows": [
+   {
+    "acs": [
+     1
+    ],
+    "requirement": "Review question types can be chosen in Settings",
+    "row": "R1"
+   },
+   {
+    "acs": [
+     2
+    ],
+    "requirement": "The choice is kept after a restart",
+    "row": "R2"
+   }
+  ],
+  "reviews": [
+   {
+    "checks": [
+     {
+      "id": "diff-review",
+      "result": "pass"
+     }
+    ],
+    "findings": [
+     {
+      "file": "lib/a.dart",
+      "line": 3,
+      "severity": "minor",
+      "text": "naming"
+     }
+    ],
+    "role": "tech-lead",
+    "step": "review",
+    "verdict": "pass"
+   },
+   {
+    "checks": [
+     {
+      "id": "qa-acceptance",
+      "result": "pass"
+     }
+    ],
+    "findings": [],
+    "role": "qa",
+    "step": "qa",
+    "verdict": "pass"
+   }
+  ],
+  "runs": [
+   {
+    "base_red": false,
+    "exit_code": 0,
+    "flaky": false,
+    "name": "ac-format",
+    "quarantined": 1,
+    "step": "ac-format"
+   },
+   {
+    "base_red": false,
+    "exit_code": 0,
+    "flaky": false,
+    "name": "test",
+    "quarantined": 1,
+    "step": "test"
+   }
+  ],
+  "verification_paths_changed": [
+   "test/settings_test.dart"
+  ]
+ },
+ "format": 1,
+ "in_files": [
+  "issue.md",
+  "review.diff",
+  "leader-decision.md"
+ ],
+ "issue": 42,
+ "mode": "attended",
+ "plan_gate": null,
+ "situation": "done-gate",
+ "stage": 2,
+ "steps": [
+  {
+   "attempts": 1,
+   "id": "analyze",
+   "kind": "role",
+   "name": "requirements-engineer",
+   "on_fail_count": 0,
+   "on_fail_max": null,
+   "status": "done"
+  },
+  {
+   "attempts": 1,
+   "id": "ac-format",
+   "kind": "run",
+   "name": "ac-format",
+   "on_fail_count": 0,
+   "on_fail_max": 2,
+   "status": "done"
+  },
+  {
+   "attempts": 1,
+   "id": "plan",
+   "kind": "check",
+   "name": "plan-gate",
+   "on_fail_count": 0,
+   "on_fail_max": null,
+   "status": "done"
+  },
+  {
+   "attempts": 1,
+   "id": "design",
+   "kind": "role",
+   "name": "tech-lead",
+   "on_fail_count": 0,
+   "on_fail_max": null,
+   "status": "done"
+  },
+  {
+   "attempts": 1,
+   "id": "test-cases",
+   "kind": "role",
+   "name": "tester",
+   "on_fail_count": 0,
+   "on_fail_max": null,
+   "status": "done"
+  },
+  {
+   "attempts": 1,
+   "id": "implement",
+   "kind": "role",
+   "name": "developer",
+   "on_fail_count": 0,
+   "on_fail_max": 2,
+   "status": "done"
+  },
+  {
+   "attempts": 1,
+   "id": "test",
+   "kind": "run",
+   "name": "test",
+   "on_fail_count": 0,
+   "on_fail_max": 2,
+   "status": "done"
+  },
+  {
+   "attempts": 1,
+   "id": "review",
+   "kind": "role",
+   "name": "tech-lead",
+   "on_fail_count": 0,
+   "on_fail_max": 2,
+   "status": "done"
+  },
+  {
+   "attempts": 1,
+   "id": "qa",
+   "kind": "role",
+   "name": "qa",
+   "on_fail_count": 0,
+   "on_fail_max": 2,
+   "status": "done"
+  },
+  {
+   "attempts": 0,
+   "id": "done",
+   "kind": "check",
+   "name": "done-gate",
+   "on_fail_count": 0,
+   "on_fail_max": null,
+   "status": "running"
+  },
+  {
+   "attempts": 0,
+   "id": "pr",
+   "kind": "op",
+   "name": "create-pr",
+   "on_fail_count": 0,
+   "on_fail_max": null,
+   "status": "pending"
+  }
+ ],
+ "stopped": null
+}

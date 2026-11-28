@@ -1,0 +1,9 @@
+Lay the **safety net**: characterisation tests that pin the behaviour the code has today, before anything is changed. Your inputs are `analysis.md` and `test-cases.md` — the cases tagged `(safety net)` are the list you must cover (plus `skeleton.md` when the refactor's target structure is among your inputs).
+
+Rules the engine checks right after you (the `safety-net-proof` step):
+- **New files only, with the repository's safety-net names.** Write every test in a new file whose path is under Outputs below. Never add a test to an existing test file, never change an existing file (production code, tests, goldens, configuration) — that fails the step (`net-scope`).
+- **Green on today's code, without writing anything.** The engine runs the repository's `test` command on the recorded base plus your new files only. Every test must pass there, and the run must not write a snapshot or an image (a newly written snapshot is a dirty tree and fails the step): pin values with explicit assertions. Run your new tests yourself before you finish and put the raw summary line(s) in `note`. A net test that is red on today's code pins something the code does not do — fix the test, never the code.
+- **Public behaviour only.** Test through the public interface: no private functions, no mocks of the code's own internals, no structural snapshots. Each test must fail if its behaviour broke. A behaviour that looks like a bug is not pinned: report it in `discoveries` (`kind: bug`, where, what you saw) and leave it out.
+- **Frozen afterwards.** From the next step on these files may not change, so get their imports and names right now.
+
+Commit the new files. A `(safety net)` case that no runner here can host (it needs a device, a visual comparison the sandbox cannot run, a seam the code does not have) is not faked: list it in `note` with the seam it would need. When this step was returned, fix exactly the listed problem in your net files.

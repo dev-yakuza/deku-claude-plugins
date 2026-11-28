@@ -1,0 +1,77 @@
+{
+ "situation": "done-gate",
+ "kind": "check",
+ "step": "done",
+ "allowed": {
+  "answers": [
+   "approve",
+   "rerun",
+   "escalate"
+  ],
+  "rerun_steps": [
+   "analyze",
+   "ac-format",
+   "design",
+   "test-cases",
+   "implement",
+   "test",
+   "review",
+   "qa"
+  ],
+  "human_answers": [
+   "approve",
+   "rerun",
+   "escalate"
+  ],
+  "human_rerun_steps": [
+   "analyze",
+   "ac-format",
+   "design",
+   "test-cases",
+   "implement",
+   "test",
+   "review",
+   "qa"
+  ],
+  "narrowed": []
+ },
+ "ids": {
+  "ac_ids": [
+   1,
+   2
+  ],
+  "discovery_ids": []
+ },
+ "checklist_acs": [
+  2
+ ],
+ "engine": {
+  "answer": "rerun",
+  "step": "implement",
+  "reason": "real-defect",
+  "failed": null,
+  "stop": null,
+  "cost_usd": 0.003129
+ },
+ "argv_flags": [
+  "--output-format",
+  "--verbose",
+  "--setting-sources",
+  "--disable-slash-commands",
+  "--strict-mcp-config",
+  "--mcp-config",
+  "--permission-mode",
+  "--permission-prompts",
+  "--settings",
+  "--tools",
+  "--model",
+  "--effort",
+  "--max-budget-usd",
+  "--json-schema",
+  "--append-system-prompt"
+ ],
+ "model_effort": [
+  "haiku",
+  "low"
+ ]
+}

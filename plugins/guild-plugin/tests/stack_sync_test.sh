@@ -18,7 +18,6 @@
 set -uo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 SYNC="$HERE/../skills/gld/commands/atoms/stack_sync.py"
-RENDER="$HERE/../skills/gld/commands/atoms/render_supervisor.py"
 [ -f "$SYNC" ] || { echo "missing: $SYNC" >&2; exit 1; }
 PY="${PY:-python3}"
 WORK="$(mktemp -d)" || { echo "mktemp -d failed" >&2; exit 1; }
@@ -77,9 +76,7 @@ elif a[:2] == ["issue", "view"]:
         q = a[a.index("--jq") + 1]
         if "closed-as-decided" not in q or "length" not in q:
             sys.stderr.write("stub: unexpected --jq %r\n" % q); sys.exit(2)
-        # 0.99.2 A5 — DONE_JQ also reads stateReason and the integration:output count.
-        payload = {"state": it.get("state", "OPEN"), "stateReason": it.get("stateReason"),
-                   "labels": [{"name": l} for l in it["labels"]],
+        payload = {"state": it.get("state", "OPEN"), "labels": [{"name": l} for l in it["labels"]],
                    "comments": [{"body": c} for c in it.get("comments", [])]}
         import shutil
         if shutil.which("jq"):
@@ -89,12 +86,9 @@ elif a[:2] == ["issue", "view"]:
             if p.returncode != 0:
                 sys.stderr.write(p.stderr); sys.exit(1)
             sys.stdout.write(p.stdout); sys.exit(0)
-        print(json.dumps({"state": payload["state"], "stateReason": payload["stateReason"],
-                          "labels": list(it["labels"]),
+        print(json.dumps({"state": payload["state"], "labels": list(it["labels"]),
                           "decided": sum(1 for c in it.get("comments", [])
-                                         if "<!-- guild:closed-as-decided -->" in c),
-                          "integrated": sum(1 for c in it.get("comments", [])
-                                            if "<!-- guild:integration:output -->" in c)}))
+                                         if "<!-- guild:closed-as-decided -->" in c)}))
         sys.exit(0)
     print(json.dumps({"body": it.get("body", ""), "labels": [{"name": l} for l in it["labels"]],
                       "state": it.get("state", "OPEN"), "stateReason": it.get("stateReason")}))
@@ -148,8 +142,9 @@ new_scenario() {
   git clone -q "$O" "$R"
   mkdir -p "$R/.claude/guild"
   printf '{"commands":{"test":"touch verified.txt","lint":null,"typecheck":null}}\n' \
-    > "$R/.claude/guild/config.json"
+    > "$R/.claude/guild/harness.json"
   : > "$S/calls.txt"
+  export GLD_ENGINE_HOME="$S/ehome"
 }
 # commit_on <branch> <from> <file> <content> — in the helper clone, pushed
 commit_on() {
@@ -165,8 +160,46 @@ squash_merge() {
 sha() { git --git-dir "$O" rev-parse "refs/heads/$1"; }
 # pull_ref <pr> <sha> — GitHub keeps every PR head at refs/pull/<n>/head
 pull_ref() { git --git-dir "$O" update-ref "refs/pull/$1/head" "$2"; }
-# write_state <json> — the gh stub's world
-write_state() { printf '%s' "$1" > "$S/state.json"; }
+# engine_state <issue> done|nopr|closed|stopped|pending|none [worktree] — that member's engine state.json
+# (the REAL engine.py reads it: stack_sync asks `engine.py status --json`, never a label).
+engine_state() {
+  "$PY" - "$S/ehome/records/acme/app/$1" "$@" <<'PYE'
+import json, os, shutil, sys
+d, n, kind = sys.argv[1], int(sys.argv[2]), sys.argv[3]
+shutil.rmtree(d, ignore_errors=True)
+if kind == "none":
+    raise SystemExit(0)
+os.makedirs(d)
+ok = kind in ("done", "nopr", "closed")
+st = {"format": 1, "issue": n, "revision": 1, "last_head": "a" * 40, "repo": "acme/app", "mode": "unattended",
+      "base_sha": "a" * 40,
+      "steps": [{"id": "analyze", "status": "done", "latest_attempt": 1},
+                {"id": "pr", "status": "skipped" if kind == "closed" else "done" if ok else "pending",
+                 "latest_attempt": 1 if ok else None, **({"reason": "closed-as-decided"} if kind == "closed" else {})}],
+      "github": {"summary_comment_id": None, "engine_comment_ids": [], "last_seen_comment_id": None,
+                 "pr_number": 900 + n if kind in ("done", "stopped") else None, "pr_url": None},
+      "stop": None}
+if kind == "stopped":
+    st["stop"] = {"status": "needs_human", "reason": "blocked", "step": "pr", "attempt": 1, "at": "2026-11-25T01:02:03Z"}
+if kind == "closed":
+    st["closed"] = {"reason": "completed", "comment_id": 1, "at": "2026-11-25T01:02:03Z"}
+if len(sys.argv) > 4:
+    st["git"] = {"git_dir": "/x", "common_dir": "/x", "work_tree": sys.argv[4], "main_checkout": "/x"}
+with open(os.path.join(d, "state.json"), "w") as f:
+    json.dump(st, f)
+PYE
+}
+# write_state <json> — the gh stub's world. An Issue it labels guild:done is one the engine finished on this
+# machine (the label itself means nothing to stack_sync any more).
+write_state() {
+  printf '%s' "$1" > "$S/state.json"
+  local n kind
+  while read -r n kind; do [ -n "$n" ] && engine_state "$n" "$kind"; done <<EOF
+$("$PY" -c 'import json,sys
+for n, i in json.load(open(sys.argv[1]))["issues"].items():
+    if "guild:done" in i.get("labels", []): print(n, "closed" if any("closed-as-decided" in c for c in i.get("comments", [])) else "done")' "$S/state.json")
+EOF
+}
 tracker_body() {   # rows: "<issue>:<base dep or ->" ...
   local rows="" r
   for r in "$@"; do
@@ -183,7 +216,7 @@ pair_state() {
      {\"number\":102,\"state\":\"OPEN\",\"headRefName\":\"feature/#12-member\",\"baseRefName\":\"main\",\"mergeCommit\":null,\"isDraft\":$1,\"body\":\"$STACK_BODY\",\"closingIssuesReferences\":[{\"number\":12}]}]}"
 }
 sync() {   # sync [args…] → stdout; rc in $RC
-  OUT="$(cd "$R" && STUB_STATE="$S/state.json" STUB_REMOTE="$O" STUB_CALLS="$S/calls.txt" \
+  OUT="$(cd "$R" && STUB_STATE="$S/state.json" STUB_REMOTE="$O" STUB_CALLS="$S/calls.txt" GLD_ENGINE_HOME="$S/ehome" \
          PATH="$WORK/bin:$PATH" "$PY" "$SYNC" --tracker 10 "$@" 2>"$S/err")"; RC=$?
 }
 # standard: #11 squash-merged; #12 stacked on it, done, draft with the stack marker
@@ -297,7 +330,7 @@ import json, sys; p = sys.argv[1]; s = json.load(open(p))
 s["prs"][1].update(isDraft=True, baseRefName="feature/#11-dep")
 json.dump(s, open(p, "w"))
 EOF
-printf '{"commands":{"test":null}}\n' > "$R/.claude/guild/config.json"
+printf '{"commands":{"test":null}}\n' > "$R/.claude/guild/harness.json"
 sync
 eq "no verification command: a merge-commit member is still retargeted and readied" "$OUT" "12 synced #11 retarget+ready"
 
@@ -318,7 +351,7 @@ eq "conflict: worktree cleaned up" "$(git -C "$R" worktree list | wc -l | tr -d 
 
 # verify-failed: nothing is pushed
 standard s5
-printf '{"commands":{"test":"false","lint":null}}\n' > "$R/.claude/guild/config.json"
+printf '{"commands":{"test":"false","lint":null}}\n' > "$R/.claude/guild/harness.json"
 BEFORE="$(sha 'feature/#12-member')"
 sync
 has "verify-failed: reported with the log" "$OUT" "12 verify-failed #11 "
@@ -327,9 +360,23 @@ eq "verify-failed: no retarget or ready" "$(cat "$S/calls.txt")" ""
 
 # a member still in the spine is not touched
 standard s6
-"$PY" - "$S/state.json" <<'EOF'
-import json, sys; p = sys.argv[1]; s = json.load(open(p)); s["issues"]["12"]["labels"] = ["guild:test"]; json.dump(s, open(p, "w"))
+for K in stopped pending nopr none; do      # …whatever its labels say (they still carry guild:done here)
+  engine_state 12 "$K"
+  sync
+  eq "engine facts: $K → skipped, the label decides nothing" "$OUT" "12 skipped #11 not-done"
+done
+engine_state 12 done
+mkdir -p "$S/ehome/records/acme/app/12"
+"$PY" - "$S/ehome/records/acme/app/12/lock" <<'EOF'
+import json, os, subprocess, sys
+pid = os.getppid()
+start = " ".join(subprocess.run(["ps", "-o", "lstart=", "-p", str(pid)], capture_output=True, text=True,
+                                env={"PATH": "/bin:/usr/bin", "LC_ALL": "C", "LANG": "C"}).stdout.split())
+json.dump({"format": 1, "pid": pid, "started": start, "issue": 12}, open(sys.argv[1], "w"))
 EOF
+sync
+eq "engine facts: an engine is running on it → skipped" "$OUT" "12 skipped #11 not-done"
+engine_state 12 pending
 sync
 eq "not-done: skipped" "$OUT" "12 skipped #11 not-done"
 sync --check
@@ -343,6 +390,24 @@ sync
 # (git prints the realpath — /private/var on macOS — so match the tail)
 case "$OUT" in "12 skipped #11 branch-checked-out "*/s7/repo) ok "checked out: skipped, naming the checkout that holds it" ;;
   *) bad "checked out: skipped, naming the checkout" "got [$OUT]" ;; esac
+
+# …but the member's own kept engine worktree is expected to hold it: synced, the worktree left as it is
+standard s7b
+git -C "$R" fetch -q origin
+git -C "$R" worktree add -q -b "feature/#12-member" "$S/.gld-app-12" "origin/feature/#12-member"
+engine_state 12 done "$S/.gld-app-12"
+OWN="$(git -C "$S/.gld-app-12" rev-parse HEAD)"; BEFORE="$(sha 'feature/#12-member')"
+sync
+eq "engine worktree: synced" "$OUT" "12 synced #11 merge+retarget+ready"
+[ "$(sha 'feature/#12-member')" != "$BEFORE" ] && ok "engine worktree: the remote branch got the merge" || bad "engine worktree" "remote not moved"
+eq "engine worktree: its HEAD and tree are untouched" "$(git -C "$S/.gld-app-12" rev-parse HEAD)|$(git -C "$S/.gld-app-12" status --porcelain)" "$OWN|"
+engine_state 12 done "$S/somewhere-else"
+standard s7c
+git -C "$R" fetch -q origin
+git -C "$R" worktree add -q -b "feature/#12-member" "$S/.gld-app-12" "origin/feature/#12-member"
+engine_state 12 done "$S/somewhere-else"
+sync
+has "another worktree than the engine's own: skipped" "$OUT" "12 skipped #11 branch-checked-out "
 
 # a draft the human made (no stack marker) is never marked ready
 standard s8
@@ -400,7 +465,7 @@ eq "local ahead: local branch left where it was" "$(git -C "$R" rev-parse 'featu
 
 # verification that rewrites a tracked file verified a different tree — nothing is pushed
 standard s16
-printf '{"commands":{"test":"cp base.txt b.txt"}}\n' > "$R/.claude/guild/config.json"
+printf '{"commands":{"test":"cp base.txt b.txt"}}\n' > "$R/.claude/guild/harness.json"
 BEFORE="$(sha 'feature/#12-member')"
 sync
 has "verify rewrote a tracked file: refused" "$OUT" "12 verify-failed #11 verification changed tracked files"
@@ -409,7 +474,7 @@ has "verify rewrote a tracked file: the kept worktree is reported on stdout" "$O
 
 # verification leaving untracked, non-ignored output (coverage, junit) is not a kept worktree
 standard s41
-printf '{"commands":{"test":"touch coverage.out"}}\n' > "$R/.claude/guild/config.json"
+printf '{"commands":{"test":"touch coverage.out"}}\n' > "$R/.claude/guild/harness.json"
 sync
 eq "untracked verification output: synced, nothing kept" "$OUT" "12 synced #11 merge+retarget+ready"
 
@@ -786,7 +851,7 @@ import json, sys; p = sys.argv[1]; s = json.load(open(p)); s["issues"]["10"]["la
 EOF
 sync --check
 eq "not a sprint tracker: refused (64)" "$RC" "64"
-printf '{"commands":{"test":null,"lint":null}}\n' > "$R/.claude/guild/config.json"
+printf '{"commands":{"test":null,"lint":null}}\n' > "$R/.claude/guild/harness.json"
 "$PY" - "$S/state.json" <<'EOF'
 import json, sys; p = sys.argv[1]; s = json.load(open(p)); s["issues"]["10"]["labels"] = ["guild:sprint"]; json.dump(s, open(p, "w"))
 EOF
@@ -802,7 +867,7 @@ eq "no verification command: --check exit 0" "$RC" "0"
 eq "no verification command: --check says the sync would refuse (daily must not promise it)" "$OUT" \
   "12 error #11 config.commands has no test/lint/typecheck command — refusing to sync unverified"
 # A sentinel, not a destructive payload: if the guard ever regresses, this is what runs.
-printf '{"commands":{"test":"true; touch %s/pwned"}}\n' "$S" > "$R/.claude/guild/config.json"
+printf '{"commands":{"test":"true; touch %s/pwned"}}\n' "$S" > "$R/.claude/guild/harness.json"
 sync
 eq "verify command with a metacharacter: the member is refused, nothing pushed" "$OUT|$(sha 'feature/#12-member')" \
   "12 error #11 config.commands value 'true; touch $S/pwned' contains shell metacharacters (init.md:163)|$BEFORE"
@@ -810,8 +875,7 @@ eq "verify command with a metacharacter: the member is refused, nothing pushed" 
   || bad "verify command with a metacharacter" "the payload ran"
 
 M1="$("$PY" -c "import sys; sys.dont_write_bytecode=True; sys.path.insert(0, '$(dirname "$SYNC")'); import stack_sync; print(stack_sync._METACHAR.pattern)")"
-M2="$("$PY" -c "import sys; sys.path.insert(0, '$(dirname "$RENDER")'); sys.dont_write_bytecode=True; import render_supervisor; print(render_supervisor._METACHAR.pattern)")"
-eq "the metacharacter class is the renderer's (init.md:163)" "$M1" "$M2"
+eq "the metacharacter class is init.md:163's list" "$M1" '\$\(|`|&&|\|\||[|;<>&\n]'
 
 echo "── stack_sync: --done-cards (sync.md board step) ──"
 # mutate <python statements on `st`> — edit the stub's world in place
@@ -850,7 +914,7 @@ write_state "{\"issues\":{\"10\":{\"labels\":[\"guild:sprint\"],\"body\":\"$(tra
   \"11\":{\"labels\":[\"guild:done\"],\"state\":\"CLOSED\",\"stateReason\":\"COMPLETED\"},\"13\":{\"labels\":[\"guild:done\"],\"state\":\"CLOSED\",\"stateReason\":\"COMPLETED\"}},
   \"prs\":[{\"number\":101,\"state\":\"MERGED\",\"headRefName\":\"feature/#11-a\",\"headRefOid\":\"x\",\"baseRefName\":\"main\",\"mergeCommit\":{\"oid\":\"y\"},\"isDraft\":false,\"closingIssuesReferences\":[{\"number\":11}]},
    {\"number\":103,\"state\":\"MERGED\",\"headRefName\":\"feature/#13-b\",\"headRefOid\":\"x\",\"baseRefName\":\"main\",\"mergeCommit\":{\"oid\":\"z\"},\"isDraft\":false,\"closingIssuesReferences\":[{\"number\":13}]}]}"
-printf '{"commands":{"test":null}}\n' > "$R/.claude/guild/config.json"
+printf '{"commands":{"test":null}}\n' > "$R/.claude/guild/harness.json"
 sync --done-cards
 eq "done-cards: no stack → exit 0 (and no verification command needed)" "$RC" "0"
 eq "done-cards: no stack → the line alone, members in table order" "$OUT" "done-cards 11,13"
@@ -868,29 +932,37 @@ write_state "{\"issues\":{\"10\":{\"labels\":[\"guild:sprint\"],\"body\":\"$(tra
   \"11\":{\"labels\":[\"guild:done\"],\"state\":\"CLOSED\",\"stateReason\":\"COMPLETED\"},
   \"13\":{\"labels\":[\"guild:done\"],\"state\":\"CLOSED\",\"stateReason\":\"NOT_PLANNED\",\"comments\":[\"<!-- guild:analyze:output -->x\",\"<!-- guild:closed-as-decided -->\\n결정\\n<!-- /guild:closed-as-decided -->\"]}},
   \"prs\":[{\"number\":101,\"state\":\"MERGED\",\"headRefName\":\"feature/#11-a\",\"headRefOid\":\"x\",\"baseRefName\":\"main\",\"mergeCommit\":{\"oid\":\"y\"},\"isDraft\":false,\"closingIssuesReferences\":[{\"number\":11}]}]}"
-printf '{"commands":{"test":null}}\n' > "$R/.claude/guild/config.json"
+printf '{"commands":{"test":null}}\n' > "$R/.claude/guild/harness.json"
 export STUB_VIEWS="$S/views.txt"; : > "$STUB_VIEWS"
 sync --check --done-cards
 eq "Z6 done-cards: no PR + CLOSED/NOT_PLANNED + guild:done + marker → listed" "$(last "$OUT")" "done-cards 11,13"
 eq "Z6 done-cards: the marker read is ONE issue view of #13" "$(grep -c '^issue view 13 ' "$STUB_VIEWS")" "1"
-has "Z6 done-cards: --json state,stateReason,labels,comments (0.99.2 A5: one read, both verdicts)" "$(grep '^issue view 13 ' "$STUB_VIEWS")" "--json state,stateReason,labels,comments --jq"
+has "Z6 done-cards: --json state,labels,comments" "$(grep '^issue view 13 ' "$STUB_VIEWS")" "--json state,labels,comments --jq"
 lacks "Z6 done-cards: no gh api --paginate" "$(cat "$STUB_VIEWS" "$S/calls.txt")" "api"
 eq "Z6 done-cards: --check makes no mutating gh call" "$(cat "$S/calls.txt")" ""
 mutate 'st["issues"]["13"]["comments"]=["<!-- guild:analyze:output -->x"]'
 sync --check --done-cards
 eq "Z6 done-cards: no marker → not listed" "$(last "$OUT")" "done-cards 11"
-mutate 'st["issues"]["13"]["comments"]=["<!-- guild:closed-as-decided -->"]; st["issues"]["13"]["labels"]=["guild:analyze"]'
+mutate 'st["issues"]["13"]["comments"]=["<!-- guild:closed-as-decided -->"]'
+for K in none pending stopped done; do
+  engine_state 13 "$K"
+  sync --check --done-cards
+  eq "Z6 done-cards: marker + guild:done, but the engine did not close it ($K) → not listed" "$(last "$OUT")" "done-cards 11"
+done
+engine_state 13 closed
+mutate 'st["issues"]["13"]["labels"]=["guild:analyze"]'
 sync --check --done-cards
-eq "Z6 done-cards: marker but no guild:done → not listed" "$(last "$OUT")" "done-cards 11"
+eq "Z6 done-cards: the label decides nothing" "$(last "$OUT")" "done-cards 11,13"
 mutate 'st["issues"]["13"]["labels"]=["guild:done"]; st["issues"]["13"]["state"]="OPEN"'
 sync --check --done-cards
-eq "Z6 done-cards: marker + guild:done but still OPEN → not listed" "$(last "$OUT")" "done-cards 11"
+eq "Z6 done-cards: marker + engine closed but still OPEN → not listed" "$(last "$OUT")" "done-cards 11"
 # One PR-less member's read failing skips THAT member only — never the whole line (review r1 #5).
 mutate 'st["issues"]["13"]["state"]="CLOSED"; st["issues"]["14"]={"labels":["guild:done"],"state":"CLOSED","stateReason":"COMPLETED","comments":["<!-- guild:closed-as-decided -->"]}'
 "$PY" - "$S/state.json" "$(tracker_body 11:- 13:- 14:-)" <<'PYB'
 import json, sys
 p = sys.argv[1]; st = json.load(open(p)); st["issues"]["10"]["body"] = sys.argv[2].replace("\\n", "\n"); json.dump(st, open(p, "w"))
 PYB
+engine_state 14 closed
 sync --check --done-cards
 eq "Z6 done-cards: two decided members → both listed" "$(last "$OUT")" "done-cards 11,13,14"
 STUB_FAIL_VIEW=13 sync --check --done-cards
@@ -898,87 +970,12 @@ eq "Z6 done-cards: #13's read fails → #13 skipped, #14 still listed (no error 
 if command -v jq >/dev/null 2>&1; then
   export STUB_JQ_LOG="$S/jq.txt"; : > "$STUB_JQ_LOG"
   sync --check --done-cards
-  eq "Z6 done-cards: the REAL DONE_JQ ran over gh-shaped JSON" "$(grep -c real-jq "$STUB_JQ_LOG")|$(last "$OUT")" "2|done-cards 11,13,14"
+  eq "Z6 done-cards: the REAL DECIDED_JQ ran over gh-shaped JSON" "$(grep -c real-jq "$STUB_JQ_LOG")|$(last "$OUT")" "2|done-cards 11,13,14"
   unset STUB_JQ_LOG
 else
   bad "Z6 done-cards: real jq" "jq on PATH" "missing"
 fi
 unset STUB_VIEWS
-
-echo "── stack_sync: --done-cards — real replays (0.99.2 B2 · B9 · A5) ──"
-# real_state <fixture> <key> — the state file for --tracker 10 from a real fixture (numbers, labels,
-# states, branches as they were; comment bodies are the marker line + `x`; repo acme/app).
-real_state() {
-  "$PY" - "$HERE/fixtures/real/$1.json" "$2" "$S/state.json" <<'PYR'
-import json, sys
-d = json.load(open(sys.argv[1], encoding="utf-8")); key = sys.argv[2]
-rows = ""
-if key == "sprint630":
-    sp = d["sprint630"]; issues = {k: dict(v) for k, v in sp["issues"].items()}
-    members, prs = sp["members"], sp["prs"]
-    issues["628"]["comments"] = d["comments"]["628"]
-else:   # board-161: #649 reduced to this case's two members; #161's own read is the supplement row
-    members = [[m["number"], None] for m in d["members"]]
-    issues = {"161": {"labels": [l["name"] for l in d["supplement"]["161"]["labels"]],
-                      "state": d["supplement"]["161"]["state"], "stateReason": d["supplement"]["161"]["stateReason"],
-                      "comments": d["comments"]["161"]},
-              "638": {"labels": [l["name"] for l in d["labels_gh"][0]["labels"]], "state": "CLOSED", "stateReason": "COMPLETED"}}
-    prs = d["prs_gh"]
-for n, dep in members:
-    rows += "| x | #%d | %s | %s | |\n" % (n, "#%d" % dep if dep else "—", "#%d" % dep if dep else "—")
-issues["10"] = {"labels": ["guild:sprint"], "body": "# Sprint\n<!-- guild:sprint:plan -->\n| # | 이슈 | base 의존 | 원래 의존 | 비고 |\n|---|---|---|---|---|\n" + rows + "<!-- /guild:sprint:plan -->\n"}
-out = []
-for p in prs:
-    p = {k: p[k] for k in ("number", "state", "headRefName", "baseRefName", "closingIssuesReferences")}
-    p.update({"headRefOid": "x", "mergeCommit": {"oid": "y"}, "isDraft": False})
-    out.append(p)
-json.dump({"issues": issues, "prs": out}, open(sys.argv[3], "w"))
-PYR
-}
-# B2 — #630's real member table (#629 · #624 on #629 · #628), #628 closed as decided (the marker is
-# the fixture's — #628 closed before 0.98.7 and has none in reality)
-new_scenario rz6; real_state z6-628 sprint630
-printf '{"commands":{"test":null}}\n' > "$R/.claude/guild/config.json"
-sync --check --done-cards
-eq "B2(Z6) #630 shape + the marker → done-cards 629,624,628 (table order)" "$(last "$OUT")" "done-cards 629,624,628"
-mutate 'st["issues"]["628"]["comments"]=[c for c in st["issues"]["628"]["comments"] if "closed-as-decided" not in c]'
-sync --check --done-cards
-eq "B2(Z6) …today's real #628 (no marker) → done-cards 629,624" "$(last "$OUT")" "done-cards 629,624"
-# B9 — #161, the split parent of sprint #649: integration passed (two integration:output comments),
-# the human closed it COMPLETED, no PR of its own. Before 0.99.2: `done-cards 638` — never 161.
-new_scenario rb9; real_state board-161 -
-printf '{"commands":{"test":null}}\n' > "$R/.claude/guild/config.json"
-export STUB_VIEWS="$S/views.txt"; : > "$STUB_VIEWS"
-sync --check --done-cards
-eq "B9(A5) #161 landed split parent → done-cards 161,638 (members order)" "$(last "$OUT")" "done-cards 161,638"
-eq "B9(A5) …#161 is read ONCE" "$(grep -c '^issue view 161 ' "$STUB_VIEWS" | tr -d ' ')" "1"
-has "B9(A5) …with --json state,stateReason,labels,comments" "$(grep '^issue view 161 ' "$STUB_VIEWS")" "--json state,stateReason,labels,comments --jq"
-lacks "B9(A5) …and no gh api --paginate" "$(cat "$STUB_VIEWS" "$S/calls.txt")" "api"
-mutate 'st["issues"]["161"]["state"]="OPEN"; st["issues"]["161"]["stateReason"]=None'
-sync --check --done-cards
-eq "B9(A5) variant OPEN · guild:done · integrated (child PRs still open) → not listed" "$(last "$OUT")" "done-cards 638"
-mutate 'st["issues"]["161"]["state"]="CLOSED"; st["issues"]["161"]["stateReason"]="NOT_PLANNED"'
-sync --check --done-cards
-eq "B9(A5) variant CLOSED/NOT_PLANNED · integrated → not listed" "$(last "$OUT")" "done-cards 638"
-mutate 'st["issues"]["161"]["stateReason"]="COMPLETED"; st["issues"]["161"]["comments"]=[c for c in st["issues"]["161"]["comments"] if "integration:output" not in c]'
-sync --check --done-cards
-eq "B9(A5) variant no integration:output → not listed" "$(last "$OUT")" "done-cards 638"
-mutate 'st["issues"]["161"]["comments"]=["<!-- guild:integration:output -->\nx"]; st["issues"]["161"]["labels"]=["guild:children"]'
-sync --check --done-cards
-eq "B9(A5) variant without guild:done (2c not passed) → not listed" "$(last "$OUT")" "done-cards 638"
-unset STUB_VIEWS
-# The stub's jq-less fallback emits the same keys as the real DONE_JQ (else the new branch is
-# judged on a missing key and passes or fails for nothing).
-FBK="$("$PY" - "$SYNC" <<'PYK'
-import re, sys
-src = open(sys.argv[1], encoding="utf-8").read()
-m = re.search(r"DONE_JQ = \((.*?)\)\n", src, re.S)
-q = "".join(re.findall(r"'([^']*)'", m.group(1)))
-print(",".join(sorted(re.findall(r"(?:^\{|, )(\w+)(?=[,:}])", q))))
-PYK
-)"
-STUBK="$(grep -A6 'print(json.dumps({"state": payload\["state"\]' "$WORK/bin/gh" | grep -oE '"(state|stateReason|labels|decided|integrated)":' | tr -d '":' | sort | tr '\n' ',' | sed 's/,$//')"
-eq "B9(A5) stub fallback keys = DONE_JQ keys" "$STUBK" "$FBK"
 
 echo "── prs_by_issue: same-repository references only (0.98.3 W8) ──"
 # -B: no .pyc beside the plugin's scripts (the pycache check below).
@@ -992,10 +989,13 @@ print(" ".join("%d:%s" % (n, ",".join(str(p["number"]) for p in out[n])) for n i
 PBI
 }
 OTHER='{"number":12,"repository":{"name":"other","owner":{"login":"acme"}}}'
-eq "W8: other-repo ref only + member-number branch → branch mapping" \
-  "$(pbi "[{\"number\":201,\"state\":\"OPEN\",\"headRefName\":\"feature/#13-x\",\"closingIssuesReferences\":[$OTHER]}]")" "13:201"
-eq "W8: other-repo ref only + unrelated branch → no mapping" \
-  "$(pbi "[{\"number\":202,\"state\":\"OPEN\",\"headRefName\":\"feature/misc\",\"closingIssuesReferences\":[$OTHER]}]")" ""
+# The JSON is built in a variable first: bash 3.2 brace-expands `{\"…\",…}` inside "$(…)", which split the
+# call into several empty words and let both checks below compare "" with "" (VZ).
+PR201='[{"number":201,"state":"OPEN","headRefName":"feature/#13-x","closingIssuesReferences":['"$OTHER"']}]'
+PR202='[{"number":202,"state":"OPEN","headRefName":"feature/misc","closingIssuesReferences":['"$OTHER"']}]'
+GOT201="$(pbi "$PR201")"; GOT202="$(pbi "$PR202" 2>&1)"
+eq "W8: other-repo ref only + member-number branch → branch mapping" "$GOT201" "13:201"
+eq "W8: other-repo ref only + unrelated branch → no mapping (and no error)" "$GOT202" ""
 eq "W8: ref without repository → kept (as before)" \
   "$(pbi '[{"number":203,"state":"OPEN","headRefName":"feature/misc","closingIssuesReferences":[{"number":12}]}]')" "12:203"
 eq "W8: uppercase owner/name → the same repository" \
@@ -1038,18 +1038,10 @@ standard w4; add_fillers 1001
 sync --check
 eq "window(e'): 1000 still incomplete → its minimum in the token" "$RC:$OUT" "0:window-incomplete 501 11"
 
-echo "── supervisor wiring (run.md --draft-stacked) ──"
-RH="$WORK/render"; mkdir -p "$RH"
-rflags() { echo --tracker 99 --owner-repo acme/app --default-branch main --container "$RH/c" \
-  --human-repo "$RH" --dag-path /x/sprint_dag.py --out -; }
-eq "render: --draft-stacked → DRAFT_STACKED=1" \
-  "$("$PY" "$RENDER" $(rflags) --draft-stacked 2>/dev/null | grep -m1 '^DRAFT_STACKED=')" "DRAFT_STACKED=1"
-eq "render: default → DRAFT_STACKED=0" \
-  "$("$PY" "$RENDER" $(rflags) 2>/dev/null | grep -m1 '^DRAFT_STACKED=')" "DRAFT_STACKED=0"
-TPL="$("$PY" "$RENDER" --print-template-path)"
-has "template: a draft only for a stack base, never for the default branch" "$(cat "$TPL")" \
-  'if [ "$DRAFT_STACKED" = 1 ] && [ "$BASE_REF" != "origin/$DEFAULT_BRANCH" ]; then SPRINT_DRAFT=1; fi'
-has "template: the child receives GLD_SPRINT_DRAFT" "$(cat "$TPL")" 'GLD_SPRINT_DRAFT="$SPRINT_DRAFT"'
+echo "── the marker the sync looks for is the engine's (draft stacks, U1) ──"
+eq "STACK_MARKER = defaults.SPRINT_STACK_MARKER" \
+  "$("$PY" -I -B -c "import sys; sys.path.insert(0, '$HERE/../skills/gld/engine'); from gxengine import defaults; print(defaults.SPRINT_STACK_MARKER)")" \
+  "$("$PY" -B -c "import sys; sys.path.insert(0, '$(dirname "$SYNC")'); import stack_sync; print(stack_sync.STACK_MARKER)")"
 # Only OUR module: other suites import their own, and a shared directory check would blame this one.
 PYC="$(ls "$(dirname "$SYNC")"/__pycache__/stack_sync.* 2>/dev/null)"
 [ -z "$PYC" ] && ok "no stack_sync .pyc written beside the plugin's scripts" || bad "pycache" "$PYC"
@@ -1058,7 +1050,7 @@ echo
 echo "stack_sync: $PASS passed, $FAIL failed"
 # ⚠ Keep equal to the measured PASS count; raise it only when checks are added on purpose. A
 #   quote that swallows the rest of the file runs fewer checks and still ends green otherwise.
-SYNC_MIN_CHECKS=168
+SYNC_MIN_CHECKS=167
 if [ "$((PASS + FAIL))" -lt "$SYNC_MIN_CHECKS" ]; then
   echo "FAIL  실행된 검사가 $((PASS + FAIL))건뿐입니다 (최소 ${SYNC_MIN_CHECKS}건)."
   exit 1

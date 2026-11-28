@@ -1,0 +1,145 @@
+{
+  "format": 1,
+  "template": "safety-net",
+  "version": "exp-1",
+  "description": "Safety-net-only template (stage 3, scope §2.3, `safety_net: only`): new characterisation tests in new files only ({path:safety-net}), proven green on the recorded base by `safety-net-proof`, and no production change at all (the plugin run `no-production-change`: every change is a new safety-net file or under docs/specs/<issue>/). No design and no QA step: the pull request only adds coverage. The developer step (E5) is `safety-net`. Named commands it needs in the repository settings: setup, test, plus the plugin commands ac-coverage, safety-net-proof, no-production-change and verify-gate, and a `safety-net` path rule.",
+  "steps": [
+    {
+      "id": "test-cases",
+      "role": "tester",
+      "inputs": [
+        "docs/specs/{issue}/analysis.md",
+        "in:failure-summary.md",
+        "in:leader-decision.md"
+      ],
+      "outputs": [
+        "docs/specs/{issue}/test-cases.md"
+      ]
+    },
+    {
+      "id": "ac-coverage",
+      "run": "ac-coverage",
+      "inputs": [
+        "docs/specs/{issue}/analysis.md",
+        "docs/specs/{issue}/test-cases.md"
+      ],
+      "on_fail": {
+        "back_to": "test-cases",
+        "max": 2
+      }
+    },
+    {
+      "id": "setup",
+      "run": "setup"
+    },
+    {
+      "id": "safety-net",
+      "role": "developer",
+      "inputs": [
+        "docs/specs/{issue}/analysis.md",
+        "docs/specs/{issue}/test-cases.md",
+        "in:failure-summary.md",
+        "in:leader-decision.md",
+        "in:pr-review.md",
+        "in:blocking-discoveries.md"
+      ],
+      "outputs": [
+        "{path:safety-net}"
+      ],
+      "on_fail": {
+        "back_to": "safety-net",
+        "max": 2
+      }
+    },
+    {
+      "id": "safety-net-proof",
+      "run": "safety-net-proof",
+      "on_fail": {
+        "back_to": "safety-net",
+        "max": 2
+      }
+    },
+    {
+      "id": "no-production-change",
+      "run": "no-production-change",
+      "on_fail": {
+        "back_to": "safety-net",
+        "max": 2
+      }
+    },
+    {
+      "id": "test",
+      "run": "test",
+      "on_fail": {
+        "back_to": "safety-net",
+        "max": 2
+      }
+    },
+    {
+      "id": "review-tests",
+      "role": "tester",
+      "inputs": [
+        "in:review.diff",
+        "docs/specs/{issue}/test-cases.md",
+        "docs/specs/{issue}/analysis.md",
+        "in:leader-decision.md"
+      ],
+      "outputs": [],
+      "checks": [
+        "test-quality",
+        "net-public-behavior"
+      ],
+      "on_fail": {
+        "back_to": "safety-net",
+        "max": 2
+      }
+    },
+    {
+      "id": "review-audit",
+      "role": "auditor",
+      "inputs": [
+        "in:review.diff",
+        "docs/specs/{issue}/analysis.md",
+        "docs/specs/{issue}/test-cases.md",
+        "in:leader-decision.md"
+      ],
+      "outputs": [],
+      "checks": [
+        "diff-review"
+      ],
+      "on_fail": {
+        "back_to": "safety-net",
+        "max": 2
+      }
+    },
+    {
+      "id": "verify-gate",
+      "run": "verify-gate",
+      "on_fail": {
+        "back_to": "safety-net",
+        "max": 2
+      }
+    },
+    {
+      "id": "done-gate",
+      "check": "done-gate",
+      "inputs": [
+        "docs/specs/{issue}/analysis.md",
+        "docs/specs/{issue}/test-cases.md",
+        "in:review.diff",
+        "in:leader-decision.md"
+      ]
+    },
+    {
+      "id": "pr",
+      "op": "create-pr",
+      "inputs": [
+        "docs/specs/{issue}/analysis.md"
+      ]
+    },
+    {
+      "id": "followups",
+      "op": "create-followups"
+    }
+  ]
+}

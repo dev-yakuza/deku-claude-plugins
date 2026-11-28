@@ -1,0 +1,488 @@
+{
+ "format": 1,
+ "issue": 1938,
+ "stage": 4,
+ "situation": "done-gate",
+ "call": {
+  "kind": "check",
+  "step": "done-gate",
+  "attempt": 2,
+  "format_retry": 0,
+  "errors": []
+ },
+ "mode": "unattended",
+ "allowed": {
+  "answers": [
+   "approve",
+   "rerun",
+   "escalate"
+  ],
+  "rerun_steps": [
+   "analyze",
+   "ac-format",
+   "test-cases",
+   "ac-coverage",
+   "setup",
+   "safety-net",
+   "safety-net-proof",
+   "no-production-change",
+   "test",
+   "lint",
+   "check-verification-doc-refs",
+   "review-tests",
+   "review-audit",
+   "verify-gate"
+  ],
+  "human_answers": [
+   "approve",
+   "rerun",
+   "escalate"
+  ],
+  "human_rerun_steps": [
+   "analyze",
+   "ac-format",
+   "test-cases",
+   "ac-coverage",
+   "setup",
+   "safety-net",
+   "safety-net-proof",
+   "no-production-change",
+   "test",
+   "lint",
+   "check-verification-doc-refs",
+   "review-tests",
+   "review-audit",
+   "verify-gate"
+  ],
+  "narrowed": [],
+  "models": [],
+  "efforts": []
+ },
+ "docs": [
+  "docs/specs/1938/analysis.md",
+  "docs/specs/1938/test-cases.md"
+ ],
+ "in_files": [
+  "issue.md",
+  "review.diff",
+  "leader-decision.md"
+ ],
+ "steps": [
+  {
+   "id": "analyze",
+   "kind": "role",
+   "name": "requirements-engineer",
+   "status": "done",
+   "attempts": 1,
+   "on_fail_count": 0,
+   "on_fail_max": null
+  },
+  {
+   "id": "ac-format",
+   "kind": "run",
+   "name": "ac-format",
+   "status": "done",
+   "attempts": 3,
+   "on_fail_count": 0,
+   "on_fail_max": 2
+  },
+  {
+   "id": "plan",
+   "kind": "check",
+   "name": "plan-gate",
+   "status": "done",
+   "attempts": 1,
+   "on_fail_count": 0,
+   "on_fail_max": null
+  },
+  {
+   "id": "test-cases",
+   "kind": "role",
+   "name": "tester",
+   "status": "done",
+   "attempts": 1,
+   "on_fail_count": 0,
+   "on_fail_max": null
+  },
+  {
+   "id": "ac-coverage",
+   "kind": "run",
+   "name": "ac-coverage",
+   "status": "done",
+   "attempts": 3,
+   "on_fail_count": 0,
+   "on_fail_max": 2
+  },
+  {
+   "id": "setup",
+   "kind": "run",
+   "name": "setup",
+   "status": "done",
+   "attempts": 3,
+   "on_fail_count": 0,
+   "on_fail_max": null
+  },
+  {
+   "id": "safety-net",
+   "kind": "role",
+   "name": "developer",
+   "status": "done",
+   "attempts": 2,
+   "on_fail_count": 0,
+   "on_fail_max": 2
+  },
+  {
+   "id": "safety-net-proof",
+   "kind": "run",
+   "name": "safety-net-proof",
+   "status": "done",
+   "attempts": 2,
+   "on_fail_count": 0,
+   "on_fail_max": 2
+  },
+  {
+   "id": "no-production-change",
+   "kind": "run",
+   "name": "no-production-change",
+   "status": "done",
+   "attempts": 2,
+   "on_fail_count": 0,
+   "on_fail_max": 2
+  },
+  {
+   "id": "test",
+   "kind": "run",
+   "name": "test",
+   "status": "done",
+   "attempts": 2,
+   "on_fail_count": 0,
+   "on_fail_max": 2
+  },
+  {
+   "id": "lint",
+   "kind": "run",
+   "name": "lint",
+   "status": "done",
+   "attempts": 2,
+   "on_fail_count": 0,
+   "on_fail_max": 2
+  },
+  {
+   "id": "check-verification-doc-refs",
+   "kind": "run",
+   "name": "check-verification-doc-refs",
+   "status": "done",
+   "attempts": 2,
+   "on_fail_count": 0,
+   "on_fail_max": 2
+  },
+  {
+   "id": "review-tests",
+   "kind": "role",
+   "name": "tester",
+   "status": "done",
+   "attempts": 2,
+   "on_fail_count": 0,
+   "on_fail_max": 2
+  },
+  {
+   "id": "review-audit",
+   "kind": "role",
+   "name": "auditor",
+   "status": "done",
+   "attempts": 2,
+   "on_fail_count": 0,
+   "on_fail_max": 2
+  },
+  {
+   "id": "verify-gate",
+   "kind": "run",
+   "name": "verify-gate",
+   "status": "done",
+   "attempts": 2,
+   "on_fail_count": 0,
+   "on_fail_max": 2
+  },
+  {
+   "id": "done-gate",
+   "kind": "check",
+   "name": "done-gate",
+   "status": "needs_leader",
+   "attempts": 1,
+   "on_fail_count": 0,
+   "on_fail_max": null
+  },
+  {
+   "id": "pr",
+   "kind": "op",
+   "name": "create-pr",
+   "status": "pending",
+   "attempts": 0,
+   "on_fail_count": 0,
+   "on_fail_max": null
+  },
+  {
+   "id": "followups",
+   "kind": "op",
+   "name": "create-followups",
+   "status": "pending",
+   "attempts": 0,
+   "on_fail_count": 0,
+   "on_fail_max": null
+  }
+ ],
+ "counters": {
+  "catalog_adds": 0,
+  "catalog_adds_max": 3,
+  "followups": 0,
+  "followups_max": 5,
+  "leader_calls": 0,
+  "leader_calls_max": 5,
+  "plan_rerun": 0,
+  "plan_rerun_max": 2,
+  "done_rerun": 1,
+  "done_rerun_max": 2,
+  "on_fail_rerun_used": false,
+  "soft_budget_rerun_used": false
+ },
+ "cost": {
+  "issue_usd": 2.453499,
+  "soft_usd": 18.44,
+  "absolute_usd": 36.88
+ },
+ "plan_gate": null,
+ "done_gate": {
+  "acs": [
+   1,
+   2,
+   3,
+   4,
+   5,
+   6,
+   7,
+   8
+  ],
+  "requirement_rows": [
+   {
+    "row": "R1",
+    "requirement": "자산 로드 횟수를 세는 테스트용 번들로 KanjiStrokesSection 을 그린 뒤 의존성 변경을 일으켜 다시 그려도 탐침 로드 횟수가 처음과 같다",
+    "acs": [
+     1,
+     2,
+     4
+    ]
+   },
+   {
+    "row": "R2",
+    "requirement": "플래그를 제거한 코드에서는 이 테스트가 실패한다(뮤테이션으로 확인)",
+    "acs": [
+     3
+    ]
+   },
+   {
+    "row": "R3",
+    "requirement": "기존 한자 모달 테스트·골든은 바뀌지 않는다",
+    "acs": [
+     5,
+     6
+    ]
+   },
+   {
+    "row": "R4",
+    "requirement": "배경: 지금은 isProbeStarted 플래그가 막지만 이를 고정하는 테스트가 없다 (테스트만 추가, 운영 코드는 그대로)",
+    "acs": [
+     1,
+     7
+    ]
+   },
+   {
+    "row": "R5",
+    "requirement": "근거: docs/specs/1933/skeleton.md §8.2 — load 호출 횟수를 세는 가짜로 재호출 시 증가하지 않음을 케이스 하나로 고정",
+    "acs": [
+     1,
+     8
+    ]
+   }
+  ],
+  "runs": [
+   {
+    "step": "ac-format",
+    "name": "ac-format",
+    "exit_code": 0,
+    "flaky": false,
+    "base_red": false,
+    "quarantined": 1
+   },
+   {
+    "step": "ac-coverage",
+    "name": "ac-coverage",
+    "exit_code": 0,
+    "flaky": false,
+    "base_red": false,
+    "quarantined": 1
+   },
+   {
+    "step": "setup",
+    "name": "setup",
+    "exit_code": 0,
+    "flaky": false,
+    "base_red": false,
+    "quarantined": 1
+   },
+   {
+    "step": "safety-net-proof",
+    "name": "safety-net-proof",
+    "exit_code": 0,
+    "flaky": false,
+    "base_red": false,
+    "quarantined": 1
+   },
+   {
+    "step": "no-production-change",
+    "name": "no-production-change",
+    "exit_code": 0,
+    "flaky": false,
+    "base_red": false,
+    "quarantined": 1
+   },
+   {
+    "step": "test",
+    "name": "test",
+    "exit_code": 0,
+    "flaky": false,
+    "base_red": false,
+    "quarantined": 1
+   },
+   {
+    "step": "lint",
+    "name": "lint",
+    "exit_code": 0,
+    "flaky": false,
+    "base_red": false,
+    "quarantined": 1
+   },
+   {
+    "step": "check-verification-doc-refs",
+    "name": "check-verification-doc-refs",
+    "exit_code": 0,
+    "flaky": false,
+    "base_red": false,
+    "quarantined": 1
+   },
+   {
+    "step": "verify-gate",
+    "name": "verify-gate",
+    "exit_code": 0,
+    "flaky": false,
+    "base_red": false,
+    "quarantined": 1
+   }
+  ],
+  "not_checked_locally": [
+   "code_quality/golden_test — needs sudo (CI machine setup); rewrites git state; rewrites tracked files (golden / fix / write mode); step 'Check if golden tests exist': shell logic (if / loops / heredoc); uses GitHub runner variables; uses a workflow expression (PR context / CI runner values)",
+   "code_quality/test_all — needs sudo (CI machine setup)",
+   "code_quality/upload-failure-golden-images — needs sudo (CI machine setup); rewrites git state; rewrites tracked files (golden / fix / write mode); uses GitHub runner variables; uses a workflow expression (PR context / CI runner values); uses actions/github-script",
+   "e2e_test/e2e_test — needs an Android emulator / SDK manager; needs sudo (CI machine setup); step 'Free up disk space': shell logic (if / loops / heredoc); uses reactivecircus/android-emulator-runner; whole job is bound to the CI machine — its other commands were not carried",
+   "set_assignees/set-assignees — uses actions/github-script",
+   "update_release_notes_draft/validate_pr — uses Slashgear/action-check-pr-title; uses danielchabr/pr-labels-checker; uses release-drafter/release-drafter/autolabeler",
+   "update_release_notes_draft/update_release_draft — uses release-drafter/release-drafter",
+   "build — flutter build apk needs GitHub release hosts, Android SDK writes and the signing key (key.properties is a secret path) inside srt (measured 2026-11-23, tools/out/BASE_GREEN.md) (base-green check: cannot run inside the sandbox — human decision)",
+   "e2e — needs an Android emulator and the adb server socket, impossible inside srt (measured 2026-11-23; CI also needs an emulator + KVM) (base-green check: cannot run inside the sandbox — human decision)"
+  ],
+  "reviews": [
+   {
+    "step": "review-tests",
+    "role": "tester",
+    "verdict": "pass",
+    "checks": [
+     {
+      "id": "test-quality",
+      "result": "pass"
+     },
+     {
+      "id": "net-public-behavior",
+      "result": "pass"
+     },
+     {
+      "id": "test-change-review",
+      "result": "pass"
+     }
+    ],
+    "findings": []
+   },
+   {
+    "step": "review-audit",
+    "role": "auditor",
+    "verdict": "pass",
+    "checks": [
+     {
+      "id": "diff-review",
+      "result": "pass"
+     }
+    ],
+    "findings": []
+   }
+  ],
+  "discoveries": [],
+  "requests": [],
+  "included_fixes": [],
+  "deferred_rows": [],
+  "followup_candidates": [],
+  "mutations": {
+   "problem": null,
+   "rows": [
+    {
+     "id": "M1",
+     "acs": [
+      3
+     ],
+     "path": "lib/features/kanji_detail_modal/widgets/kanji_strokes_section.dart",
+     "status": "not-run",
+     "detail": null,
+     "find": "    if (_isProbeStarted) return;\n",
+     "replace": "",
+     "note": "재진입 차단 제거 → 번들 교체 때마다 탐침이 다시 시작돼 light-日-4.svg 로드 횟수가 늘어야 한다",
+     "log_tail": "[gld engine] not run: the control run was not green on a clean tree"
+    }
+   ]
+  },
+  "commits": [
+   {
+    "sha": "f952f8c6779ac4a6100c8e2b15fc59bfbe508ceb",
+    "message": "chore: gld procedure for issue 1938 (revision 1)\n"
+   },
+   {
+    "sha": "12b910c03dda00f6cd2695cb456e8d2defde282e",
+    "message": "docs: requirements-engineer output of step analyze (gx engine)\n"
+   },
+   {
+    "sha": "b872527fa43977429347bb44245abaf98cf248cc",
+    "message": "chore: gld procedure for issue 1938 (revision 2, plan)\n"
+   },
+   {
+    "sha": "883d329a502df89324f84f2add3223d9ba5506c6",
+    "message": "docs: tester output of step test-cases (gx engine)\n"
+   },
+   {
+    "sha": "81844a4ed1be83727b1ae9fa7b50f14f963c1032",
+    "message": "test: 획순 탐침이 의존성 변경 후에도 한 번만 시작됨을 고정하는 안전망 추가\n\nCo-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>\n"
+   },
+   {
+    "sha": "183a96145725f096ef4cc838e58137ce206f2b64",
+    "message": "test: 획순 탐침 재진입 차단 뮤테이션 선언 추가\n\nCo-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>\n"
+   }
+  ],
+  "verification_paths_changed": [
+   "test/features/kanji_detail_modal/widgets/kanji_strokes_section_probe_safety_net_test.dart"
+  ],
+  "refused_writes": [],
+  "comment_decisions": []
+ },
+ "stopped": null,
+ "budget": null,
+ "comments": null,
+ "defer": null,
+ "removal": null,
+ "add_limit": null,
+ "pr_review": null
+}

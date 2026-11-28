@@ -12,7 +12,8 @@
 # property of the hook model — Guild's gate raises the cost of a mistake, it is not a
 # boundary against a determined bypass.
 #
-# Off-switch: `.claude/guild/config.json` → `gates.enabled: false` (or `/gld config --gates=off`).
+# Off-switch: `.claude/guild/config.json` → `gates.enabled: false`, by hand only (`/gld config --gates`
+# is refused in this edition, and the engine's settings schema refuses a `gates` key — review-q0 D7).
 set -e
 
 LOCAL_HOOK="$(git rev-parse --git-path hooks/pre-commit.local)"

@@ -1,0 +1,66 @@
+{
+ "situation": "new-collaborator-comment",
+ "kind": "leader",
+ "step": "design",
+ "allowed": {
+  "answers": [
+   "continue",
+   "rerun",
+   "replan",
+   "escalate"
+  ],
+  "rerun_steps": [
+   "analyze",
+   "ac-format",
+   "design"
+  ],
+  "human_answers": [
+   "continue",
+   "rerun",
+   "replan",
+   "escalate"
+  ],
+  "human_rerun_steps": [
+   "analyze",
+   "ac-format",
+   "design"
+  ],
+  "narrowed": []
+ },
+ "ids": {
+  "comment_ids": [
+   9101,
+   9102
+  ]
+ },
+ "checklist_acs": null,
+ "engine": {
+  "answer": "escalate",
+  "step": null,
+  "reason": "needs-human-decision",
+  "failed": null,
+  "stop": null,
+  "cost_usd": 0.003274
+ },
+ "argv_flags": [
+  "--output-format",
+  "--verbose",
+  "--setting-sources",
+  "--disable-slash-commands",
+  "--strict-mcp-config",
+  "--mcp-config",
+  "--permission-mode",
+  "--permission-prompts",
+  "--settings",
+  "--tools",
+  "--model",
+  "--effort",
+  "--max-budget-usd",
+  "--json-schema",
+  "--append-system-prompt"
+ ],
+ "model_effort": [
+  "haiku",
+  "low"
+ ]
+}

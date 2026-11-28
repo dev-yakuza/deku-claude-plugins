@@ -1,0 +1,14 @@
+{
+  "format": 1,
+  "mutations": [
+    {
+      "acs": [
+        2
+      ],
+      "path": "lib/a.dart",
+      "find": "  if (_probed) return;\n",
+      "replace": "",
+      "note": "the probe flag"
+    }
+  ]
+}

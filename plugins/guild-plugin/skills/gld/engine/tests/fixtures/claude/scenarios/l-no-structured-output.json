@@ -1,0 +1,7 @@
+{
+  "format": 1,
+  "description": "Stage 2 leader session that ends without a structured output (L14: no-structured-output → re-call, then leader_failed).",
+  "stream": "../f2/r4.jsonl",
+  "init_from_argv": true,
+  "leader": {"example": null, "expect": "no-structured-output"}
+}

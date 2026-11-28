@@ -1,0 +1,23 @@
+{
+  "format": 1,
+  "description": "A judge role writes its declared output and returns a valid work result. init tools follow --tools.",
+  "stream": "../f2/r4.jsonl",
+  "init_from_argv": true,
+  "structured_output": {
+    "status": "done",
+    "outputs": [
+      "docs/specs/42/design.md"
+    ],
+    "requests": [],
+    "blocked_by": null,
+    "discoveries": [],
+    "note": "fixture"
+  },
+  "actions": [
+    {
+      "op": "write",
+      "path": "docs/specs/42/design.md",
+      "content": "# design\n"
+    }
+  ]
+}

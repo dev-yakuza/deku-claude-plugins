@@ -1,0 +1,129 @@
+{
+ "title": "Leader answer — new collaborator comment (stage 2, scope §2.5, D16)",
+ "description": "Common envelope + one effect per new comment. continue needs every effect = none; an adds-requirement comment needs rerun of analyze. ENUM TEMPLATE: values like \"{answers}\" are placeholders that schema.fill_enums replaces for each call (codes.LEADER_SCHEMA_TOKENS); an id list that comes out empty drops its property (read as []). Keeps to type/properties/required/additionalProperties/items/enum (the CLI's structured-output subset). Rules a schema cannot say (rerun ⇔ step, escalate ⇔ recommendation, coverage of every id, the situation rules) are checked by gxengine/leader.py (codes.LeaderFormatReason).",
+ "type": "object",
+ "additionalProperties": false,
+ "required": [
+  "answer",
+  "reason",
+  "step",
+  "note",
+  "recommendation",
+  "comments"
+ ],
+ "properties": {
+  "answer": {
+   "enum": [
+    "continue",
+    "rerun",
+    "replan",
+    "escalate"
+   ],
+   "description": "One of the answers the engine allows for this call (rendered per call). The engine acts on this field only."
+  },
+  "reason": {
+   "enum": [
+    "fits-template",
+    "analysis-gap",
+    "assumption-corrected",
+    "comment-no-effect",
+    "real-defect",
+    "upstream-gap",
+    "transient",
+    "env-problem",
+    "needs-human-decision",
+    "already-decided",
+    "acceptance-met",
+    "high-complexity",
+    "repeated-failure",
+    "other"
+   ],
+   "description": "Leader-decision reason code (§4.2, scope D20). Pick `other` only when no code fits."
+  },
+  "step": {
+   "type": [
+    "string",
+    "null"
+   ],
+   "enum": [
+    "analyze",
+    "ac-format",
+    "design",
+    null
+   ],
+   "description": "The step to run again — set exactly when answer is rerun, otherwise null."
+  },
+  "note": {
+   "type": "string",
+   "description": "Free text for the next role (leader-decision.md), the human and evolve. The engine never branches on it."
+  },
+  "recommendation": {
+   "type": [
+    "object",
+    "null"
+   ],
+   "additionalProperties": false,
+   "required": [
+    "answer",
+    "step",
+    "note"
+   ],
+   "description": "Set exactly when answer is escalate: what you recommend the human answers (scope D15). Otherwise null.",
+   "properties": {
+    "answer": {
+     "enum": [
+      "continue",
+      "rerun",
+      "replan",
+      "escalate"
+     ]
+    },
+    "step": {
+     "type": [
+      "string",
+      "null"
+     ],
+     "enum": [
+      "analyze",
+      "ac-format",
+      "design",
+      null
+     ],
+     "description": "Set exactly when the recommended answer is rerun."
+    },
+    "note": {
+     "type": "string"
+    }
+   }
+  },
+  "comments": {
+   "type": "array",
+   "description": "One entry per new comment id, each exactly once.",
+   "items": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+     "id",
+     "effect"
+    ],
+    "properties": {
+     "id": {
+      "type": "integer",
+      "enum": [
+       9101,
+       9102
+      ]
+     },
+     "effect": {
+      "enum": [
+       "none",
+       "corrects-assumption",
+       "adds-requirement",
+       "instruction"
+      ]
+     }
+    }
+   }
+  }
+ }
+}

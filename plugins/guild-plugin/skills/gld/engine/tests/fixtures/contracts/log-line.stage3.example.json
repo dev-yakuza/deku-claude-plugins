@@ -1,0 +1,20 @@
+{
+  "format": 1,
+  "ts": "2026-11-24T01:02:03Z",
+  "issue": 42,
+  "who": "engine",
+  "event": "procedure-written",
+  "trigger": "ui-change",
+  "data": {
+    "source": "role-request",
+    "revision": 3,
+    "requests": [
+      {
+        "from_step": "design",
+        "step": "ux-review",
+        "outcome": "applied",
+        "reason": null
+      }
+    ]
+  }
+}

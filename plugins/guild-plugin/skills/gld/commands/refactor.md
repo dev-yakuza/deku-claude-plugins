@@ -1,13 +1,10 @@
 # REFACTOR (stage: execute variant — refactor)
 
-> **0.102 (engine)**: `/gld refactor $1` runs the engine's **execute** stage alone — follow `<<SKILL_DIR>>/commands/dev.md` *Engine driver* with `--only execute` and `--expect-type refactor` on step 1 (the engine refuses before any stage when the Issue has no `type:refactor` label — it never runs the implement variant in its place). The engine picks the variant from the `type:` label. The rest of this file is the 0.101.x reference the roles' atoms cite; it is **not executed**. **Reference (0.102) — removed in the next release.**
-
 **Stage: execute, variant for `type:refactor`.** Roles: **developer** (behavior-preserving transform) with **tech-lead conformance** (structure improved *and* behavior preserved), plus the always-on external auditor and any conditional specialists (Step 3.5). Invocable directly (`/gld refactor <issue>`) or via `/gld dev` (auto-selected when the Issue is `type:refactor`). Same spine as `implement` (execute → test); the developer's task shape differs — code is **transformed without changing behavior**, so the **existing tests are the safety net** (no new feature test).
 
 `$1` = Issue number. Returns a Section D line.
 
 > **Bash**: `_bash_rules.md`. State/handoff: `_handoff.md`.
-> **Checkout**: never move the human's branch or history — `_checkout.md` (a pull/sync/switch request: show the commands and which commits change hash, then ask) — the Issue's own branch is the one exception (`_checkout.md` Section C).
 > **Output language**: all human-readable output in `config.language` (`_handoff.md` Section K); sub-agent prompts carry that instruction.
 
 ---

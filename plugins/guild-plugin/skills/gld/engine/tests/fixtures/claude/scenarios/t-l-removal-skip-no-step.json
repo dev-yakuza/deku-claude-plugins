@@ -1,0 +1,18 @@
+{
+  "format": 1,
+  "description": "Stage 3: leader, step-removal-request: skip without skip_step (review-q0 D7).",
+  "stream": "../leader/real-2.1.323/plan-gate-plan.jsonl",
+  "init_from_argv": true,
+  "leader": {
+    "example": "leader-answer-step-removal",
+    "expect": "skip-step-mismatch"
+  },
+  "structured_output": {
+    "answer": "skip",
+    "reason": "other",
+    "step": null,
+    "note": "No user interface changed after all.",
+    "recommendation": null,
+    "skip_step": null
+  }
+}

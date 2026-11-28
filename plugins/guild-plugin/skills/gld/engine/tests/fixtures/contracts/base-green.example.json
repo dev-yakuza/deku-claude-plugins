@@ -1,0 +1,48 @@
+{
+  "format": 1,
+  "repo": "acme/app",
+  "sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "config_sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+  "ok": true,
+  "commands": [
+    {
+      "name": "setup",
+      "ok": true,
+      "runs": [
+        {
+          "exit_code": 0,
+          "timed_out": false,
+          "duration_s": 3.1,
+          "log_file": "setup.log"
+        }
+      ],
+      "dirty_files": []
+    },
+    {
+      "name": "test",
+      "ok": true,
+      "runs": [
+        {
+          "exit_code": 1,
+          "timed_out": false,
+          "duration_s": 60.0,
+          "log_file": "test.log"
+        },
+        {
+          "exit_code": 0,
+          "timed_out": false,
+          "duration_s": 58.0,
+          "log_file": "test-2.log"
+        }
+      ],
+      "dirty_files": []
+    }
+  ],
+  "red": [],
+  "flaky": [
+    "test"
+  ],
+  "problem": null,
+  "plugin_version": "1.0.0-exp.3",
+  "at": "2026-11-25T01:02:03Z"
+}

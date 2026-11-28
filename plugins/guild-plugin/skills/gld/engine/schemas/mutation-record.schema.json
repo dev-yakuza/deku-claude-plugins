@@ -1,0 +1,264 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "gld/mutation-record",
+  "title": "What the engine saw when it ran the declared mutations (VB9)",
+  "description": "records/<owner>/<repo>/<N>/mutations/<head sha>/record.json, engine only, written by mutation.prove once per HEAD (again only after a human `resume --answer rerun` moved a record without any run fact aside as superseded-<n>.json) before the done-gate. FACTS: the leader judges the ACs with them; no status turns anything green or red by itself.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "format",
+    "issue",
+    "head",
+    "blob",
+    "problem",
+    "control",
+    "rows",
+    "at"
+  ],
+  "properties": {
+    "format": {
+      "const": 1
+    },
+    "issue": {
+      "$ref": "#/$defs/issue"
+    },
+    "head": {
+      "$ref": "#/$defs/sha"
+    },
+    "blob": {
+      "$ref": "#/$defs/sha",
+      "description": "Blob of docs/specs/<N>/mutations.json at head."
+    },
+    "problem": {
+      "enum": [
+        "bad-file",
+        "bad-path",
+        "verification-path",
+        "not-unique",
+        "no-change",
+        "unknown-ac",
+        null
+      ],
+      "description": "The whole declaration was refused (bad-file); rows is empty."
+    },
+    "control": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "exit_code",
+            "timed_out",
+            "log_file"
+          ],
+          "properties": {
+            "exit_code": {
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "timed_out": {
+              "type": "boolean"
+            },
+            "log_file": {
+              "type": "string"
+            },
+            "again": {
+              "anyOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "exit_code",
+                    "timed_out",
+                    "log_file"
+                  ],
+                  "properties": {
+                    "exit_code": {
+                      "type": [
+                        "integer",
+                        "null"
+                      ]
+                    },
+                    "timed_out": {
+                      "type": "boolean"
+                    },
+                    "log_file": {
+                      "type": "string"
+                    }
+                  }
+                }
+              ],
+              "description": "The second `test` run on the same clean tree after a red first one (K8-2); null = not run again. Absent in records written before VW2 E1 (one run only)."
+            },
+            "flaky": {
+              "type": "boolean",
+              "description": "Red, then green (`again`). Then a red mutation counts only when it is red twice, each time with a failure line no control run showed (mutation.py). Absent = false."
+            }
+          }
+        }
+      ],
+      "description": "`test` on the same fresh tree WITHOUT a mutation, run first (the facts of the first run): red on a clean tree → once more (`again`); red twice, or a tree left changed → every row is not-run (a red that is not the mutation's proves nothing). null = not run."
+    },
+    "rows": {
+      "type": "array",
+      "maxItems": 5,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "acs",
+          "path",
+          "find",
+          "replace",
+          "note",
+          "status",
+          "detail",
+          "run",
+          "log_tail"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^M[1-9][0-9]*$",
+            "description": "M1… in file order."
+          },
+          "acs": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "minimum": 1
+            }
+          },
+          "path": {
+            "type": "string"
+          },
+          "find": {
+            "type": "string"
+          },
+          "replace": {
+            "type": "string"
+          },
+          "note": {
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "killed",
+              "survived",
+              "timed-out",
+              "refused",
+              "not-run"
+            ],
+            "description": "killed after a flaky control = red twice, both with a failure line no control run showed; otherwise not-run with the reason as the last line of log_tail."
+          },
+          "detail": {
+            "enum": [
+              "bad-file",
+              "bad-path",
+              "verification-path",
+              "not-unique",
+              "no-change",
+              "unknown-ac",
+              null
+            ],
+            "description": "Set exactly when status = refused."
+          },
+          "run": {
+            "anyOf": [
+              {
+                "type": "null"
+              },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "exit_code",
+                  "timed_out",
+                  "log_file"
+                ],
+                "properties": {
+                  "exit_code": {
+                    "type": [
+                      "integer",
+                      "null"
+                    ]
+                  },
+                  "timed_out": {
+                    "type": "boolean"
+                  },
+                  "log_file": {
+                    "type": "string"
+                  }
+                }
+              }
+            ]
+          },
+          "again": {
+            "anyOf": [
+              {
+                "type": "null"
+              },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "exit_code",
+                  "timed_out",
+                  "log_file"
+                ],
+                "properties": {
+                  "exit_code": {
+                    "type": [
+                      "integer",
+                      "null"
+                    ]
+                  },
+                  "timed_out": {
+                    "type": "boolean"
+                  },
+                  "log_file": {
+                    "type": "string"
+                  }
+                }
+              }
+            ],
+            "description": "After a flaky control only: the second run of a red mutation on the same tree (killed needs both red). null / absent = not run again."
+          },
+          "log_tail": {
+            "type": "string"
+          },
+          "log_excerpt": {
+            "type": "string",
+            "description": "VW3 E2: of a red run (the same run as log_tail), the first failure block with the lines around it — a header line naming the rule that found it, numbered lines, the engine's truncation mark when cut, the other failure-mark lines' numbers (mutation._excerpt). \"\" for a green run or no run. A reading aid: no status depends on it. Absent in a record of an older engine."
+          }
+        }
+      }
+    },
+    "at": {
+      "$ref": "#/$defs/ts"
+    }
+  },
+  "$defs": {
+    "sha": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}([0-9a-f]{24})?$"
+    },
+    "ts": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]+)?Z$"
+    },
+    "issue": {
+      "type": "integer",
+      "minimum": 1
+    }
+  }
+}

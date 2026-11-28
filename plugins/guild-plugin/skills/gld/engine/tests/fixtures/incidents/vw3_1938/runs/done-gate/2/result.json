@@ -1,0 +1,66 @@
+{
+  "answer": "escalate",
+  "reason": "env-problem",
+  "step": null,
+  "note": "AC #4 를 빼면 모든 AC 가 충족됐다. AC #4 는 증거가 없어서 판단할 수 없다. 뮤테이션 M1(`if (_isProbeStarted) return;` 제거)은 `killed` 로 나왔지만, log_tail 에 찍힌 실패는 새 안전망 테스트가 아니다. 기존 골든 테스트 `hanzi_modal_golden_test.dart` 의 '여러 급수에 걸친 글자 다크' 케이스가 151행 `expectLater` 에서 실패했다. 카운터는 `+3819 -1` 로 실패가 하나뿐이다. 테스트 커맨드에 `--fail-fast --concurrency=12` 가 붙어 있어 거기서 실행이 멈췄다. 그래서 `kanji_strokes_section_probe_safety_net_test.dart` 가 뮤테이션 상태에서 실패했다는 원문이 없다. 지난 결정에서 확인하기로 한 것이 바로 그 테스트의 `counter.keys.length`/`ownLoads` 단언에서 실패했는지였다. 이것도 확인할 수 없다.\n\n개발자를 다시 돌려도 소용없다. 엔진이 전체 스위트를 fail-fast 로 돌리므로 같은 골든 실패가 먼저 날 수 있다. 개발자는 기존 테스트와 커맨드를 바꿀 수 없다. 코드를 읽으면 가드가 없을 때 DefaultAssetBundle 교체로 `didChangeDependencies` 가 다시 불리고, 탐침이 `replacement` 에서 로드해 `ownLoads == 0` 단언이 깨질 것으로 보인다. 다만 그것은 증거가 아니다.\n\n참고로, 가드를 빼면 기존 다크 골든도 깨진다. 기존 스위트도 이 회귀를 일부 잡는다는 뜻이다.\n\nD2 는 ignore 로 둔다. 지난 결정에서 D1 을 ignore 로 정한 것과 같은 내용이다. AC #1 은 '예:' 라고만 적었으므로 DefaultAssetBundle 교체로 충분하다.",
+  "recommendation": {
+    "answer": "approve",
+    "step": null,
+    "note": "로컬에서 `lib/features/kanji_detail_modal/widgets/kanji_strokes_section.dart` 37행 `if (_isProbeStarted) return;` 을 지운 뒤 `flutter test test/features/kanji_detail_modal/widgets/kanji_strokes_section_probe_safety_net_test.dart` 를 단독으로 실행하세요. '의존성이 바뀌어 다시 그려도…' 케이스와 '여러 번 연속으로…' 케이스가 `counter.keys.length` 또는 `replacement.ownLoads` 단언에서 red 인지 확인합니다. red 이면 되돌리고 같은 파일이 green 인지 본 다음 approve 하세요. 뮤테이션은 커밋하지 마세요. 반대로 뮤테이션 상태에서도 green 이면 테스트가 가드를 잡지 못하는 것이니 safety-net 을 rerun 하세요."
+  },
+  "ac_verdicts": [
+    {
+      "ac": 1,
+      "status": "met",
+      "evidence": "test/features/kanji_detail_modal/widgets/kanji_strokes_section_probe_safety_net_test.dart '의존성이 바뀌어 다시 그려도 탐침은 자산을 다시 읽지 않는다'(411-425행)와 '여러 번 연속으로'(427-444행)가 `counter.keys.length == baseline`, `replacement.ownLoads == 0` 을 단언한다. 이 동작을 만드는 코드는 기존 lib kanji_strokes_section.dart:37 의 가드다. test run exit 0."
+    },
+    {
+      "ac": 2,
+      "status": "met",
+      "evidence": "같은 테스트 421-422행에서 `observed.length > buildsBefore` 와 `observed.last same(replacement)` 로 의존성 변경 뒤 실제로 다시 빌드됐음을 함께 단언한다."
+    },
+    {
+      "ac": 3,
+      "status": "met",
+      "evidence": "픽스처가 없는 '龍' 을 쓴다(356행). 첫 테스트(402-409행)가 로드 키를 정확히 `[assets/kanji/light-龍-0.svg]` 로 단언하므로 렌더 로드가 섞이지 않는다. test run exit 0, flaky false."
+    },
+    {
+      "ac": 4,
+      "status": "unmet",
+      "evidence": "M1 은 killed 로 나왔다. 그러나 log_tail 의 유일한 실패(+3819 -1)는 기존 hanzi_modal_golden_test '여러 급수에 걸친 글자 다크' 이고, --fail-fast 로 실행이 멈췄다. 새 안전망 테스트가 뮤테이션 상태에서 실패했다는 원문은 없다."
+    },
+    {
+      "ac": 5,
+      "status": "met",
+      "evidence": "diff 에 기존 테스트 파일 변경이 없다(새 파일 1개만 추가). test run exit 0(전체 스위트 + verify_test_coverage)."
+    },
+    {
+      "ac": 6,
+      "status": "met",
+      "evidence": "review.diff 에 *.png 변경이 없다."
+    },
+    {
+      "ac": 7,
+      "status": "met",
+      "evidence": "review.diff 에 lib/ 변경이 없다. no-production-change run exit 0."
+    },
+    {
+      "ac": 8,
+      "status": "met",
+      "evidence": "새 testWidgets 이름 3개(402·411·427행)는 이슈 번호나 케이스 ID 가 없는 서술형 문장이다."
+    },
+    {
+      "ac": 9,
+      "status": "met",
+      "evidence": "test run(flutter test + verify_test_coverage.sh) exit 0, lint run(flutter analyze 등) exit 0."
+    }
+  ],
+  "discoveries": [
+    {
+      "id": "D2",
+      "disposition": "ignore",
+      "title": null,
+      "duplicate_of": null
+    }
+  ]
+}

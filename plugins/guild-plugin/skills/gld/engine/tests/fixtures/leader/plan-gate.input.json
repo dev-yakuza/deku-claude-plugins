@@ -1,0 +1,146 @@
+{
+ "allowed": {
+  "answers": [
+   "plan",
+   "rerun",
+   "close-as-decided",
+   "escalate"
+  ],
+  "human_answers": [
+   "plan",
+   "rerun",
+   "close-as-decided",
+   "escalate"
+  ],
+  "human_rerun_steps": [
+   "analyze"
+  ],
+  "narrowed": [],
+  "rerun_steps": [
+   "analyze"
+  ]
+ },
+ "budget": null,
+ "call": {
+  "attempt": 1,
+  "errors": [],
+  "format_retry": 0,
+  "kind": "check",
+  "step": "plan"
+ },
+ "comments": null,
+ "cost": {
+  "absolute_usd": 89.57,
+  "issue_usd": 1.5,
+  "soft_usd": 44.79
+ },
+ "counters": {
+  "done_rerun": 0,
+  "done_rerun_max": 2,
+  "leader_calls": 0,
+  "leader_calls_max": 5,
+  "on_fail_rerun_used": false,
+  "plan_rerun": 0,
+  "plan_rerun_max": 2,
+  "soft_budget_rerun_used": false
+ },
+ "docs": [
+  "docs/specs/42/analysis.md"
+ ],
+ "done_gate": null,
+ "format": 1,
+ "in_files": [
+  "issue.md",
+  "leader-decision.md"
+ ],
+ "issue": 42,
+ "mode": "attended",
+ "plan_gate": {
+  "acs": [
+   1,
+   2
+  ],
+  "analysis": {
+   "prerequisite_open": false,
+   "risk": "low",
+   "size": "small",
+   "split": false,
+   "type": "feature"
+  },
+  "assumptions": [
+   "The existing review-type preference key is reused."
+  ],
+  "decision_marker": false,
+  "referenced_issues": [
+   {
+    "number": 540,
+    "state": "CLOSED",
+    "state_reason": "COMPLETED"
+   }
+  ],
+  "requirement_rows": [
+   {
+    "acs": [
+     1
+    ],
+    "requirement": "Review question types can be chosen in Settings",
+    "row": "R1"
+   },
+   {
+    "acs": [
+     2
+    ],
+    "requirement": "The choice is kept after a restart",
+    "row": "R2"
+   }
+  ],
+  "templates": [
+   {
+    "name": "feature",
+    "steps": [
+     "design",
+     "test-cases",
+     "implement",
+     "test",
+     "review",
+     "qa",
+     "done",
+     "pr"
+    ],
+    "version": "exp-1"
+   }
+  ]
+ },
+ "situation": "plan-gate",
+ "stage": 2,
+ "steps": [
+  {
+   "attempts": 1,
+   "id": "analyze",
+   "kind": "role",
+   "name": "requirements-engineer",
+   "on_fail_count": 0,
+   "on_fail_max": null,
+   "status": "done"
+  },
+  {
+   "attempts": 1,
+   "id": "ac-format",
+   "kind": "run",
+   "name": "ac-format",
+   "on_fail_count": 0,
+   "on_fail_max": 2,
+   "status": "done"
+  },
+  {
+   "attempts": 0,
+   "id": "plan",
+   "kind": "check",
+   "name": "plan-gate",
+   "on_fail_count": 0,
+   "on_fail_max": null,
+   "status": "running"
+  }
+ ],
+ "stopped": null
+}

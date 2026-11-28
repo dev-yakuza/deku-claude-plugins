@@ -1,0 +1,1822 @@
+[
+ {
+  "id": "Read:read:home:.ssh",
+  "tool": "Read",
+  "target": "/Users/gx-user/.ssh/gx-canary",
+  "expect": "refused",
+  "action": "read",
+  "token": null,
+  "label": "home:.ssh",
+  "cmd": null
+ },
+ {
+  "id": "Bash:read:home:.ssh",
+  "tool": "Bash",
+  "target": "/Users/gx-user/.ssh/gx-canary",
+  "expect": "refused",
+  "action": "read",
+  "token": null,
+  "label": "home:.ssh",
+  "cmd": "cat -- /Users/gx-user/.ssh/gx-canary >/dev/null"
+ },
+ {
+  "id": "Read:read:home:.aws",
+  "tool": "Read",
+  "target": "/Users/gx-user/.aws/gx-canary",
+  "expect": "refused",
+  "action": "read",
+  "token": null,
+  "label": "home:.aws",
+  "cmd": null
+ },
+ {
+  "id": "Bash:read:home:.aws",
+  "tool": "Bash",
+  "target": "/Users/gx-user/.aws/gx-canary",
+  "expect": "refused",
+  "action": "read",
+  "token": null,
+  "label": "home:.aws",
+  "cmd": "cat -- /Users/gx-user/.aws/gx-canary >/dev/null"
+ },
+ {
+  "id": "Read:read:home:.azure",
+  "tool": "Read",
+  "target": "/Users/gx-user/.azure/gx-canary",
+  "expect": "refused",
+  "action": "read",
+  "token": null,
+  "label": "home:.azure",
+  "cmd": null
+ },
+ {
+  "id": "Bash:read:home:.azure",
+  "tool": "Bash",
+  "target": "/Users/gx-user/.azure/gx-canary",
+  "expect": "refused",
+  "action": "read",
+  "token": null,
+  "label": "home:.azure",
+  "cmd": "cat -- /Users/gx-user/.azure/gx-canary >/dev/null"
+ },
+ {
+  "id": "Read:read:home:.config/gcloud",
+  "tool": "Read",
+  "target": "/Users/gx-user/.config/gcloud/gx-canary",
+  "expect": "refused",
+  "action": "read",
+  "token": null,
+  "label": "home:.config/gcloud",
+  "cmd": null
+ },
+ {
+  "id": "Bash:read:home:.config/gcloud",
+  "tool": "Bash",
+  "target": "/Users/gx-user/.config/gcloud/gx-canary",
+  "expect": "refused",
+  "action": "read",
+  "token": null,
+  "label": "home:.config/gcloud",
+  "cmd": "cat -- /Users/gx-user/.config/gcloud/gx-canary >/dev/null"
+ },
+ {
+  "id": "Read:read:home:.config/gh",
+  "tool": "Read",
+  "target": "/Users/gx-user/.config/gh/gx-canary",
+  "expect": "refused",
+  "action": "read",
+  "token": null,
+  "label": "home:.config/gh",
+  "cmd": null
+ },
+ {
+  "id": "Bash:read:home:.config/gh",
+  "tool": "Bash",
+  "target": "/Users/gx-user/.config/gh/gx-canary",
+  "expect": "refused",
+  "action": "read",
+  "token": null,
+  "label": "home:.config/gh",
+  "cmd": "cat -- /Users/gx-user/.config/gh/gx-canary >/dev/null"
+ },
+ {
+  "id": "Bash:read:home:.npmrc",
+  "tool": "Bash",
+  "target": "/Users/gx-user/.npmrc",
+  "expect": "refused",
+  "action": "read",
+  "token": null,
+  "label": "home:.npmrc",
+  "cmd": "cat -- /Users/gx-user/.npmrc >/dev/null"
+ },
+ {
+  "id": "Read:read:home:.netrc",
+  "tool": "Read",
+  "target": "/Users/gx-user/.netrc",
+  "expect": "refused",
+  "action": "read",
+  "token": null,
+  "label": "home:.netrc",
+  "cmd": null
+ },
+ {
+  "id": "Bash:read:home:.netrc",
+  "tool": "Bash",
+  "target": "/Users/gx-user/.netrc",
+  "expect": "refused",
+  "action": "read",
+  "token": null,
+  "label": "home:.netrc",
+  "cmd": "cat -- /Users/gx-user/.netrc >/dev/null"
+ },
+ {
+  "id": "Read:read:home:.git-credentials",
+  "tool": "Read",
+  "target": "/Users/gx-user/.git-credentials",
+  "expect": "refused",
+  "action": "read",
+  "token": null,
+  "label": "home:.git-credentials",
+  "cmd": null
+ },
+ {
+  "id": "Bash:read:home:.git-credentials",
+  "tool": "Bash",
+  "target": "/Users/gx-user/.git-credentials",
+  "expect": "refused",
+  "action": "read",
+  "token": null,
+  "label": "home:.git-credentials",
+  "cmd": "cat -- /Users/gx-user/.git-credentials >/dev/null"
+ },
+ {
+  "id": "Bash:read:home:.docker/config.json",
+  "tool": "Bash",
+  "target": "/Users/gx-user/.docker/config.json",
+  "expect": "refused",
+  "action": "read",
+  "token": null,
+  "label": "home:.docker/config.json",
+  "cmd": "cat -- /Users/gx-user/.docker/config.json >/dev/null"
+ },
+ {
+  "id": "Read:read:home:.kube",
+  "tool": "Read",
+  "target": "/Users/gx-user/.kube/gx-canary",
+  "expect": "refused",
+  "action": "read",
+  "token": null,
+  "label": "home:.kube",
+  "cmd": null
+ },
+ {
+  "id": "Bash:read:home:.kube",
+  "tool": "Bash",
+  "target": "/Users/gx-user/.kube/gx-canary",
+  "expect": "refused",
+  "action": "read",
+  "token": null,
+  "label": "home:.kube",
+  "cmd": "cat -- /Users/gx-user/.kube/gx-canary >/dev/null"
+ },
+ {
+  "id": "Read:read:home:Library/Keychains",
+  "tool": "Read",
+  "target": "/Users/gx-user/Library/Keychains/gx-canary",
+  "expect": "refused",
+  "action": "read",
+  "token": null,
+  "label": "home:Library/Keychains",
+  "cmd": null
+ },
+ {
+  "id": "Bash:read:home:Library/Keychains",
+  "tool": "Bash",
+  "target": "/Users/gx-user/Library/Keychains/gx-canary",
+  "expect": "refused",
+  "action": "read",
+  "token": null,
+  "label": "home:Library/Keychains",
+  "cmd": "cat -- /Users/gx-user/Library/Keychains/gx-canary >/dev/null"
+ },
+ {
+  "id": "Read:read:claude-config",
+  "tool": "Read",
+  "target": "/Users/gx-user/.claude-personal/gx-canary",
+  "expect": "refused",
+  "action": "read",
+  "token": null,
+  "label": "claude-config",
+  "cmd": null
+ },
+ {
+  "id": "Bash:read:claude-config",
+  "tool": "Bash",
+  "target": "/Users/gx-user/.claude-personal/gx-canary",
+  "expect": "refused",
+  "action": "read",
+  "token": null,
+  "label": "claude-config",
+  "cmd": "cat -- /Users/gx-user/.claude-personal/gx-canary >/dev/null"
+ },
+ {
+  "id": "Read:read:home-claude",
+  "tool": "Read",
+  "target": "/Users/gx-user/.claude/gx-canary",
+  "expect": "refused",
+  "action": "read",
+  "token": null,
+  "label": "home-claude",
+  "cmd": null
+ },
+ {
+  "id": "Bash:read:home-claude",
+  "tool": "Bash",
+  "target": "/Users/gx-user/.claude/gx-canary",
+  "expect": "refused",
+  "action": "read",
+  "token": null,
+  "label": "home-claude",
+  "cmd": "cat -- /Users/gx-user/.claude/gx-canary >/dev/null"
+ },
+ {
+  "id": "Bash:read:claude-json",
+  "tool": "Bash",
+  "target": "/Users/gx-user/.claude.json",
+  "expect": "refused",
+  "action": "read",
+  "token": null,
+  "label": "claude-json",
+  "cmd": "cat -- /Users/gx-user/.claude.json >/dev/null"
+ },
+ {
+  "id": "Read:read:main-secret:.env*",
+  "tool": "Read",
+  "target": "/tmp/gx-c/l/w/projects/app/.env-gx-canary",
+  "expect": "refused",
+  "action": "read",
+  "token": null,
+  "label": "main-secret:.env*",
+  "cmd": null
+ },
+ {
+  "id": "Bash:read:main-secret:.env*",
+  "tool": "Bash",
+  "target": "/tmp/gx-c/l/w/projects/app/.env-gx-canary",
+  "expect": "refused",
+  "action": "read",
+  "token": null,
+  "label": "main-secret:.env*",
+  "cmd": "cat -- /tmp/gx-c/l/w/projects/app/.env-gx-canary >/dev/null"
+ },
+ {
+  "id": "Read:read:wt-secret:.env*",
+  "tool": "Read",
+  "target": "/tmp/gx-c/l/w/projects/.gld-app-1/.env-gx-canary",
+  "expect": "refused",
+  "action": "read",
+  "token": null,
+  "label": "wt-secret:.env*",
+  "cmd": null
+ },
+ {
+  "id": "Bash:read:wt-secret:.env*",
+  "tool": "Bash",
+  "target": "/tmp/gx-c/l/w/projects/.gld-app-1/.env-gx-canary",
+  "expect": "refused",
+  "action": "read",
+  "token": null,
+  "label": "wt-secret:.env*",
+  "cmd": "cat -- /tmp/gx-c/l/w/projects/.gld-app-1/.env-gx-canary >/dev/null"
+ },
+ {
+  "id": "Read:read:wt-secret-nested:.env*",
+  "tool": "Read",
+  "target": "/tmp/gx-c/l/w/projects/.gld-app-1/gx-canary-sub/.env-gx-canary",
+  "expect": "refused",
+  "action": "read",
+  "token": null,
+  "label": "wt-secret-nested:.env*",
+  "cmd": null
+ },
+ {
+  "id": "Bash:read:wt-secret-nested:.env*",
+  "tool": "Bash",
+  "target": "/tmp/gx-c/l/w/projects/.gld-app-1/gx-canary-sub/.env-gx-canary",
+  "expect": "refused",
+  "action": "read",
+  "token": null,
+  "label": "wt-secret-nested:.env*",
+  "cmd": "cat -- /tmp/gx-c/l/w/projects/.gld-app-1/gx-canary-sub/.env-gx-canary >/dev/null"
+ },
+ {
+  "id": "Read:read:wt-secret-case:.env*",
+  "tool": "Read",
+  "target": "/tmp/gx-c/l/w/projects/.gld-app-1/.ENV-GX-CANARY",
+  "expect": "refused",
+  "action": "read",
+  "token": null,
+  "label": "wt-secret-case:.env*",
+  "cmd": null
+ },
+ {
+  "id": "Bash:read:wt-secret-case:.env*",
+  "tool": "Bash",
+  "target": "/tmp/gx-c/l/w/projects/.gld-app-1/.ENV-GX-CANARY",
+  "expect": "refused",
+  "action": "read",
+  "token": null,
+  "label": "wt-secret-case:.env*",
+  "cmd": "cat -- /tmp/gx-c/l/w/projects/.gld-app-1/.ENV-GX-CANARY >/dev/null"
+ },
+ {
+  "id": "Read:read:other-wt-secret:0:.env*",
+  "tool": "Read",
+  "target": "/tmp/gx-c/l/w/projects/.gld-app-2/.env-gx-canary",
+  "expect": "refused",
+  "action": "read",
+  "token": null,
+  "label": "other-wt-secret:0:.env*",
+  "cmd": null
+ },
+ {
+  "id": "Bash:read:other-wt-secret:0:.env*",
+  "tool": "Bash",
+  "target": "/tmp/gx-c/l/w/projects/.gld-app-2/.env-gx-canary",
+  "expect": "refused",
+  "action": "read",
+  "token": null,
+  "label": "other-wt-secret:0:.env*",
+  "cmd": "cat -- /tmp/gx-c/l/w/projects/.gld-app-2/.env-gx-canary >/dev/null"
+ },
+ {
+  "id": "Read:read:main-secret:*.pem",
+  "tool": "Read",
+  "target": "/tmp/gx-c/l/w/projects/app/gx-canary.pem",
+  "expect": "refused",
+  "action": "read",
+  "token": null,
+  "label": "main-secret:*.pem",
+  "cmd": null
+ },
+ {
+  "id": "Bash:read:main-secret:*.pem",
+  "tool": "Bash",
+  "target": "/tmp/gx-c/l/w/projects/app/gx-canary.pem",
+  "expect": "refused",
+  "action": "read",
+  "token": null,
+  "label": "main-secret:*.pem",
+  "cmd": "cat -- /tmp/gx-c/l/w/projects/app/gx-canary.pem >/dev/null"
+ },
+ {
+  "id": "Read:read:wt-secret:*.pem",
+  "tool": "Read",
+  "target": "/tmp/gx-c/l/w/projects/.gld-app-1/gx-canary.pem",
+  "expect": "refused",
+  "action": "read",
+  "token": null,
+  "label": "wt-secret:*.pem",
+  "cmd": null
+ },
+ {
+  "id": "Bash:read:wt-secret:*.pem",
+  "tool": "Bash",
+  "target": "/tmp/gx-c/l/w/projects/.gld-app-1/gx-canary.pem",
+  "expect": "refused",
+  "action": "read",
+  "token": null,
+  "label": "wt-secret:*.pem",
+  "cmd": "cat -- /tmp/gx-c/l/w/projects/.gld-app-1/gx-canary.pem >/dev/null"
+ },
+ {
+  "id": "Read:read:wt-secret-nested:*.pem",
+  "tool": "Read",
+  "target": "/tmp/gx-c/l/w/projects/.gld-app-1/gx-canary-sub/gx-canary.pem",
+  "expect": "refused",
+  "action": "read",
+  "token": null,
+  "label": "wt-secret-nested:*.pem",
+  "cmd": null
+ },
+ {
+  "id": "Bash:read:wt-secret-nested:*.pem",
+  "tool": "Bash",
+  "target": "/tmp/gx-c/l/w/projects/.gld-app-1/gx-canary-sub/gx-canary.pem",
+  "expect": "refused",
+  "action": "read",
+  "token": null,
+  "label": "wt-secret-nested:*.pem",
+  "cmd": "cat -- /tmp/gx-c/l/w/projects/.gld-app-1/gx-canary-sub/gx-canary.pem >/dev/null"
+ },
+ {
+  "id": "Read:read:wt-secret-case:*.pem",
+  "tool": "Read",
+  "target": "/tmp/gx-c/l/w/projects/.gld-app-1/GX-CANARY.PEM",
+  "expect": "refused",
+  "action": "read",
+  "token": null,
+  "label": "wt-secret-case:*.pem",
+  "cmd": null
+ },
+ {
+  "id": "Bash:read:wt-secret-case:*.pem",
+  "tool": "Bash",
+  "target": "/tmp/gx-c/l/w/projects/.gld-app-1/GX-CANARY.PEM",
+  "expect": "refused",
+  "action": "read",
+  "token": null,
+  "label": "wt-secret-case:*.pem",
+  "cmd": "cat -- /tmp/gx-c/l/w/projects/.gld-app-1/GX-CANARY.PEM >/dev/null"
+ },
+ {
+  "id": "Read:read:other-wt-secret:0:*.pem",
+  "tool": "Read",
+  "target": "/tmp/gx-c/l/w/projects/.gld-app-2/gx-canary.pem",
+  "expect": "refused",
+  "action": "read",
+  "token": null,
+  "label": "other-wt-secret:0:*.pem",
+  "cmd": null
+ },
+ {
+  "id": "Bash:read:other-wt-secret:0:*.pem",
+  "tool": "Bash",
+  "target": "/tmp/gx-c/l/w/projects/.gld-app-2/gx-canary.pem",
+  "expect": "refused",
+  "action": "read",
+  "token": null,
+  "label": "other-wt-secret:0:*.pem",
+  "cmd": "cat -- /tmp/gx-c/l/w/projects/.gld-app-2/gx-canary.pem >/dev/null"
+ },
+ {
+  "id": "Read:read:main-secret:*.p12",
+  "tool": "Read",
+  "target": "/tmp/gx-c/l/w/projects/app/gx-canary.p12",
+  "expect": "refused",
+  "action": "read",
+  "token": null,
+  "label": "main-secret:*.p12",
+  "cmd": null
+ },
+ {
+  "id": "Bash:read:main-secret:*.p12",
+  "tool": "Bash",
+  "target": "/tmp/gx-c/l/w/projects/app/gx-canary.p12",
+  "expect": "refused",
+  "action": "read",
+  "token": null,
+  "label": "main-secret:*.p12",
+  "cmd": "cat -- /tmp/gx-c/l/w/projects/app/gx-canary.p12 >/dev/null"
+ },
+ {
+  "id": "Read:read:wt-secret:*.p12",
+  "tool": "Read",
+  "target": "/tmp/gx-c/l/w/projects/.gld-app-1/gx-canary.p12",
+  "expect": "refused",
+  "action": "read",
+  "token": null,
+  "label": "wt-secret:*.p12",
+  "cmd": null
+ },
+ {
+  "id": "Bash:read:wt-secret:*.p12",
+  "tool": "Bash",
+  "target": "/tmp/gx-c/l/w/projects/.gld-app-1/gx-canary.p12",
+  "expect": "refused",
+  "action": "read",
+  "token": null,
+  "label": "wt-secret:*.p12",
+  "cmd": "cat -- /tmp/gx-c/l/w/projects/.gld-app-1/gx-canary.p12 >/dev/null"
+ },
+ {
+  "id": "Read:read:wt-secret-nested:*.p12",
+  "tool": "Read",
+  "target": "/tmp/gx-c/l/w/projects/.gld-app-1/gx-canary-sub/gx-canary.p12",
+  "expect": "refused",
+  "action": "read",
+  "token": null,
+  "label": "wt-secret-nested:*.p12",
+  "cmd": null
+ },
+ {
+  "id": "Bash:read:wt-secret-nested:*.p12",
+  "tool": "Bash",
+  "target": "/tmp/gx-c/l/w/projects/.gld-app-1/gx-canary-sub/gx-canary.p12",
+  "expect": "refused",
+  "action": "read",
+  "token": null,
+  "label": "wt-secret-nested:*.p12",
+  "cmd": "cat -- /tmp/gx-c/l/w/projects/.gld-app-1/gx-canary-sub/gx-canary.p12 >/dev/null"
+ },
+ {
+  "id": "Read:read:wt-secret-case:*.p12",
+  "tool": "Read",
+  "target": "/tmp/gx-c/l/w/projects/.gld-app-1/GX-CANARY.P12",
+  "expect": "refused",
+  "action": "read",
+  "token": null,
+  "label": "wt-secret-case:*.p12",
+  "cmd": null
+ },
+ {
+  "id": "Bash:read:wt-secret-case:*.p12",
+  "tool": "Bash",
+  "target": "/tmp/gx-c/l/w/projects/.gld-app-1/GX-CANARY.P12",
+  "expect": "refused",
+  "action": "read",
+  "token": null,
+  "label": "wt-secret-case:*.p12",
+  "cmd": "cat -- /tmp/gx-c/l/w/projects/.gld-app-1/GX-CANARY.P12 >/dev/null"
+ },
+ {
+  "id": "Read:read:other-wt-secret:0:*.p12",
+  "tool": "Read",
+  "target": "/tmp/gx-c/l/w/projects/.gld-app-2/gx-canary.p12",
+  "expect": "refused",
+  "action": "read",
+  "token": null,
+  "label": "other-wt-secret:0:*.p12",
+  "cmd": null
+ },
+ {
+  "id": "Bash:read:other-wt-secret:0:*.p12",
+  "tool": "Bash",
+  "target": "/tmp/gx-c/l/w/projects/.gld-app-2/gx-canary.p12",
+  "expect": "refused",
+  "action": "read",
+  "token": null,
+  "label": "other-wt-secret:0:*.p12",
+  "cmd": "cat -- /tmp/gx-c/l/w/projects/.gld-app-2/gx-canary.p12 >/dev/null"
+ },
+ {
+  "id": "Read:read:main-secret:*.key",
+  "tool": "Read",
+  "target": "/tmp/gx-c/l/w/projects/app/gx-canary.key",
+  "expect": "refused",
+  "action": "read",
+  "token": null,
+  "label": "main-secret:*.key",
+  "cmd": null
+ },
+ {
+  "id": "Bash:read:main-secret:*.key",
+  "tool": "Bash",
+  "target": "/tmp/gx-c/l/w/projects/app/gx-canary.key",
+  "expect": "refused",
+  "action": "read",
+  "token": null,
+  "label": "main-secret:*.key",
+  "cmd": "cat -- /tmp/gx-c/l/w/projects/app/gx-canary.key >/dev/null"
+ },
+ {
+  "id": "Read:read:wt-secret:*.key",
+  "tool": "Read",
+  "target": "/tmp/gx-c/l/w/projects/.gld-app-1/gx-canary.key",
+  "expect": "refused",
+  "action": "read",
+  "token": null,
+  "label": "wt-secret:*.key",
+  "cmd": null
+ },
+ {
+  "id": "Bash:read:wt-secret:*.key",
+  "tool": "Bash",
+  "target": "/tmp/gx-c/l/w/projects/.gld-app-1/gx-canary.key",
+  "expect": "refused",
+  "action": "read",
+  "token": null,
+  "label": "wt-secret:*.key",
+  "cmd": "cat -- /tmp/gx-c/l/w/projects/.gld-app-1/gx-canary.key >/dev/null"
+ },
+ {
+  "id": "Read:read:wt-secret-nested:*.key",
+  "tool": "Read",
+  "target": "/tmp/gx-c/l/w/projects/.gld-app-1/gx-canary-sub/gx-canary.key",
+  "expect": "refused",
+  "action": "read",
+  "token": null,
+  "label": "wt-secret-nested:*.key",
+  "cmd": null
+ },
+ {
+  "id": "Bash:read:wt-secret-nested:*.key",
+  "tool": "Bash",
+  "target": "/tmp/gx-c/l/w/projects/.gld-app-1/gx-canary-sub/gx-canary.key",
+  "expect": "refused",
+  "action": "read",
+  "token": null,
+  "label": "wt-secret-nested:*.key",
+  "cmd": "cat -- /tmp/gx-c/l/w/projects/.gld-app-1/gx-canary-sub/gx-canary.key >/dev/null"
+ },
+ {
+  "id": "Read:read:wt-secret-case:*.key",
+  "tool": "Read",
+  "target": "/tmp/gx-c/l/w/projects/.gld-app-1/GX-CANARY.KEY",
+  "expect": "refused",
+  "action": "read",
+  "token": null,
+  "label": "wt-secret-case:*.key",
+  "cmd": null
+ },
+ {
+  "id": "Bash:read:wt-secret-case:*.key",
+  "tool": "Bash",
+  "target": "/tmp/gx-c/l/w/projects/.gld-app-1/GX-CANARY.KEY",
+  "expect": "refused",
+  "action": "read",
+  "token": null,
+  "label": "wt-secret-case:*.key",
+  "cmd": "cat -- /tmp/gx-c/l/w/projects/.gld-app-1/GX-CANARY.KEY >/dev/null"
+ },
+ {
+  "id": "Read:read:other-wt-secret:0:*.key",
+  "tool": "Read",
+  "target": "/tmp/gx-c/l/w/projects/.gld-app-2/gx-canary.key",
+  "expect": "refused",
+  "action": "read",
+  "token": null,
+  "label": "other-wt-secret:0:*.key",
+  "cmd": null
+ },
+ {
+  "id": "Bash:read:other-wt-secret:0:*.key",
+  "tool": "Bash",
+  "target": "/tmp/gx-c/l/w/projects/.gld-app-2/gx-canary.key",
+  "expect": "refused",
+  "action": "read",
+  "token": null,
+  "label": "other-wt-secret:0:*.key",
+  "cmd": "cat -- /tmp/gx-c/l/w/projects/.gld-app-2/gx-canary.key >/dev/null"
+ },
+ {
+  "id": "Read:read:main-secret:**/.env*",
+  "tool": "Read",
+  "target": "/tmp/gx-c/l/w/projects/app/gx-canary/.env-gx-canary",
+  "expect": "refused",
+  "action": "read",
+  "token": null,
+  "label": "main-secret:**/.env*",
+  "cmd": null
+ },
+ {
+  "id": "Bash:read:main-secret:**/.env*",
+  "tool": "Bash",
+  "target": "/tmp/gx-c/l/w/projects/app/gx-canary/.env-gx-canary",
+  "expect": "refused",
+  "action": "read",
+  "token": null,
+  "label": "main-secret:**/.env*",
+  "cmd": "cat -- /tmp/gx-c/l/w/projects/app/gx-canary/.env-gx-canary >/dev/null"
+ },
+ {
+  "id": "Read:read:wt-secret:**/.env*",
+  "tool": "Read",
+  "target": "/tmp/gx-c/l/w/projects/.gld-app-1/gx-canary/.env-gx-canary",
+  "expect": "refused",
+  "action": "read",
+  "token": null,
+  "label": "wt-secret:**/.env*",
+  "cmd": null
+ },
+ {
+  "id": "Bash:read:wt-secret:**/.env*",
+  "tool": "Bash",
+  "target": "/tmp/gx-c/l/w/projects/.gld-app-1/gx-canary/.env-gx-canary",
+  "expect": "refused",
+  "action": "read",
+  "token": null,
+  "label": "wt-secret:**/.env*",
+  "cmd": "cat -- /tmp/gx-c/l/w/projects/.gld-app-1/gx-canary/.env-gx-canary >/dev/null"
+ },
+ {
+  "id": "Read:read:wt-secret-nested:**/.env*",
+  "tool": "Read",
+  "target": "/tmp/gx-c/l/w/projects/.gld-app-1/gx-canary-sub/gx-canary/.env-gx-canary",
+  "expect": "refused",
+  "action": "read",
+  "token": null,
+  "label": "wt-secret-nested:**/.env*",
+  "cmd": null
+ },
+ {
+  "id": "Bash:read:wt-secret-nested:**/.env*",
+  "tool": "Bash",
+  "target": "/tmp/gx-c/l/w/projects/.gld-app-1/gx-canary-sub/gx-canary/.env-gx-canary",
+  "expect": "refused",
+  "action": "read",
+  "token": null,
+  "label": "wt-secret-nested:**/.env*",
+  "cmd": "cat -- /tmp/gx-c/l/w/projects/.gld-app-1/gx-canary-sub/gx-canary/.env-gx-canary >/dev/null"
+ },
+ {
+  "id": "Read:read:wt-secret-case:**/.env*",
+  "tool": "Read",
+  "target": "/tmp/gx-c/l/w/projects/.gld-app-1/GX-CANARY/.ENV-GX-CANARY",
+  "expect": "refused",
+  "action": "read",
+  "token": null,
+  "label": "wt-secret-case:**/.env*",
+  "cmd": null
+ },
+ {
+  "id": "Bash:read:wt-secret-case:**/.env*",
+  "tool": "Bash",
+  "target": "/tmp/gx-c/l/w/projects/.gld-app-1/GX-CANARY/.ENV-GX-CANARY",
+  "expect": "refused",
+  "action": "read",
+  "token": null,
+  "label": "wt-secret-case:**/.env*",
+  "cmd": "cat -- /tmp/gx-c/l/w/projects/.gld-app-1/GX-CANARY/.ENV-GX-CANARY >/dev/null"
+ },
+ {
+  "id": "Read:read:other-wt-secret:0:**/.env*",
+  "tool": "Read",
+  "target": "/tmp/gx-c/l/w/projects/.gld-app-2/gx-canary/.env-gx-canary",
+  "expect": "refused",
+  "action": "read",
+  "token": null,
+  "label": "other-wt-secret:0:**/.env*",
+  "cmd": null
+ },
+ {
+  "id": "Bash:read:other-wt-secret:0:**/.env*",
+  "tool": "Bash",
+  "target": "/tmp/gx-c/l/w/projects/.gld-app-2/gx-canary/.env-gx-canary",
+  "expect": "refused",
+  "action": "read",
+  "token": null,
+  "label": "other-wt-secret:0:**/.env*",
+  "cmd": "cat -- /tmp/gx-c/l/w/projects/.gld-app-2/gx-canary/.env-gx-canary >/dev/null"
+ },
+ {
+  "id": "Read:read:main-secret:**/*.pem",
+  "tool": "Read",
+  "target": "/tmp/gx-c/l/w/projects/app/gx-canary/gx-canary.pem",
+  "expect": "refused",
+  "action": "read",
+  "token": null,
+  "label": "main-secret:**/*.pem",
+  "cmd": null
+ },
+ {
+  "id": "Bash:read:main-secret:**/*.pem",
+  "tool": "Bash",
+  "target": "/tmp/gx-c/l/w/projects/app/gx-canary/gx-canary.pem",
+  "expect": "refused",
+  "action": "read",
+  "token": null,
+  "label": "main-secret:**/*.pem",
+  "cmd": "cat -- /tmp/gx-c/l/w/projects/app/gx-canary/gx-canary.pem >/dev/null"
+ },
+ {
+  "id": "Read:read:wt-secret:**/*.pem",
+  "tool": "Read",
+  "target": "/tmp/gx-c/l/w/projects/.gld-app-1/gx-canary/gx-canary.pem",
+  "expect": "refused",
+  "action": "read",
+  "token": null,
+  "label": "wt-secret:**/*.pem",
+  "cmd": null
+ },
+ {
+  "id": "Bash:read:wt-secret:**/*.pem",
+  "tool": "Bash",
+  "target": "/tmp/gx-c/l/w/projects/.gld-app-1/gx-canary/gx-canary.pem",
+  "expect": "refused",
+  "action": "read",
+  "token": null,
+  "label": "wt-secret:**/*.pem",
+  "cmd": "cat -- /tmp/gx-c/l/w/projects/.gld-app-1/gx-canary/gx-canary.pem >/dev/null"
+ },
+ {
+  "id": "Read:read:wt-secret-nested:**/*.pem",
+  "tool": "Read",
+  "target": "/tmp/gx-c/l/w/projects/.gld-app-1/gx-canary-sub/gx-canary/gx-canary.pem",
+  "expect": "refused",
+  "action": "read",
+  "token": null,
+  "label": "wt-secret-nested:**/*.pem",
+  "cmd": null
+ },
+ {
+  "id": "Bash:read:wt-secret-nested:**/*.pem",
+  "tool": "Bash",
+  "target": "/tmp/gx-c/l/w/projects/.gld-app-1/gx-canary-sub/gx-canary/gx-canary.pem",
+  "expect": "refused",
+  "action": "read",
+  "token": null,
+  "label": "wt-secret-nested:**/*.pem",
+  "cmd": "cat -- /tmp/gx-c/l/w/projects/.gld-app-1/gx-canary-sub/gx-canary/gx-canary.pem >/dev/null"
+ },
+ {
+  "id": "Read:read:wt-secret-case:**/*.pem",
+  "tool": "Read",
+  "target": "/tmp/gx-c/l/w/projects/.gld-app-1/GX-CANARY/GX-CANARY.PEM",
+  "expect": "refused",
+  "action": "read",
+  "token": null,
+  "label": "wt-secret-case:**/*.pem",
+  "cmd": null
+ },
+ {
+  "id": "Bash:read:wt-secret-case:**/*.pem",
+  "tool": "Bash",
+  "target": "/tmp/gx-c/l/w/projects/.gld-app-1/GX-CANARY/GX-CANARY.PEM",
+  "expect": "refused",
+  "action": "read",
+  "token": null,
+  "label": "wt-secret-case:**/*.pem",
+  "cmd": "cat -- /tmp/gx-c/l/w/projects/.gld-app-1/GX-CANARY/GX-CANARY.PEM >/dev/null"
+ },
+ {
+  "id": "Read:read:other-wt-secret:0:**/*.pem",
+  "tool": "Read",
+  "target": "/tmp/gx-c/l/w/projects/.gld-app-2/gx-canary/gx-canary.pem",
+  "expect": "refused",
+  "action": "read",
+  "token": null,
+  "label": "other-wt-secret:0:**/*.pem",
+  "cmd": null
+ },
+ {
+  "id": "Bash:read:other-wt-secret:0:**/*.pem",
+  "tool": "Bash",
+  "target": "/tmp/gx-c/l/w/projects/.gld-app-2/gx-canary/gx-canary.pem",
+  "expect": "refused",
+  "action": "read",
+  "token": null,
+  "label": "other-wt-secret:0:**/*.pem",
+  "cmd": "cat -- /tmp/gx-c/l/w/projects/.gld-app-2/gx-canary/gx-canary.pem >/dev/null"
+ },
+ {
+  "id": "Read:read:main-secret:**/*.p12",
+  "tool": "Read",
+  "target": "/tmp/gx-c/l/w/projects/app/gx-canary/gx-canary.p12",
+  "expect": "refused",
+  "action": "read",
+  "token": null,
+  "label": "main-secret:**/*.p12",
+  "cmd": null
+ },
+ {
+  "id": "Bash:read:main-secret:**/*.p12",
+  "tool": "Bash",
+  "target": "/tmp/gx-c/l/w/projects/app/gx-canary/gx-canary.p12",
+  "expect": "refused",
+  "action": "read",
+  "token": null,
+  "label": "main-secret:**/*.p12",
+  "cmd": "cat -- /tmp/gx-c/l/w/projects/app/gx-canary/gx-canary.p12 >/dev/null"
+ },
+ {
+  "id": "Read:read:wt-secret:**/*.p12",
+  "tool": "Read",
+  "target": "/tmp/gx-c/l/w/projects/.gld-app-1/gx-canary/gx-canary.p12",
+  "expect": "refused",
+  "action": "read",
+  "token": null,
+  "label": "wt-secret:**/*.p12",
+  "cmd": null
+ },
+ {
+  "id": "Bash:read:wt-secret:**/*.p12",
+  "tool": "Bash",
+  "target": "/tmp/gx-c/l/w/projects/.gld-app-1/gx-canary/gx-canary.p12",
+  "expect": "refused",
+  "action": "read",
+  "token": null,
+  "label": "wt-secret:**/*.p12",
+  "cmd": "cat -- /tmp/gx-c/l/w/projects/.gld-app-1/gx-canary/gx-canary.p12 >/dev/null"
+ },
+ {
+  "id": "Read:read:wt-secret-nested:**/*.p12",
+  "tool": "Read",
+  "target": "/tmp/gx-c/l/w/projects/.gld-app-1/gx-canary-sub/gx-canary/gx-canary.p12",
+  "expect": "refused",
+  "action": "read",
+  "token": null,
+  "label": "wt-secret-nested:**/*.p12",
+  "cmd": null
+ },
+ {
+  "id": "Bash:read:wt-secret-nested:**/*.p12",
+  "tool": "Bash",
+  "target": "/tmp/gx-c/l/w/projects/.gld-app-1/gx-canary-sub/gx-canary/gx-canary.p12",
+  "expect": "refused",
+  "action": "read",
+  "token": null,
+  "label": "wt-secret-nested:**/*.p12",
+  "cmd": "cat -- /tmp/gx-c/l/w/projects/.gld-app-1/gx-canary-sub/gx-canary/gx-canary.p12 >/dev/null"
+ },
+ {
+  "id": "Read:read:wt-secret-case:**/*.p12",
+  "tool": "Read",
+  "target": "/tmp/gx-c/l/w/projects/.gld-app-1/GX-CANARY/GX-CANARY.P12",
+  "expect": "refused",
+  "action": "read",
+  "token": null,
+  "label": "wt-secret-case:**/*.p12",
+  "cmd": null
+ },
+ {
+  "id": "Bash:read:wt-secret-case:**/*.p12",
+  "tool": "Bash",
+  "target": "/tmp/gx-c/l/w/projects/.gld-app-1/GX-CANARY/GX-CANARY.P12",
+  "expect": "refused",
+  "action": "read",
+  "token": null,
+  "label": "wt-secret-case:**/*.p12",
+  "cmd": "cat -- /tmp/gx-c/l/w/projects/.gld-app-1/GX-CANARY/GX-CANARY.P12 >/dev/null"
+ },
+ {
+  "id": "Read:read:other-wt-secret:0:**/*.p12",
+  "tool": "Read",
+  "target": "/tmp/gx-c/l/w/projects/.gld-app-2/gx-canary/gx-canary.p12",
+  "expect": "refused",
+  "action": "read",
+  "token": null,
+  "label": "other-wt-secret:0:**/*.p12",
+  "cmd": null
+ },
+ {
+  "id": "Bash:read:other-wt-secret:0:**/*.p12",
+  "tool": "Bash",
+  "target": "/tmp/gx-c/l/w/projects/.gld-app-2/gx-canary/gx-canary.p12",
+  "expect": "refused",
+  "action": "read",
+  "token": null,
+  "label": "other-wt-secret:0:**/*.p12",
+  "cmd": "cat -- /tmp/gx-c/l/w/projects/.gld-app-2/gx-canary/gx-canary.p12 >/dev/null"
+ },
+ {
+  "id": "Read:read:main-secret:**/*.key",
+  "tool": "Read",
+  "target": "/tmp/gx-c/l/w/projects/app/gx-canary/gx-canary.key",
+  "expect": "refused",
+  "action": "read",
+  "token": null,
+  "label": "main-secret:**/*.key",
+  "cmd": null
+ },
+ {
+  "id": "Bash:read:main-secret:**/*.key",
+  "tool": "Bash",
+  "target": "/tmp/gx-c/l/w/projects/app/gx-canary/gx-canary.key",
+  "expect": "refused",
+  "action": "read",
+  "token": null,
+  "label": "main-secret:**/*.key",
+  "cmd": "cat -- /tmp/gx-c/l/w/projects/app/gx-canary/gx-canary.key >/dev/null"
+ },
+ {
+  "id": "Read:read:wt-secret:**/*.key",
+  "tool": "Read",
+  "target": "/tmp/gx-c/l/w/projects/.gld-app-1/gx-canary/gx-canary.key",
+  "expect": "refused",
+  "action": "read",
+  "token": null,
+  "label": "wt-secret:**/*.key",
+  "cmd": null
+ },
+ {
+  "id": "Bash:read:wt-secret:**/*.key",
+  "tool": "Bash",
+  "target": "/tmp/gx-c/l/w/projects/.gld-app-1/gx-canary/gx-canary.key",
+  "expect": "refused",
+  "action": "read",
+  "token": null,
+  "label": "wt-secret:**/*.key",
+  "cmd": "cat -- /tmp/gx-c/l/w/projects/.gld-app-1/gx-canary/gx-canary.key >/dev/null"
+ },
+ {
+  "id": "Read:read:wt-secret-nested:**/*.key",
+  "tool": "Read",
+  "target": "/tmp/gx-c/l/w/projects/.gld-app-1/gx-canary-sub/gx-canary/gx-canary.key",
+  "expect": "refused",
+  "action": "read",
+  "token": null,
+  "label": "wt-secret-nested:**/*.key",
+  "cmd": null
+ },
+ {
+  "id": "Bash:read:wt-secret-nested:**/*.key",
+  "tool": "Bash",
+  "target": "/tmp/gx-c/l/w/projects/.gld-app-1/gx-canary-sub/gx-canary/gx-canary.key",
+  "expect": "refused",
+  "action": "read",
+  "token": null,
+  "label": "wt-secret-nested:**/*.key",
+  "cmd": "cat -- /tmp/gx-c/l/w/projects/.gld-app-1/gx-canary-sub/gx-canary/gx-canary.key >/dev/null"
+ },
+ {
+  "id": "Read:read:wt-secret-case:**/*.key",
+  "tool": "Read",
+  "target": "/tmp/gx-c/l/w/projects/.gld-app-1/GX-CANARY/GX-CANARY.KEY",
+  "expect": "refused",
+  "action": "read",
+  "token": null,
+  "label": "wt-secret-case:**/*.key",
+  "cmd": null
+ },
+ {
+  "id": "Bash:read:wt-secret-case:**/*.key",
+  "tool": "Bash",
+  "target": "/tmp/gx-c/l/w/projects/.gld-app-1/GX-CANARY/GX-CANARY.KEY",
+  "expect": "refused",
+  "action": "read",
+  "token": null,
+  "label": "wt-secret-case:**/*.key",
+  "cmd": "cat -- /tmp/gx-c/l/w/projects/.gld-app-1/GX-CANARY/GX-CANARY.KEY >/dev/null"
+ },
+ {
+  "id": "Read:read:other-wt-secret:0:**/*.key",
+  "tool": "Read",
+  "target": "/tmp/gx-c/l/w/projects/.gld-app-2/gx-canary/gx-canary.key",
+  "expect": "refused",
+  "action": "read",
+  "token": null,
+  "label": "other-wt-secret:0:**/*.key",
+  "cmd": null
+ },
+ {
+  "id": "Bash:read:other-wt-secret:0:**/*.key",
+  "tool": "Bash",
+  "target": "/tmp/gx-c/l/w/projects/.gld-app-2/gx-canary/gx-canary.key",
+  "expect": "refused",
+  "action": "read",
+  "token": null,
+  "label": "other-wt-secret:0:**/*.key",
+  "cmd": "cat -- /tmp/gx-c/l/w/projects/.gld-app-2/gx-canary/gx-canary.key >/dev/null"
+ },
+ {
+  "id": "Read:read:other-repo:0",
+  "tool": "Read",
+  "target": "/tmp/gx-c/l/w/projects/other/gx-canary",
+  "expect": "refused",
+  "action": "read",
+  "token": null,
+  "label": "other-repo:0",
+  "cmd": null
+ },
+ {
+  "id": "Bash:read:other-repo:0",
+  "tool": "Bash",
+  "target": "/tmp/gx-c/l/w/projects/other/gx-canary",
+  "expect": "refused",
+  "action": "read",
+  "token": null,
+  "label": "other-repo:0",
+  "cmd": "cat -- /tmp/gx-c/l/w/projects/other/gx-canary >/dev/null"
+ },
+ {
+  "id": "Read:read:records-state",
+  "tool": "Read",
+  "target": "/tmp/gx-c/l/w/.gld/records/gx-canary/state.json",
+  "expect": "refused",
+  "action": "read",
+  "token": null,
+  "label": "records-state",
+  "cmd": null
+ },
+ {
+  "id": "Bash:read:records-state",
+  "tool": "Bash",
+  "target": "/tmp/gx-c/l/w/.gld/records/gx-canary/state.json",
+  "expect": "refused",
+  "action": "read",
+  "token": null,
+  "label": "records-state",
+  "cmd": "cat -- /tmp/gx-c/l/w/.gld/records/gx-canary/state.json >/dev/null"
+ },
+ {
+  "id": "Read:read:records-log",
+  "tool": "Read",
+  "target": "/tmp/gx-c/l/w/.gld/records/gx-canary/log.jsonl",
+  "expect": "refused",
+  "action": "read",
+  "token": null,
+  "label": "records-log",
+  "cmd": null
+ },
+ {
+  "id": "Bash:read:records-log",
+  "tool": "Bash",
+  "target": "/tmp/gx-c/l/w/.gld/records/gx-canary/log.jsonl",
+  "expect": "refused",
+  "action": "read",
+  "token": null,
+  "label": "records-log",
+  "cmd": "cat -- /tmp/gx-c/l/w/.gld/records/gx-canary/log.jsonl >/dev/null"
+ },
+ {
+  "id": "Read:read:records-brief",
+  "tool": "Read",
+  "target": "/tmp/gx-c/l/w/.gld/records/gx-canary/runs/gx-canary/1/brief.json",
+  "expect": "refused",
+  "action": "read",
+  "token": null,
+  "label": "records-brief",
+  "cmd": null
+ },
+ {
+  "id": "Bash:read:records-brief",
+  "tool": "Bash",
+  "target": "/tmp/gx-c/l/w/.gld/records/gx-canary/runs/gx-canary/1/brief.json",
+  "expect": "refused",
+  "action": "read",
+  "token": null,
+  "label": "records-brief",
+  "cmd": "cat -- /tmp/gx-c/l/w/.gld/records/gx-canary/runs/gx-canary/1/brief.json >/dev/null"
+ },
+ {
+  "id": "Read:read:other-attempt-in",
+  "tool": "Read",
+  "target": "/tmp/gx-c/l/w/.gld/records/gx-canary/runs/gx-canary/2/in/issue.md",
+  "expect": "refused",
+  "action": "read",
+  "token": null,
+  "label": "other-attempt-in",
+  "cmd": null
+ },
+ {
+  "id": "Bash:read:other-attempt-in",
+  "tool": "Bash",
+  "target": "/tmp/gx-c/l/w/.gld/records/gx-canary/runs/gx-canary/2/in/issue.md",
+  "expect": "refused",
+  "action": "read",
+  "token": null,
+  "label": "other-attempt-in",
+  "cmd": "cat -- /tmp/gx-c/l/w/.gld/records/gx-canary/runs/gx-canary/2/in/issue.md >/dev/null"
+ },
+ {
+  "id": "Read:read-ok:worktree-file",
+  "tool": "Read",
+  "target": "/tmp/gx-c/l/w/projects/.gld-app-1/gx-canary-readme.txt",
+  "expect": "allowed",
+  "action": "read",
+  "token": "GXCANARY-cf6f43795fdd",
+  "label": "worktree-file",
+  "cmd": null
+ },
+ {
+  "id": "Bash:read-ok:worktree-file",
+  "tool": "Bash",
+  "target": "/tmp/gx-c/l/w/projects/.gld-app-1/gx-canary-readme.txt",
+  "expect": "allowed",
+  "action": "read",
+  "token": "GXCANARY-cf6f43795fdd",
+  "label": "worktree-file",
+  "cmd": "cat -- /tmp/gx-c/l/w/projects/.gld-app-1/gx-canary-readme.txt"
+ },
+ {
+  "id": "Read:read-ok:own-in",
+  "tool": "Read",
+  "target": "/tmp/gx-c/l/w/.gld/records/acme/app/1/runs/canary/1/in/gx-canary.md",
+  "expect": "allowed",
+  "action": "read",
+  "token": "GXCANARY-f3cbc5770d0c",
+  "label": "own-in",
+  "cmd": null
+ },
+ {
+  "id": "Bash:read-ok:own-in",
+  "tool": "Bash",
+  "target": "/tmp/gx-c/l/w/.gld/records/acme/app/1/runs/canary/1/in/gx-canary.md",
+  "expect": "allowed",
+  "action": "read",
+  "token": "GXCANARY-f3cbc5770d0c",
+  "label": "own-in",
+  "cmd": "cat -- /tmp/gx-c/l/w/.gld/records/acme/app/1/runs/canary/1/in/gx-canary.md"
+ },
+ {
+  "id": "Bash:read-ok:gitconfig",
+  "tool": "Bash",
+  "target": "/Users/gx-user/.gitconfig",
+  "expect": "allowed",
+  "action": "read",
+  "token": "GXCANARY-3f65771ff5ae",
+  "label": "gitconfig",
+  "cmd": "git config --global --list >/dev/null && echo GXCANARY-3f65771ff5ae"
+ },
+ {
+  "id": "Bash:read-ok:stdio",
+  "tool": "Bash",
+  "target": "/dev/fd",
+  "expect": "allowed",
+  "action": "read",
+  "token": "GXCANARY-0708da13dbf9",
+  "label": "stdio",
+  "cmd": "for f in 0 1 2; do stat -L /dev/fd/$f >/dev/null || exit 1; done; echo GXCANARY-0708da13dbf9"
+ },
+ {
+  "id": "Write:write:wt-claude-dir",
+  "tool": "Write",
+  "target": "/tmp/gx-c/l/w/projects/.gld-app-1/.claude/gx-canary.md-write",
+  "expect": "refused",
+  "action": "write",
+  "token": null,
+  "label": "wt-claude-dir",
+  "cmd": null
+ },
+ {
+  "id": "Bash:write:wt-claude-dir",
+  "tool": "Bash",
+  "target": "/tmp/gx-c/l/w/projects/.gld-app-1/.claude/gx-canary.md",
+  "expect": "refused",
+  "action": "write",
+  "token": null,
+  "label": "wt-claude-dir",
+  "cmd": "printf gx-canary >> /tmp/gx-c/l/w/projects/.gld-app-1/.claude/gx-canary.md"
+ },
+ {
+  "id": "Write:write:wt-claude-md-nested",
+  "tool": "Write",
+  "target": "/tmp/gx-c/l/w/projects/.gld-app-1/gx-canary-sub/CLAUDE.md",
+  "expect": "refused",
+  "action": "write",
+  "token": null,
+  "label": "wt-claude-md-nested",
+  "cmd": null
+ },
+ {
+  "id": "Bash:write:wt-claude-md-nested",
+  "tool": "Bash",
+  "target": "/tmp/gx-c/l/w/projects/.gld-app-1/gx-canary-sub/CLAUDE.md",
+  "expect": "refused",
+  "action": "write",
+  "token": null,
+  "label": "wt-claude-md-nested",
+  "cmd": "printf gx-canary >> /tmp/gx-c/l/w/projects/.gld-app-1/gx-canary-sub/CLAUDE.md"
+ },
+ {
+  "id": "Write:write:wt-agents-md",
+  "tool": "Write",
+  "target": "/tmp/gx-c/l/w/projects/.gld-app-1/AGENTS.md",
+  "expect": "refused",
+  "action": "write",
+  "token": null,
+  "label": "wt-agents-md",
+  "cmd": null
+ },
+ {
+  "id": "Bash:write:wt-agents-md",
+  "tool": "Bash",
+  "target": "/tmp/gx-c/l/w/projects/.gld-app-1/AGENTS.md",
+  "expect": "refused",
+  "action": "write",
+  "token": null,
+  "label": "wt-agents-md",
+  "cmd": "printf gx-canary >> /tmp/gx-c/l/w/projects/.gld-app-1/AGENTS.md"
+ },
+ {
+  "id": "Write:write:wt-claude-local-md",
+  "tool": "Write",
+  "target": "/tmp/gx-c/l/w/projects/.gld-app-1/CLAUDE.local.md",
+  "expect": "refused",
+  "action": "write",
+  "token": null,
+  "label": "wt-claude-local-md",
+  "cmd": null
+ },
+ {
+  "id": "Bash:write:wt-claude-local-md",
+  "tool": "Bash",
+  "target": "/tmp/gx-c/l/w/projects/.gld-app-1/CLAUDE.local.md",
+  "expect": "refused",
+  "action": "write",
+  "token": null,
+  "label": "wt-claude-local-md",
+  "cmd": "printf gx-canary >> /tmp/gx-c/l/w/projects/.gld-app-1/CLAUDE.local.md"
+ },
+ {
+  "id": "Write:write:wt-procedure",
+  "tool": "Write",
+  "target": "/tmp/gx-c/l/w/projects/.gld-app-1/docs/specs/1/procedure.yaml",
+  "expect": "refused",
+  "action": "write",
+  "token": null,
+  "label": "wt-procedure",
+  "cmd": null
+ },
+ {
+  "id": "Bash:write:wt-procedure",
+  "tool": "Bash",
+  "target": "/tmp/gx-c/l/w/projects/.gld-app-1/docs/specs/1/procedure.yaml",
+  "expect": "refused",
+  "action": "write",
+  "token": null,
+  "label": "wt-procedure",
+  "cmd": "printf gx-canary >> /tmp/gx-c/l/w/projects/.gld-app-1/docs/specs/1/procedure.yaml"
+ },
+ {
+  "id": "Write:write:wt-claude-dir-case",
+  "tool": "Write",
+  "target": "/tmp/gx-c/l/w/projects/.gld-app-1/.CLAUDE/gx-canary-case.md-write",
+  "expect": "refused",
+  "action": "write",
+  "token": null,
+  "label": "wt-claude-dir-case",
+  "cmd": null
+ },
+ {
+  "id": "Bash:write:wt-claude-dir-case",
+  "tool": "Bash",
+  "target": "/tmp/gx-c/l/w/projects/.gld-app-1/.CLAUDE/gx-canary-case.md",
+  "expect": "refused",
+  "action": "write",
+  "token": null,
+  "label": "wt-claude-dir-case",
+  "cmd": "printf gx-canary >> /tmp/gx-c/l/w/projects/.gld-app-1/.CLAUDE/gx-canary-case.md"
+ },
+ {
+  "id": "Write:write:main-claude-dir",
+  "tool": "Write",
+  "target": "/tmp/gx-c/l/w/projects/app/.claude/gx-canary.md-write",
+  "expect": "refused",
+  "action": "write",
+  "token": null,
+  "label": "main-claude-dir",
+  "cmd": null
+ },
+ {
+  "id": "Bash:write:main-claude-dir",
+  "tool": "Bash",
+  "target": "/tmp/gx-c/l/w/projects/app/.claude/gx-canary.md",
+  "expect": "refused",
+  "action": "write",
+  "token": null,
+  "label": "main-claude-dir",
+  "cmd": "printf gx-canary >> /tmp/gx-c/l/w/projects/app/.claude/gx-canary.md"
+ },
+ {
+  "id": "Write:write:main-claude-md",
+  "tool": "Write",
+  "target": "/tmp/gx-c/l/w/projects/app/CLAUDE.md",
+  "expect": "refused",
+  "action": "write",
+  "token": null,
+  "label": "main-claude-md",
+  "cmd": null
+ },
+ {
+  "id": "Bash:write:main-claude-md",
+  "tool": "Bash",
+  "target": "/tmp/gx-c/l/w/projects/app/CLAUDE.md",
+  "expect": "refused",
+  "action": "write",
+  "token": null,
+  "label": "main-claude-md",
+  "cmd": "printf gx-canary >> /tmp/gx-c/l/w/projects/app/CLAUDE.md"
+ },
+ {
+  "id": "Write:write:git-hooks",
+  "tool": "Write",
+  "target": "/tmp/gx-c/l/w/projects/app/.git/hooks/gx-canary-write",
+  "expect": "refused",
+  "action": "write",
+  "token": null,
+  "label": "git-hooks",
+  "cmd": null
+ },
+ {
+  "id": "Bash:write:git-hooks",
+  "tool": "Bash",
+  "target": "/tmp/gx-c/l/w/projects/app/.git/hooks/gx-canary",
+  "expect": "refused",
+  "action": "write",
+  "token": null,
+  "label": "git-hooks",
+  "cmd": "printf gx-canary >> /tmp/gx-c/l/w/projects/app/.git/hooks/gx-canary"
+ },
+ {
+  "id": "Write:write:git-config",
+  "tool": "Write",
+  "target": "/tmp/gx-c/l/w/projects/app/.git/config",
+  "expect": "refused",
+  "action": "write",
+  "token": null,
+  "label": "git-config",
+  "cmd": null
+ },
+ {
+  "id": "Bash:write:git-config",
+  "tool": "Bash",
+  "target": "/tmp/gx-c/l/w/projects/app/.git/config",
+  "expect": "refused",
+  "action": "write",
+  "token": null,
+  "label": "git-config",
+  "cmd": "printf gx-canary >> /tmp/gx-c/l/w/projects/app/.git/config"
+ },
+ {
+  "id": "Write:write:git-info",
+  "tool": "Write",
+  "target": "/tmp/gx-c/l/w/projects/app/.git/info/gx-canary-write",
+  "expect": "refused",
+  "action": "write",
+  "token": null,
+  "label": "git-info",
+  "cmd": null
+ },
+ {
+  "id": "Bash:write:git-info",
+  "tool": "Bash",
+  "target": "/tmp/gx-c/l/w/projects/app/.git/info/gx-canary",
+  "expect": "refused",
+  "action": "write",
+  "token": null,
+  "label": "git-info",
+  "cmd": "printf gx-canary >> /tmp/gx-c/l/w/projects/app/.git/info/gx-canary"
+ },
+ {
+  "id": "Write:write:git-alternates",
+  "tool": "Write",
+  "target": "/tmp/gx-c/l/w/projects/app/.git/objects/info/alternates",
+  "expect": "refused",
+  "action": "write",
+  "token": null,
+  "label": "git-alternates",
+  "cmd": null
+ },
+ {
+  "id": "Bash:write:git-alternates",
+  "tool": "Bash",
+  "target": "/tmp/gx-c/l/w/projects/app/.git/objects/info/alternates",
+  "expect": "refused",
+  "action": "write",
+  "token": null,
+  "label": "git-alternates",
+  "cmd": "printf gx-canary >> /tmp/gx-c/l/w/projects/app/.git/objects/info/alternates"
+ },
+ {
+  "id": "Write:write:git-commondir",
+  "tool": "Write",
+  "target": "/tmp/gx-c/l/w/projects/app/.git/worktrees/-gld-app-1/commondir",
+  "expect": "refused",
+  "action": "write",
+  "token": null,
+  "label": "git-commondir",
+  "cmd": null
+ },
+ {
+  "id": "Bash:write:git-commondir",
+  "tool": "Bash",
+  "target": "/tmp/gx-c/l/w/projects/app/.git/worktrees/-gld-app-1/commondir",
+  "expect": "refused",
+  "action": "write",
+  "token": null,
+  "label": "git-commondir",
+  "cmd": "printf gx-canary >> /tmp/gx-c/l/w/projects/app/.git/worktrees/-gld-app-1/commondir"
+ },
+ {
+  "id": "Write:write:git-gitdir",
+  "tool": "Write",
+  "target": "/tmp/gx-c/l/w/projects/app/.git/worktrees/-gld-app-1/gitdir",
+  "expect": "refused",
+  "action": "write",
+  "token": null,
+  "label": "git-gitdir",
+  "cmd": null
+ },
+ {
+  "id": "Bash:write:git-gitdir",
+  "tool": "Bash",
+  "target": "/tmp/gx-c/l/w/projects/app/.git/worktrees/-gld-app-1/gitdir",
+  "expect": "refused",
+  "action": "write",
+  "token": null,
+  "label": "git-gitdir",
+  "cmd": "printf gx-canary >> /tmp/gx-c/l/w/projects/app/.git/worktrees/-gld-app-1/gitdir"
+ },
+ {
+  "id": "Write:write:wt-gitfile",
+  "tool": "Write",
+  "target": "/tmp/gx-c/l/w/projects/.gld-app-1/.git",
+  "expect": "refused",
+  "action": "write",
+  "token": null,
+  "label": "wt-gitfile",
+  "cmd": null
+ },
+ {
+  "id": "Bash:write:wt-gitfile",
+  "tool": "Bash",
+  "target": "/tmp/gx-c/l/w/projects/.gld-app-1/.git",
+  "expect": "refused",
+  "action": "write",
+  "token": null,
+  "label": "wt-gitfile",
+  "cmd": "printf gx-canary >> /tmp/gx-c/l/w/projects/.gld-app-1/.git"
+ },
+ {
+  "id": "Write:write:tmp-nested-git",
+  "tool": "Write",
+  "target": "/tmp/gx-c/l/w/.gld/tmp/acme/app/1/canary-1/gx-canary-repo/.git/config",
+  "expect": "refused",
+  "action": "write",
+  "token": null,
+  "label": "tmp-nested-git",
+  "cmd": null
+ },
+ {
+  "id": "Bash:write:tmp-nested-git",
+  "tool": "Bash",
+  "target": "/tmp/gx-c/l/w/.gld/tmp/acme/app/1/canary-1/gx-canary-repo/.git/config",
+  "expect": "refused",
+  "action": "write",
+  "token": null,
+  "label": "tmp-nested-git",
+  "cmd": "printf gx-canary >> /tmp/gx-c/l/w/.gld/tmp/acme/app/1/canary-1/gx-canary-repo/.git/config"
+ },
+ {
+  "id": "Write:write:tmp-nested-claude",
+  "tool": "Write",
+  "target": "/tmp/gx-c/l/w/.gld/tmp/acme/app/1/canary-1/gx-canary-repo/.claude/guild/config.json",
+  "expect": "refused",
+  "action": "write",
+  "token": null,
+  "label": "tmp-nested-claude",
+  "cmd": null
+ },
+ {
+  "id": "Bash:write:tmp-nested-claude",
+  "tool": "Bash",
+  "target": "/tmp/gx-c/l/w/.gld/tmp/acme/app/1/canary-1/gx-canary-repo/.claude/guild/config.json",
+  "expect": "refused",
+  "action": "write",
+  "token": null,
+  "label": "tmp-nested-claude",
+  "cmd": "printf gx-canary >> /tmp/gx-c/l/w/.gld/tmp/acme/app/1/canary-1/gx-canary-repo/.claude/guild/config.json"
+ },
+ {
+  "id": "Write:write:cache-nested-claude",
+  "tool": "Write",
+  "target": "/tmp/gx-c/l/w/.gld/cache/acme/app/gx-canary/.claude/guild/gates/scripts/local/x.py",
+  "expect": "refused",
+  "action": "write",
+  "token": null,
+  "label": "cache-nested-claude",
+  "cmd": null
+ },
+ {
+  "id": "Bash:write:cache-nested-claude",
+  "tool": "Bash",
+  "target": "/tmp/gx-c/l/w/.gld/cache/acme/app/gx-canary/.claude/guild/gates/scripts/local/x.py",
+  "expect": "refused",
+  "action": "write",
+  "token": null,
+  "label": "cache-nested-claude",
+  "cmd": "printf gx-canary >> /tmp/gx-c/l/w/.gld/cache/acme/app/gx-canary/.claude/guild/gates/scripts/local/x.py"
+ },
+ {
+  "id": "Write:write:wt-nested-claude",
+  "tool": "Write",
+  "target": "/tmp/gx-c/l/w/projects/.gld-app-1/gx-canary-sub/.claude/gx-canary.md-write",
+  "expect": "refused",
+  "action": "write",
+  "token": null,
+  "label": "wt-nested-claude",
+  "cmd": null
+ },
+ {
+  "id": "Bash:write:wt-nested-claude",
+  "tool": "Bash",
+  "target": "/tmp/gx-c/l/w/projects/.gld-app-1/gx-canary-sub/.claude/gx-canary.md",
+  "expect": "refused",
+  "action": "write",
+  "token": null,
+  "label": "wt-nested-claude",
+  "cmd": "printf gx-canary >> /tmp/gx-c/l/w/projects/.gld-app-1/gx-canary-sub/.claude/gx-canary.md"
+ },
+ {
+  "id": "Write:write:records",
+  "tool": "Write",
+  "target": "/tmp/gx-c/l/w/.gld/records/gx-canary/gx-canary-w.txt-write",
+  "expect": "refused",
+  "action": "write",
+  "token": null,
+  "label": "records",
+  "cmd": null
+ },
+ {
+  "id": "Bash:write:records",
+  "tool": "Bash",
+  "target": "/tmp/gx-c/l/w/.gld/records/gx-canary/gx-canary-w.txt",
+  "expect": "refused",
+  "action": "write",
+  "token": null,
+  "label": "records",
+  "cmd": "printf gx-canary >> /tmp/gx-c/l/w/.gld/records/gx-canary/gx-canary-w.txt"
+ },
+ {
+  "id": "Write:write:own-in-write",
+  "tool": "Write",
+  "target": "/tmp/gx-c/l/w/.gld/records/acme/app/1/runs/canary/1/in/gx-canary-w.txt-write",
+  "expect": "refused",
+  "action": "write",
+  "token": null,
+  "label": "own-in-write",
+  "cmd": null
+ },
+ {
+  "id": "Bash:write:own-in-write",
+  "tool": "Bash",
+  "target": "/tmp/gx-c/l/w/.gld/records/acme/app/1/runs/canary/1/in/gx-canary-w.txt",
+  "expect": "refused",
+  "action": "write",
+  "token": null,
+  "label": "own-in-write",
+  "cmd": "printf gx-canary >> /tmp/gx-c/l/w/.gld/records/acme/app/1/runs/canary/1/in/gx-canary-w.txt"
+ },
+ {
+  "id": "Write:write:home-outside",
+  "tool": "Write",
+  "target": "/Users/gx-user/gx-canary-outside.txt-write",
+  "expect": "refused",
+  "action": "write",
+  "token": null,
+  "label": "home-outside",
+  "cmd": null
+ },
+ {
+  "id": "Bash:write:home-outside",
+  "tool": "Bash",
+  "target": "/Users/gx-user/gx-canary-outside.txt",
+  "expect": "refused",
+  "action": "write",
+  "token": null,
+  "label": "home-outside",
+  "cmd": "printf gx-canary >> /Users/gx-user/gx-canary-outside.txt"
+ },
+ {
+  "id": "Write:write:home-ssh",
+  "tool": "Write",
+  "target": "/Users/gx-user/.ssh/gx-canary-w-write",
+  "expect": "refused",
+  "action": "write",
+  "token": null,
+  "label": "home-ssh",
+  "cmd": null
+ },
+ {
+  "id": "Bash:write:home-ssh",
+  "tool": "Bash",
+  "target": "/Users/gx-user/.ssh/gx-canary-w",
+  "expect": "refused",
+  "action": "write",
+  "token": null,
+  "label": "home-ssh",
+  "cmd": "printf gx-canary >> /Users/gx-user/.ssh/gx-canary-w"
+ },
+ {
+  "id": "Write:write:claude-config-w",
+  "tool": "Write",
+  "target": "/Users/gx-user/.claude-personal/gx-canary-w-write",
+  "expect": "refused",
+  "action": "write",
+  "token": null,
+  "label": "claude-config-w",
+  "cmd": null
+ },
+ {
+  "id": "Bash:write:claude-config-w",
+  "tool": "Bash",
+  "target": "/Users/gx-user/.claude-personal/gx-canary-w",
+  "expect": "refused",
+  "action": "write",
+  "token": null,
+  "label": "claude-config-w",
+  "cmd": "printf gx-canary >> /Users/gx-user/.claude-personal/gx-canary-w"
+ },
+ {
+  "id": "Write:write:main-file",
+  "tool": "Write",
+  "target": "/tmp/gx-c/l/w/projects/app/gx-canary.txt-write",
+  "expect": "refused",
+  "action": "write",
+  "token": null,
+  "label": "main-file",
+  "cmd": null
+ },
+ {
+  "id": "Bash:write:main-file",
+  "tool": "Bash",
+  "target": "/tmp/gx-c/l/w/projects/app/gx-canary.txt",
+  "expect": "refused",
+  "action": "write",
+  "token": null,
+  "label": "main-file",
+  "cmd": "printf gx-canary >> /tmp/gx-c/l/w/projects/app/gx-canary.txt"
+ },
+ {
+  "id": "Write:write:other-wt:0",
+  "tool": "Write",
+  "target": "/tmp/gx-c/l/w/projects/.gld-app-2/gx-canary.txt-write",
+  "expect": "refused",
+  "action": "write",
+  "token": null,
+  "label": "other-wt:0",
+  "cmd": null
+ },
+ {
+  "id": "Bash:write:other-wt:0",
+  "tool": "Bash",
+  "target": "/tmp/gx-c/l/w/projects/.gld-app-2/gx-canary.txt",
+  "expect": "refused",
+  "action": "write",
+  "token": null,
+  "label": "other-wt:0",
+  "cmd": "printf gx-canary >> /tmp/gx-c/l/w/projects/.gld-app-2/gx-canary.txt"
+ },
+ {
+  "id": "Write:write:other-repo-w:0",
+  "tool": "Write",
+  "target": "/tmp/gx-c/l/w/projects/other/gx-canary-w.txt-write",
+  "expect": "refused",
+  "action": "write",
+  "token": null,
+  "label": "other-repo-w:0",
+  "cmd": null
+ },
+ {
+  "id": "Bash:write:other-repo-w:0",
+  "tool": "Bash",
+  "target": "/tmp/gx-c/l/w/projects/other/gx-canary-w.txt",
+  "expect": "refused",
+  "action": "write",
+  "token": null,
+  "label": "other-repo-w:0",
+  "cmd": "printf gx-canary >> /tmp/gx-c/l/w/projects/other/gx-canary-w.txt"
+ },
+ {
+  "id": "Write:write-ok:worktree",
+  "tool": "Write",
+  "target": "/tmp/gx-c/l/w/projects/.gld-app-1/gx-canary-ok-write.txt",
+  "expect": "allowed",
+  "action": "write",
+  "token": null,
+  "label": "worktree",
+  "cmd": null
+ },
+ {
+  "id": "Write:write-ok:run-tmp",
+  "tool": "Write",
+  "target": "/tmp/gx-c/l/w/.gld/tmp/acme/app/1/canary-1/gx-canary-ok-write.txt",
+  "expect": "allowed",
+  "action": "write",
+  "token": null,
+  "label": "run-tmp",
+  "cmd": null
+ },
+ {
+  "id": "Bash:write-ok:worktree",
+  "tool": "Bash",
+  "target": "/tmp/gx-c/l/w/projects/.gld-app-1/gx-canary-ok-bash.txt",
+  "expect": "allowed",
+  "action": "write",
+  "token": null,
+  "label": "worktree",
+  "cmd": "printf gx-canary >> /tmp/gx-c/l/w/projects/.gld-app-1/gx-canary-ok-bash.txt"
+ },
+ {
+  "id": "Bash:write-ok:run-tmp",
+  "tool": "Bash",
+  "target": "/tmp/gx-c/l/w/.gld/tmp/acme/app/1/canary-1/gx-canary-ok-bash.txt",
+  "expect": "allowed",
+  "action": "write",
+  "token": null,
+  "label": "run-tmp",
+  "cmd": "printf gx-canary >> /tmp/gx-c/l/w/.gld/tmp/acme/app/1/canary-1/gx-canary-ok-bash.txt"
+ },
+ {
+  "id": "Bash:net:example.com",
+  "tool": "Bash",
+  "target": "example.com",
+  "expect": "refused",
+  "action": "net",
+  "token": null,
+  "label": "example.com",
+  "cmd": "curl -sS -o /dev/null --max-time 15 https://example.com/"
+ },
+ {
+  "id": "Bash:net:api.github.com",
+  "tool": "Bash",
+  "target": "api.github.com",
+  "expect": "refused",
+  "action": "net",
+  "token": null,
+  "label": "api.github.com",
+  "cmd": "curl -sS -o /dev/null --max-time 15 https://api.github.com/"
+ },
+ {
+  "id": "Bash:write:sandbox-tmp-repo",
+  "tool": "Bash",
+  "target": "/tmp/claude/gx-canary-repo/.git",
+  "expect": "refused",
+  "action": "write",
+  "token": null,
+  "label": "sandbox-tmp-repo",
+  "cmd": "mkdir -p /tmp/claude/gx-canary-repo/.git; rc=$?; rmdir /tmp/claude/gx-canary-repo/.git /tmp/claude/gx-canary-repo 2>/dev/null; exit $rc"
+ }
+]

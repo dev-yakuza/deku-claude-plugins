@@ -1,0 +1,83 @@
+{
+  "format": 1,
+  "issue": 42,
+  "step": "fix",
+  "attempt": 4,
+  "kind": "role",
+  "base_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "start_head": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "created_at": "2026-11-23T01:02:03Z",
+  "role": "developer",
+  "role_class": "work",
+  "result_kind": "work",
+  "instruction": "<instruction>",
+  "system_prompt_sources": [
+    {
+      "path": "CLAUDE.md",
+      "blob": "cccccccccccccccccccccccccccccccccccccccc"
+    }
+  ],
+  "inputs": [
+    "docs/specs/42/analysis.md"
+  ],
+  "in_dir": "/Users/u/.gld/records/acme/app/42/runs/design/1/in",
+  "in_files": [
+    "repro-evidence.md",
+    "blocking-discoveries.md",
+    "failure-summary.md"
+  ],
+  "outputs": [],
+  "checks": [],
+  "rule_checks": [],
+  "facts": {},
+  "returned": {
+    "from_step": "done-gate",
+    "from_attempt": 1,
+    "code": null,
+    "detail": null,
+    "errors": [],
+    "sources": [
+      {
+        "step": "review-audit",
+        "attempt": 1,
+        "cause": "leader-rerun"
+      }
+    ]
+  },
+  "reentry": null,
+  "session": {
+    "model": "opus",
+    "effort": "xhigh",
+    "tools": [
+      "Bash",
+      "Read",
+      "Edit",
+      "Write"
+    ],
+    "max_budget_usd": null,
+    "wall_clock_s": null,
+    "no_output_s": null,
+    "resume": null,
+    "cli_version": "2.1.323",
+    "escalation": {
+      "base": {
+        "model": "sonnet",
+        "effort": "high",
+        "layer": "plugin-default"
+      },
+      "returns": 3,
+      "raised": {
+        "effort": [
+          "high",
+          "xhigh"
+        ],
+        "model": [
+          "sonnet",
+          "opus"
+        ]
+      },
+      "capped": false
+    }
+  },
+  "run": null
+}

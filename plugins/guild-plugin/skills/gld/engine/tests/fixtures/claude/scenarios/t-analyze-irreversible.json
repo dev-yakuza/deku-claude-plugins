@@ -1,0 +1,28 @@
+{
+  "format": 1,
+  "description": "Stage 3: analyze reports deploy-or-release → irreversible-change before plan-gate (TI3).",
+  "stream": "../f2/r4.jsonl",
+  "init_from_argv": true,
+  "role": {
+    "example": "result-work-s3",
+    "expect": "irreversible-change"
+  },
+  "structured_output": {
+    "status": "done",
+    "outputs": [
+      "docs/specs/42/analysis.md"
+    ],
+    "requests": [],
+    "blocked_by": null,
+    "discoveries": [],
+    "irreversible": [
+      {
+        "code": "deploy-or-release",
+        "where": "release.yml",
+        "note": "fixture"
+      }
+    ],
+    "golden_reasons": [],
+    "note": "fixture"
+  }
+}

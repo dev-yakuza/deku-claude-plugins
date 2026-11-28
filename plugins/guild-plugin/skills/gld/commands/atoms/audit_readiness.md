@@ -10,7 +10,7 @@
 - **`GATE_SCRIPT`** — the absolute path of the plugin's `gates/gate_precommit.py`, **supplied by the caller** (`init` P3.5 puts it in the spawn prompt; `audit` dimension A passes it inline). There is no fallback: this atom may run as a sub-agent, which cannot resolve `<<SKILL_DIR>>`. Not supplied, or the path does not exist → every check below that calls it reports `id: gate-script-unavailable`, **MAJOR** ("판정 불가 — 시크릿·훅 검사를 실행하지 못함"), and is **never** read as clean. The plugin's copy is used rather than the repo's `.claude/guild/gates/scripts/` copy because the repo's can lag behind these instructions (`update` may skip refreshing it) and an old script ignores the arguments below.
 - **Exit-code contract for every `GATE_SCRIPT` call**: `0` = clean · `1` = found · **anything else (2 = could not scan, 64 = no input) = NOT judged**. Not judged → `id: secret-scan-unavailable` (or `gate-hook-undetermined` for the hook check), **MAJOR**, with the stderr line — never "no findings".
 - The five P1 scan findings if available (from `scan_repo.md`), else re-derive by reading the repo directly.
-- `.claude/guild/config.json` (for `commands`, `language`).
+- `.claude/guild/harness.json` (for `commands`, `language`).
 - Owner/repo (per `_handoff.md` Section F) for the GitHub-workflow checks.
 
 ## Output
@@ -44,7 +44,7 @@ The verify gate judges completion by real test evidence — without tests it is 
 
 **Guild's own commit gate — check this first.** It is the only enforcement Guild installs, and
 it can be silently absent in a repo that otherwise looks fully set up. Skip this whole block
-when `.claude/guild/config.json` is absent (Guild not initialized — `init` will install it).
+when `.claude/guild/harness.json` is absent (Guild not initialized — `init` will install it).
 
 - **Who owns the hook, and is the gate actually wired?** ⚠ There are **two valid wirings**, and
   checking only one produces a false BLOCKER on every repo that uses a hook manager. Resolve the
@@ -84,9 +84,12 @@ when `.claude/guild/config.json` is absent (Guild not initialized — `init` wil
   elsewhere (husky and similar do this), so Guild's hook never runs no matter how it is
   installed. Remediation: copy `.git/hooks/pre-commit` into that directory, or chain to it
   from the existing hook there. Report the literal path so the fix is actionable.
-- **Is the gate switched off?** Read `.claude/guild/config.json` → `gates.enabled`. `false` →
-  `id: gate-disabled`, MAJOR — legitimate (it is a documented escape hatch), but it should be
-  a deliberate state, not one nobody remembers choosing. Note it and move on.
+- **Is the gate switched off?** guild-plugin has no switch: `harness.json` holds no `gates`, and the
+  engine settings `.claude/guild/config.json` refuse the key. But the gate script still reads
+  `gates.enabled` from that engine settings path, so **read it (read only — never write it)**: absent →
+  no finding. `false` → a leftover settings file from before the engine (Guild 0.98.7 kept `gates`
+  there) that keeps the gate off: `id: gate-disabled`, MAJOR — remediation: move the settings with
+  `/gld init` (never edit the file by hand). Note it and move on.
 
 Then the repo's own static tooling:
 - **Linter configured?** eslint/biome/ruff/flutter_lints/analysis_options etc. Absent → `id: no-linter`, MAJOR.

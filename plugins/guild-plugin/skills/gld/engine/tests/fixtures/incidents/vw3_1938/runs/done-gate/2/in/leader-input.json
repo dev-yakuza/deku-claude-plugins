@@ -1,0 +1,505 @@
+{
+ "format": 1,
+ "issue": 1938,
+ "stage": 4,
+ "situation": "done-gate",
+ "call": {
+  "kind": "check",
+  "step": "done-gate",
+  "attempt": 2,
+  "format_retry": 0,
+  "errors": []
+ },
+ "mode": "unattended",
+ "allowed": {
+  "answers": [
+   "approve",
+   "rerun",
+   "escalate"
+  ],
+  "rerun_steps": [
+   "analyze",
+   "ac-format",
+   "test-cases",
+   "ac-coverage",
+   "setup",
+   "safety-net",
+   "safety-net-proof",
+   "no-production-change",
+   "test",
+   "lint",
+   "check-verification-doc-refs",
+   "review-tests",
+   "review-audit",
+   "verify-gate"
+  ],
+  "human_answers": [
+   "approve",
+   "rerun",
+   "escalate"
+  ],
+  "human_rerun_steps": [
+   "analyze",
+   "ac-format",
+   "test-cases",
+   "ac-coverage",
+   "setup",
+   "safety-net",
+   "safety-net-proof",
+   "no-production-change",
+   "test",
+   "lint",
+   "check-verification-doc-refs",
+   "review-tests",
+   "review-audit",
+   "verify-gate"
+  ],
+  "narrowed": [],
+  "models": [],
+  "efforts": []
+ },
+ "docs": [
+  "docs/specs/1938/analysis.md",
+  "docs/specs/1938/test-cases.md"
+ ],
+ "in_files": [
+  "issue.md",
+  "review.diff",
+  "leader-decision.md"
+ ],
+ "steps": [
+  {
+   "id": "analyze",
+   "kind": "role",
+   "name": "requirements-engineer",
+   "status": "done",
+   "attempts": 1,
+   "on_fail_count": 0,
+   "on_fail_max": null
+  },
+  {
+   "id": "ac-format",
+   "kind": "run",
+   "name": "ac-format",
+   "status": "done",
+   "attempts": 3,
+   "on_fail_count": 0,
+   "on_fail_max": 2
+  },
+  {
+   "id": "plan",
+   "kind": "check",
+   "name": "plan-gate",
+   "status": "done",
+   "attempts": 1,
+   "on_fail_count": 0,
+   "on_fail_max": null
+  },
+  {
+   "id": "test-cases",
+   "kind": "role",
+   "name": "tester",
+   "status": "done",
+   "attempts": 1,
+   "on_fail_count": 0,
+   "on_fail_max": null
+  },
+  {
+   "id": "ac-coverage",
+   "kind": "run",
+   "name": "ac-coverage",
+   "status": "done",
+   "attempts": 3,
+   "on_fail_count": 0,
+   "on_fail_max": 2
+  },
+  {
+   "id": "setup",
+   "kind": "run",
+   "name": "setup",
+   "status": "done",
+   "attempts": 3,
+   "on_fail_count": 0,
+   "on_fail_max": null
+  },
+  {
+   "id": "safety-net",
+   "kind": "role",
+   "name": "developer",
+   "status": "done",
+   "attempts": 2,
+   "on_fail_count": 0,
+   "on_fail_max": 2
+  },
+  {
+   "id": "safety-net-proof",
+   "kind": "run",
+   "name": "safety-net-proof",
+   "status": "done",
+   "attempts": 2,
+   "on_fail_count": 0,
+   "on_fail_max": 2
+  },
+  {
+   "id": "no-production-change",
+   "kind": "run",
+   "name": "no-production-change",
+   "status": "done",
+   "attempts": 2,
+   "on_fail_count": 0,
+   "on_fail_max": 2
+  },
+  {
+   "id": "test",
+   "kind": "run",
+   "name": "test",
+   "status": "done",
+   "attempts": 2,
+   "on_fail_count": 0,
+   "on_fail_max": 2
+  },
+  {
+   "id": "lint",
+   "kind": "run",
+   "name": "lint",
+   "status": "done",
+   "attempts": 2,
+   "on_fail_count": 0,
+   "on_fail_max": 2
+  },
+  {
+   "id": "check-verification-doc-refs",
+   "kind": "run",
+   "name": "check-verification-doc-refs",
+   "status": "done",
+   "attempts": 2,
+   "on_fail_count": 0,
+   "on_fail_max": 2
+  },
+  {
+   "id": "review-tests",
+   "kind": "role",
+   "name": "tester",
+   "status": "done",
+   "attempts": 2,
+   "on_fail_count": 0,
+   "on_fail_max": 2
+  },
+  {
+   "id": "review-audit",
+   "kind": "role",
+   "name": "auditor",
+   "status": "done",
+   "attempts": 2,
+   "on_fail_count": 0,
+   "on_fail_max": 2
+  },
+  {
+   "id": "verify-gate",
+   "kind": "run",
+   "name": "verify-gate",
+   "status": "done",
+   "attempts": 2,
+   "on_fail_count": 0,
+   "on_fail_max": 2
+  },
+  {
+   "id": "done-gate",
+   "kind": "check",
+   "name": "done-gate",
+   "status": "needs_leader",
+   "attempts": 1,
+   "on_fail_count": 0,
+   "on_fail_max": null
+  },
+  {
+   "id": "pr",
+   "kind": "op",
+   "name": "create-pr",
+   "status": "pending",
+   "attempts": 0,
+   "on_fail_count": 0,
+   "on_fail_max": null
+  },
+  {
+   "id": "followups",
+   "kind": "op",
+   "name": "create-followups",
+   "status": "pending",
+   "attempts": 0,
+   "on_fail_count": 0,
+   "on_fail_max": null
+  }
+ ],
+ "counters": {
+  "catalog_adds": 0,
+  "catalog_adds_max": 3,
+  "followups": 0,
+  "followups_max": 5,
+  "leader_calls": 0,
+  "leader_calls_max": 5,
+  "plan_rerun": 0,
+  "plan_rerun_max": 2,
+  "done_rerun": 1,
+  "done_rerun_max": 2,
+  "on_fail_rerun_used": false,
+  "soft_budget_rerun_used": false
+ },
+ "cost": {
+  "issue_usd": 2.855522,
+  "soft_usd": 18.44,
+  "absolute_usd": 36.88
+ },
+ "plan_gate": null,
+ "done_gate": {
+  "acs": [
+   1,
+   2,
+   3,
+   4,
+   5,
+   6,
+   7,
+   8,
+   9
+  ],
+  "requirement_rows": [
+   {
+    "row": "R1",
+    "requirement": "자산 로드 횟수를 세는 테스트용 번들로 KanjiStrokesSection 을 그린 뒤 의존성 변경을 일으켜 다시 그려도(예: MediaQuery 또는 테마 변경) 탐침 로드 횟수가 처음과 같다",
+    "acs": [
+     1,
+     2,
+     3
+    ]
+   },
+   {
+    "row": "R2",
+    "requirement": "플래그를 제거한 코드에서는 이 테스트가 실패한다(뮤테이션으로 확인)",
+    "acs": [
+     4
+    ]
+   },
+   {
+    "row": "R3",
+    "requirement": "기존 한자 모달 테스트·골든은 바뀌지 않는다",
+    "acs": [
+     5,
+     6
+    ]
+   },
+   {
+    "row": "R4",
+    "requirement": "이를 고정하는 테스트가 없다(테스트로 고정한다 — 제목) / 운영 코드 변경 요구 없음",
+    "acs": [
+     7
+    ]
+   },
+   {
+    "row": "R5",
+    "requirement": "docs/specs/1933/skeleton.md §8.2 의 계획(\"번들에 load 호출 횟수를 세는 가짜로 재호출 시 증가하지 않음을 S 케이스 하나로 고정\")",
+    "acs": [
+     1,
+     8
+    ]
+   },
+   {
+    "row": "R6",
+    "requirement": "레포 완료 정의(유닛 테스트·린트 green)",
+    "acs": [
+     9
+    ]
+   }
+  ],
+  "runs": [
+   {
+    "step": "ac-format",
+    "name": "ac-format",
+    "exit_code": 0,
+    "flaky": false,
+    "base_red": false,
+    "quarantined": 1
+   },
+   {
+    "step": "ac-coverage",
+    "name": "ac-coverage",
+    "exit_code": 0,
+    "flaky": false,
+    "base_red": false,
+    "quarantined": 1
+   },
+   {
+    "step": "setup",
+    "name": "setup",
+    "exit_code": 0,
+    "flaky": false,
+    "base_red": false,
+    "quarantined": 1
+   },
+   {
+    "step": "safety-net-proof",
+    "name": "safety-net-proof",
+    "exit_code": 0,
+    "flaky": false,
+    "base_red": false,
+    "quarantined": 1
+   },
+   {
+    "step": "no-production-change",
+    "name": "no-production-change",
+    "exit_code": 0,
+    "flaky": false,
+    "base_red": false,
+    "quarantined": 1
+   },
+   {
+    "step": "test",
+    "name": "test",
+    "exit_code": 0,
+    "flaky": false,
+    "base_red": false,
+    "quarantined": 1
+   },
+   {
+    "step": "lint",
+    "name": "lint",
+    "exit_code": 0,
+    "flaky": false,
+    "base_red": false,
+    "quarantined": 1
+   },
+   {
+    "step": "check-verification-doc-refs",
+    "name": "check-verification-doc-refs",
+    "exit_code": 0,
+    "flaky": false,
+    "base_red": false,
+    "quarantined": 1
+   },
+   {
+    "step": "verify-gate",
+    "name": "verify-gate",
+    "exit_code": 0,
+    "flaky": false,
+    "base_red": false,
+    "quarantined": 1
+   }
+  ],
+  "not_checked_locally": [
+   "code_quality/golden_test — needs sudo (CI machine setup); rewrites git state; rewrites tracked files (golden / fix / write mode); step 'Check if golden tests exist': shell logic (if / loops / heredoc); uses GitHub runner variables; uses a workflow expression (PR context / CI runner values)",
+   "code_quality/test_all — needs sudo (CI machine setup)",
+   "code_quality/upload-failure-golden-images — needs sudo (CI machine setup); rewrites git state; rewrites tracked files (golden / fix / write mode); uses GitHub runner variables; uses a workflow expression (PR context / CI runner values); uses actions/github-script",
+   "e2e_test/e2e_test — needs an Android emulator / SDK manager; needs sudo (CI machine setup); step 'Free up disk space': shell logic (if / loops / heredoc); uses reactivecircus/android-emulator-runner; whole job is bound to the CI machine — its other commands were not carried",
+   "set_assignees/set-assignees — uses actions/github-script",
+   "update_release_notes_draft/validate_pr — uses Slashgear/action-check-pr-title; uses danielchabr/pr-labels-checker; uses release-drafter/release-drafter/autolabeler",
+   "update_release_notes_draft/update_release_draft — uses release-drafter/release-drafter",
+   "build — flutter build apk needs GitHub release hosts, Android SDK writes and the signing key (key.properties is a secret path) inside srt (measured 2026-11-23, tools/out/BASE_GREEN.md) (base-green check: cannot run inside the sandbox — human decision)",
+   "e2e — needs an Android emulator and the adb server socket, impossible inside srt (measured 2026-11-23; CI also needs an emulator + KVM) (base-green check: cannot run inside the sandbox — human decision)"
+  ],
+  "reviews": [
+   {
+    "step": "review-tests",
+    "role": "tester",
+    "verdict": "pass",
+    "checks": [
+     {
+      "id": "test-quality",
+      "result": "pass"
+     },
+     {
+      "id": "net-public-behavior",
+      "result": "pass"
+     },
+     {
+      "id": "test-change-review",
+      "result": "pass"
+     }
+    ],
+    "findings": []
+   },
+   {
+    "step": "review-audit",
+    "role": "auditor",
+    "verdict": "pass",
+    "checks": [
+     {
+      "id": "diff-review",
+      "result": "pass"
+     }
+    ],
+    "findings": []
+   }
+  ],
+  "discoveries": [
+   {
+    "id": "D2",
+    "kind": "doc",
+    "where": "docs/specs/1938/analysis.md AC #1",
+    "blocks_current_ac": false,
+    "role": "tester",
+    "note": "분석은 MediaQuery/테마 변경이 didChangeDependencies 를 다시 부른다고 적었으나 테스트는 DefaultAssetBundle 교체로 의존성 변경을 일으킨다. 리더가 D1 을 ignore 로 결정했으므로 참고용이다."
+   }
+  ],
+  "requests": [],
+  "included_fixes": [],
+  "deferred_rows": [],
+  "followup_candidates": [],
+  "mutations": {
+   "problem": null,
+   "control_flaky": false,
+   "rows": [
+    {
+     "id": "M1",
+     "acs": [
+      4
+     ],
+     "path": "lib/features/kanji_detail_modal/widgets/kanji_strokes_section.dart",
+     "status": "killed",
+     "detail": null,
+     "find": "    if (_isProbeStarted) return;\n",
+     "replace": "",
+     "note": "AC 4: without the probe-started guard the dependency-change test is red",
+     "log_tail": "\nWhen the exception was thrown, this was the stack:\n#0      TestHandle.markPending (package:test_api/hooks.dart:60:26)\n#1      _expect (package:matcher/src/expect/expect.dart:151:36)\n#2      expectLater (package:matcher/src/expect/expect.dart:91:7)\n#3      expectLater (package:flutter_test/src/widget_tester.dart:507:8)\n#4      main.shoot (file:///home/u/.gld/tmp/owner/app_a/1938/mutation-proof-1/mutation-tree/test/features/kanji_detail_modal/hanzi_modal_golden_test.dart:151:11)\n<asynchronous suspension>\n#5      main.<anonymous closure>.<anonymous closure> (file:///home/u/.gld/tmp/owner/app_a/1938/mutation-proof-1/mutation-tree/test/features/kanji_detail_modal/hanzi_modal_golden_test.dart:244:7)\n<asynchronous suspension>\n#6      testWidgets.<anonymous closure>.<anonymous closure> (package:flutter_test/src/widget_tester.dart:192:15)\n<asynchronous suspension>\n#7      TestWidgetsFlutterBinding._runTestBody (package:flutter_test/src/binding.dart:1953:5)\n<asynchronous suspension>\n<asynchronous suspension>\n(elided one frame from package:stack_trace)\n\nThe test description was:\n  여러 급수에 걸친 글자 다크\n════════════════════════════════════════════════════════════════════════════════════════════════════\n00:40 +3819 -1: /home/u/.gld/tmp/owner/app_a/1938/mutation-proof-1/mutation-tree/test/features/kanji_detail_modal/data/hanzi_data_integration_test.dart: hskwords 번들 한자 데이터 전수 모든 글자 파일이 문법 예외 없이 파싱되고 획 수가 정보와 같다\nhanzi-parse-all app=hskwords chars=3227 total=6205ms worst=影 26.357ms\n01:11 +3819 -1: /home/u/.gld/tmp/owner/app_a/1938/mutation-proof-1/mutation-tree/test/features/kanji_detail_modal/controller/related_words_query_test.dart: 관련 단어 조회 동치 이전 쿼리와 표본 전체에서 같은 단어·순서·단원을 낸다 - did not complete [E]\n01:11 +3819 -1: /home/u/.gld/tmp/owner/app_a/1938/mutation-proof-1/mutation-tree/test/features/kanji_detail_modal/data/hanzi_data_integration_test.dart: hskwords 번들 한자 데이터 전수 모든 글자 파일이 문법 예외 없이 파싱되고 획 수가 정보와 같다 - did not complete [E]\n01:11 +3819 -1: /home/u/.gld/tmp/owner/app_a/1938/mutation-proof-1/mutation-tree/test/features/kanji_detail_modal/widgets/kanji_strokes_section_source_test.dart: 획순 자산이 없는 한자는 획순 섹션을 그리지 않는다 - did not complete [E]\n01:11 +3819 -1: /home/u/.gld/tmp/owner/app_a/1938/mutation-proof-1/mutation-tree/test/features/kanji_detail_modal/kanji_detail_modal_chinese_test.dart: 중국어 한자 모달 내용 24획 글자도 넘침 없이 그려지고 모든 스텝에 닿는다 - did not complete [E]\n01:11 +3819 -1: /home/u/.gld/tmp/owner/app_a/1938/mutation-proof-1/mutation-tree/test/features/kanji_detail_modal/hanzi_modal_golden_test.dart: 중국어 한자 모달 기준 이미지 여러 급수에 걸친 글자 다크 - did not complete [E]\n01:11 +3819 -1: /home/u/.gld/tmp/owner/app_a/1938/mutation-proof-1/mutation-tree/test/features/kanji_detail_modal/widgets/kanji_strokes_section_blur_test.dart: 미결제 획순 블러 폭 800 에서 24획도 보이는 만큼만 카드를 만든다 - did not complete [E]\n01:11 +3819 -1: /home/u/.gld/tmp/owner/app_a/1938/mutation-proof-1/mutation-tree/test/features/kanji_detail_modal/widgets/kanji_section_test.dart: kunReading이 있을 때 잘 표시된다 - did not complete [E]\n01:11 +3819 -1: /home/u/.gld/tmp/owner/app_a/1938/mutation-proof-1/mutation-tree/test/controller/iap_controller_test.dart: 구독 해제 판단과 자동 복구 시작 시 조용한 복원 재설치로 저장 상태가 없어도 상품 조회가 성공하면 시작 시 복원을 한 번 호출한다 - did not complete [E]\n01:11 +3819 -1: /home/u/.gld/tmp/owner/app_a/1938/mutation-proof-1/mutation-tree/test/features/kanji_detail_modal/widgets/hanzi_section_test.dart: 중국어 라벨 세트 en 에서 일본어 한자 라벨이 없고 제목이 Hanzi Info 이다 - did not complete [E]\n01:11 +3819 -1: /home/u/.gld/tmp/owner/app_a/1938/mutation-proof-1/mutation-tree/test/features/kanji_detail_modal/kanji_detail_modal_test.dart: koreanHanja가 없어도 잘 표시된다 - did not complete [E]\n01:11 +3819 -1: Some tests failed.\n\nFailing tests:\n  /home/u/.gld/tmp/owner/app_a/1938/mutation-proof-1/mutation-tree/test/controller/iap_cont…[truncated by the engine]"
+    }
+   ]
+  },
+  "commits": [
+   {
+    "sha": "41bdcdc8f0416d1394ecccfdae40501db049d004",
+    "message": "chore: gld procedure for issue 1938 (revision 1)\n"
+   },
+   {
+    "sha": "57ab408a7890a3c5cf7a755535735cedff75a70b",
+    "message": "docs: requirements-engineer output of step analyze (gx engine)\n"
+   },
+   {
+    "sha": "df29b033beab14efffee8e16766c92a6c669e2c9",
+    "message": "chore: gld procedure for issue 1938 (revision 2, plan)\n"
+   },
+   {
+    "sha": "80f062a510de42ea922e8693703ae7cf6a9fd2d3",
+    "message": "docs: tester output of step test-cases (gx engine)\n"
+   },
+   {
+    "sha": "540c6aadaf63f276f2001c67993c7b4b96eaf7c9",
+    "message": "test: 의존성 변경에도 한자 획순 탐침이 한 번만 자산을 읽는 안전망 테스트 추가\n\nCo-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>\n"
+   },
+   {
+    "sha": "27dffac98f13b6d8524bba8719a68e00c137786c",
+    "message": "test: 탐침 가드 제거 뮤테이션 선언 추가\n\nCo-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>\n"
+   }
+  ],
+  "verification_paths_changed": [
+   "test/features/kanji_detail_modal/widgets/kanji_strokes_section_probe_safety_net_test.dart"
+  ],
+  "refused_writes": [],
+  "comment_decisions": []
+ },
+ "stopped": null,
+ "budget": null,
+ "comments": null,
+ "defer": null,
+ "removal": null,
+ "add_limit": null,
+ "pr_review": null
+}

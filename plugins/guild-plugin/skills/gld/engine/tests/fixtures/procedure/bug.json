@@ -1,0 +1,33 @@
+{
+  "format": 1,
+  "template": "bug",
+  "version": "fixture-1",
+  "description": "Test fixture (session B1): the shape of the stage-3 bug template (scope §2.2). Not a shipped template.",
+  "steps": [
+    {"id": "test-cases", "role": "tester",
+     "inputs": ["docs/specs/{issue}/analysis.md", "in:leader-decision.md"],
+     "outputs": ["docs/specs/{issue}/test-cases.md"]},
+    {"id": "diagnose", "role": "tech-lead",
+     "inputs": ["docs/specs/{issue}/analysis.md", "docs/specs/{issue}/test-cases.md", "in:leader-decision.md"],
+     "outputs": ["docs/specs/{issue}/diagnosis.md"]},
+    {"id": "setup", "run": "setup"},
+    {"id": "reproduce", "role": "developer",
+     "inputs": ["docs/specs/{issue}/diagnosis.md", "in:failure-summary.md", "in:leader-decision.md"],
+     "outputs": ["{path:test-code}"], "on_fail": {"back_to": "reproduce", "max": 2}},
+    {"id": "repro-red", "run": "repro-red", "on_fail": {"back_to": "reproduce", "max": 2}},
+    {"id": "fix", "role": "developer",
+     "inputs": ["docs/specs/{issue}/diagnosis.md", "in:repro-evidence.md", "in:blocking-discoveries.md",
+                "in:failure-summary.md", "in:leader-decision.md"],
+     "outputs": [], "on_fail": {"back_to": "fix", "max": 2}},
+    {"id": "test", "run": "test", "on_fail": {"back_to": "fix", "max": 2}},
+    {"id": "review-tests", "role": "tester",
+     "inputs": ["in:review.diff", "docs/specs/{issue}/test-cases.md", "in:repro-evidence.md", "in:leader-decision.md"],
+     "outputs": [], "checks": ["test-quality", "regression-proof"], "on_fail": {"back_to": "fix", "max": 2}},
+    {"id": "review-audit", "role": "auditor",
+     "inputs": ["in:review.diff", "docs/specs/{issue}/analysis.md", "in:leader-decision.md"],
+     "outputs": [], "checks": ["diff-review"], "on_fail": {"back_to": "fix", "max": 2}},
+    {"id": "done-gate", "check": "done-gate", "inputs": ["in:review.diff", "in:repro-evidence.md"]},
+    {"id": "pr", "op": "create-pr"},
+    {"id": "followups", "op": "create-followups"}
+  ]
+}

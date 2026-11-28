@@ -1,0 +1,112 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "gld/incident",
+  "title": "An engine incident (readiness R1)",
+  "description": "<engine home>/incidents/<slug>/incident.json, engine only (incidents.py). A needs_human stop the engine probably caused: kind `defect` (an engine-caused stop code, A13) or `suspect` (a leader escalate with reason env-problem, or a leader seat that gave no usable answer). The same signature again adds one occurrence; only the first occurrence copies evidence (evidence/). `incidents list` / `sprint status --json` show it, `incidents prune` (retro) removes it once the fixed-defects list shipped with the engine explains every occurrence.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["format", "signature", "slug", "kind", "first_seen", "last_seen", "count", "evidence", "occurrences"],
+  "properties": {
+    "format": {"const": 1},
+    "signature": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9:-]* @ [A-Za-z0-9_.][A-Za-z0-9_./-]*$",
+      "description": "<code> @ <where> (design §2): engine-error @ <module>.<function>; <engine code> @ <step|start>; escalate:env-problem @ <situation>[/<step>]; leader-failed:<code>[:<detail>] @ <situation>[/<step>]; sprint-engine-error @ <module>.<function>."
+    },
+    "slug": {"type": "string", "pattern": "^[a-z0-9][a-z0-9.-]{0,90}-[0-9a-f]{8}$"},
+    "kind": {"enum": ["defect", "suspect"]},
+    "first_seen": {"$ref": "#/$defs/ts"},
+    "last_seen": {"$ref": "#/$defs/ts"},
+    "count": {"type": "integer", "minimum": 1, "description": "Every occurrence, also those the list below no longer holds."},
+    "evidence": {
+      "anyOf": [
+        {"type": "null"},
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["occurrence", "files", "withheld"],
+          "properties": {
+            "occurrence": {"type": "integer", "minimum": 1},
+            "files": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["path", "source", "bytes", "redacted"],
+                "properties": {
+                  "path": {"type": "string", "description": "Relative to evidence/."},
+                  "source": {"type": "string"},
+                  "bytes": {"type": "integer", "minimum": 0},
+                  "redacted": {"type": "integer", "minimum": 0, "description": "Values masked plus lines the gate scanner still reported (removed whole)."}
+                }
+              }
+            },
+            "withheld": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["source", "why"],
+                "properties": {
+                  "source": {"type": "string"},
+                  "why": {"enum": ["size-cap", "too-large", "unreadable", "scanner-unavailable"]}
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "occurrences": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 50,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["n", "at", "recorded", "repo", "issue", "tracker", "step", "reason", "detail", "escalate_reason",
+                     "leader_failed", "engine", "records", "note", "log"],
+        "properties": {
+          "n": {"type": "integer", "minimum": 1},
+          "at": {"$ref": "#/$defs/ts", "description": "The stop's own time (state.stop.at); with repo, issue and tracker the key that keeps one stop from counting twice."},
+          "recorded": {"$ref": "#/$defs/ts"},
+          "repo": {"type": "string", "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$"},
+          "issue": {"anyOf": [{"type": "null"}, {"type": "integer", "minimum": 1}]},
+          "tracker": {"anyOf": [{"type": "null"}, {"type": "integer", "minimum": 1}]},
+          "step": {"type": ["string", "null"]},
+          "reason": {"type": ["string", "null"]},
+          "detail": {"type": ["string", "null"]},
+          "escalate_reason": {"type": ["string", "null"]},
+          "leader_failed": {
+            "anyOf": [
+              {"type": "null"},
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["code", "detail"],
+                "properties": {"code": {"type": ["string", "null"]}, "detail": {"type": ["string", "null"]}}
+              }
+            ]
+          },
+          "engine": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["version", "commit", "dirty", "fixes"],
+            "properties": {
+              "version": {"type": "string"},
+              "commit": {"anyOf": [{"type": "null"}, {"type": "string", "pattern": "^[0-9a-f]{40}([0-9a-f]{24})?$"}]},
+              "dirty": {"type": ["boolean", "null"]},
+              "fixes": {"type": "array", "items": {"type": "string"}, "description": "Ids of the fixed-defects list the occurring engine shipped (retro judges with them)."}
+            }
+          },
+          "records": {"type": ["string", "null"], "description": "The Issue's (or sprint's) records folder; records cleanup never removes one an incident names."},
+          "note": {"type": ["string", "null"], "description": "The stop note, secrets removed, at most 1000 characters."},
+          "log": {"type": "array", "maxItems": 8, "items": {"type": "string"}, "description": "log.jsonl lines around the stop line, secrets removed."}
+        }
+      }
+    }
+  },
+  "$defs": {
+    "ts": {"type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]+)?Z$"}
+  }
+}

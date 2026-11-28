@@ -1,0 +1,277 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "gld/repo-config",
+  "title": "Repository settings — .claude/guild/config.json (design §7.10, §7.4, §7.6, §7.11, §7.12 S8)",
+  "description": "Repository knowledge the engine passes through without interpreting (§1): named run commands, toolchain-prepare commands, path rules, registry hosts, cache env, repo secret paths, worktree-prepare copies, approved sandbox exceptions, the quarantine list. Built by the conversion script (U16) / init, approved and committed by a human. A control file (§7.6): the engine reads it only from the recorded base SHA blob (§7.12 S3). No role or leader can add a command string (§7.10).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["format", "commands"],
+  "properties": {
+    "format": {"const": 1},
+    "commands": {
+      "type": "object",
+      "description": "Named commands — the only thing a `run:` step can reference. Plugin check scripts appear as {\"plugin\": <name>} entries (§7.10).",
+      "propertyNames": {"$ref": "#/$defs/name"},
+      "minProperties": 1,
+      "additionalProperties": {
+        "oneOf": [
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["cmd"],
+            "properties": {
+              "cmd": {"type": "string", "minLength": 1, "description": "Shell command run with `srt -c` in the Issue worktree (developer's rendered boundary, §7.1). Must not modify the tree (--ci, --no-update-goldens, …; §4.4-2)."},
+              "timeout_min": {"$ref": "#/$defs/timeout"},
+              "description": {"type": "string"}
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["plugin"],
+            "properties": {
+              "plugin": {"enum": ["ac-format", "ac-coverage", "verify-gate", "repro-red", "safety-net-proof", "verification-frozen", "no-production-change"], "description": "A plugin check script, run from the plugin install path (§7.6). The last four (stage 3) are engine-judged runs without a script (runner.py)."},
+              "timeout_min": {"$ref": "#/$defs/timeout"},
+              "description": {"type": "string"}
+            }
+          }
+        ]
+      }
+    },
+    "run_timeout_min": {"$ref": "#/$defs/timeout", "description": "Default per-command time limit (provisional 30, §7.10)."},
+    "toolchain_prepare": {
+      "type": "array",
+      "description": "Toolchain preparation before the first run of an engine start (§7.12 S8, P3-Z human decision 4), in order. A `sync` entry is the ONLY thing done outside the sandbox: a file copy from a trusted, read-only source (the user's SDK) into the repository's Guild cache — links are copied as links, never followed; files that differ from the source are rewritten and files the source does not have are removed, every engine start. Nothing outside the sandbox ever executes a file a role or a run can write. A `cmd` entry (e.g. `flutter precache`) runs INSIDE srt with the run boundary in the Issue worktree, like a named command; the network it needs must be in registry_hosts. Never a package manager install.",
+      "items": {
+        "oneOf": [
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["name", "cmd"],
+            "properties": {
+              "name": {"$ref": "#/$defs/name"},
+              "cmd": {"type": "string", "minLength": 1, "description": "Shell command run with `srt -c` (the run boundary, cwd = the Issue worktree)."},
+              "timeout_min": {"$ref": "#/$defs/timeout"},
+              "description": {"type": "string"}
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["name", "sync"],
+            "properties": {
+              "name": {"$ref": "#/$defs/name"},
+              "sync": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["from", "to"],
+                "properties": {
+                  "from": {
+                    "type": "array", "minItems": 1, "maxItems": 8, "uniqueItems": true,
+                    "description": "Source folder candidates, the first existing real folder wins (none → the prepare fails, the Issue stops). An absolute path or `{home}/…`; never inside the engine home, the Guild cache, a worktree or a temp folder (the loader / runner refuse it).",
+                    "items": {"$ref": "#/$defs/syncsource"}
+                  },
+                  "to": {"$ref": "#/$defs/cacherel", "description": "Destination inside the repository's Guild cache ({cache}/<to>)."}
+                }
+              },
+              "description": {"type": "string"}
+            }
+          }
+        ]
+      }
+    },
+    "path_rules": {
+      "type": "array",
+      "description": "Path rule kinds (§7.4, §7.11): verification paths (tests, goldens, test config, runner wrappers, CI config, command definition files — I11 b), risk areas (→ a gate step), irreversible-change kinds (→ a handling level).",
+      "items": {
+        "oneOf": [
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["kind", "globs"],
+            "properties": {
+              "kind": {"const": "verification"},
+              "category": {"enum": ["test", "golden", "comparison-config", "runner", "ci"], "description": "Stage 3 (E33), optional: golden / comparison-config paths feed the baseline-image ledger."},
+              "globs": {"$ref": "#/$defs/globs"},
+              "note": {"type": "string"}
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["kind", "area", "gate", "globs"],
+            "properties": {
+              "kind": {"const": "risk"},
+              "area": {"$ref": "#/$defs/name", "description": "e.g. security, auth, data-migration."},
+              "gate": {"$ref": "#/$defs/name", "description": "Plugin-fixed gate step definition to require (e.g. security-review)."},
+              "globs": {"$ref": "#/$defs/globs"},
+              "note": {"type": "string"}
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["kind", "category", "globs"],
+            "properties": {
+              "kind": {"const": "irreversible"},
+              "category": {"enum": ["external-side-effect", "hard-to-revert", "human-executed"]},
+              "level": {"enum": ["human-decision", "notify", "proceed"], "description": "Override of the §7.4 default level. Lowering needs human approval (evolve)."},
+              "globs": {"$ref": "#/$defs/globs"},
+              "note": {"type": "string"}
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["kind", "globs"],
+            "description": "Stage 3 (E4): test source files only — no golden, snapshot or comparison config. Fills {path:test-code} of a template.",
+            "properties": {
+              "kind": {"const": "test-code"},
+              "globs": {"$ref": "#/$defs/someglobs"},
+              "note": {"type": "string"}
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["kind", "globs"],
+            "description": "Stage 3 (E4): the naming rule of safety-net-only test files. Fills {path:safety-net} of a template.",
+            "properties": {
+              "kind": {"const": "safety-net"},
+              "globs": {"$ref": "#/$defs/someglobs"},
+              "note": {"type": "string"}
+            }
+          }
+        ]
+      }
+    },
+    "irreversible_levels": {
+      "type": "object",
+      "description": "Stage 3 (E22): the category's level when a path rule has none (default: defaults.IRREVERSIBLE_DEFAULT_LEVEL). A lowered level is shown in every PR it applies to (E24).",
+      "propertyNames": {"enum": ["external-side-effect", "hard-to-revert", "human-executed"]},
+      "additionalProperties": {"enum": ["human-decision", "notify", "proceed"]}
+    },
+    "followups_dry_run": {"type": "boolean", "description": "Stage 3 (user decision A4): true = create-followups only records what it would write (no Issue, comment or label). Absent = false = really create."},
+    "registry_hosts": {
+      "type": "array",
+      "description": "The only network the sandbox allows (§7.6). No GitHub domain unless a human approved it for git dependencies.",
+      "items": {"type": "string", "pattern": "^(\\*\\.)?[A-Za-z0-9-]+(\\.[A-Za-z0-9-]+)+$"},
+      "uniqueItems": true
+    },
+    "cache_env": {
+      "type": "object",
+      "description": "Cache-path env vars pointed at the repo's Guild cache (§7.6, §7.12 S8). Values may use the placeholder {cache}. Path values only — literal non-path values go to run_env.",
+      "propertyNames": {"type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"},
+      "additionalProperties": {"type": "string", "minLength": 1}
+    },
+    "run_env": {
+      "type": "object",
+      "description": "Literal, non-path env vars for runs (P3-0), e.g. TURBO_TELEMETRY_DISABLED=1. No placeholder, no control characters. Names: [A-Z_][A-Z0-9_]*, none that looks secret (TOKEN, SECRET, KEY, PASSWORD, PASSWD, CREDENTIAL), none the engine sets or scrubs (defaults.RUN_ENV_RESERVED / RUN_ENV_RESERVED_PREFIXES).",
+      "propertyNames": {"$ref": "#/$defs/runenvname"},
+      "additionalProperties": {"type": "string", "pattern": "^[^{}\\x00-\\x1f\\x7f]*$"}
+    },
+    "secret_paths": {
+      "$ref": "#/$defs/globs",
+      "description": "Repository secret paths, denied for reading in the main checkout and every worktree (§7.6). Defaults .env*, *.pem, *.p12."
+    },
+    "worktree_prepare": {
+      "type": "array",
+      "description": "Files copied from the main checkout into the Issue worktree (ignored generated files etc., §7.3). Copy only — no command. Control-file patterns are never copied; links are not followed (§7.12 S2, S6).",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["copy"],
+        "properties": {"copy": {"$ref": "#/$defs/relglob"}, "note": {"type": "string"}}
+      }
+    },
+    "sandbox_exceptions": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Exceptions a human approved during the base-green check (§7.10). Never the user's home toolchain/cache paths (§7.12 S8).",
+      "properties": {
+        "allow_write": {
+          "type": "array",
+          "description": "Extra write roots for the sandbox (P3-0). Each entry is an absolute path without globs, or exactly the token {user_tmp} (macOS `getconf DARWIN_USER_TEMP_DIR`, resolved by the engine — unresolvable → refused). Never a component listed in defaults.ALLOW_WRITE_FORBIDDEN_COMPONENTS (git internals, control files, home secrets); the loader also refuses the root, the home folder, its ancestors and home toolchain/cache paths (§7.12 S8).",
+          "items": {"$ref": "#/$defs/allowwrite"},
+          "uniqueItems": true
+        },
+        "allow_hosts": {"type": "array", "items": {"type": "string", "pattern": "^(\\*\\.)?[A-Za-z0-9-]+(\\.[A-Za-z0-9-]+)+$"}, "uniqueItems": true},
+        "allow_local_binding": {"type": "boolean", "description": "Allow binding local ports (srt network.allowLocalBinding). Absent = false."},
+        "weaker_network_isolation": {"type": "boolean", "description": "Open the macOS trust service for TLS (srt enableWeakerNetworkIsolation). Absent = false."},
+        "note": {"type": "string"}
+      }
+    },
+    "quarantine": {
+      "type": "array",
+      "description": "Tests that were red before the change, registered by a human (§7.10). The commands themselves exclude them; the engine still only reads exit codes.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["test", "note"],
+        "properties": {"test": {"type": "string", "minLength": 1}, "note": {"type": "string"}, "added": {"type": "string"}}
+      }
+    },
+    "not_checked_locally": {
+      "type": "array",
+      "description": "CI checks that cannot run locally (secrets, Linux-only, deploy) — listed in the PR body (§7.2-2).",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "note"],
+        "properties": {"name": {"type": "string", "minLength": 1}, "note": {"type": "string"}}
+      }
+    },
+    "allowed_models": {"type": "array", "items": {"enum": ["haiku", "sonnet", "opus", "fable"]}, "uniqueItems": true, "description": "§7.8 allow-list override (default: no Fable)."},
+    "allowed_efforts": {"type": "array", "items": {"enum": ["low", "medium", "high", "xhigh", "max"]}, "uniqueItems": true, "description": "§7.8 allow-list override (default: no max)."},
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Provenance (conversion script, §9.2 stage 0).",
+      "properties": {"converted_from": {"type": "string"}, "at": {"type": "string"}, "by": {"type": "string"}}
+    }
+  },
+  "$defs": {
+    "name": {"type": "string", "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*$", "maxLength": 64},
+    "timeout": {"type": "integer", "minimum": 1, "maximum": 600},
+    "relglob": {"type": "string", "minLength": 1, "pattern": "^(?!/)(?!.*(^|/)\\.\\.(/|$))\\S+$"},
+    "globs": {"type": "array", "items": {"$ref": "#/$defs/relglob"}, "uniqueItems": true},
+    "someglobs": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/relglob"}, "uniqueItems": true},
+    "syncsource": {
+      "type": "string",
+      "allOf": [
+        {"pattern": "^(\\{home\\}|/[A-Za-z0-9._@+-]+)(/[A-Za-z0-9._@+-]+)*$"},
+        {"not": {"pattern": "(^|/)\\.\\.?(/|$)"}}
+      ]
+    },
+    "cacherel": {
+      "type": "string",
+      "allOf": [
+        {"pattern": "^[A-Za-z0-9._@+-]+(/[A-Za-z0-9._@+-]+)*$"},
+        {"not": {"pattern": "(^|/)\\.\\.?(/|$)"}},
+        {"not": {"pattern": "(?i)(^|/)(\\.git|\\.claude)(/|$)"}}
+      ]
+    },
+    "allowwrite": {
+      "type": "string",
+      "anyOf": [
+        {"const": "{user_tmp}"},
+        {
+          "allOf": [
+            {"pattern": "^/[^\\s{}~$*?\\[\\]]+$"},
+            {"not": {"pattern": "//"}},
+            {"not": {"pattern": "(?i)(^|/)(\\.|\\.\\.|\\.git|\\.claude|CLAUDE\\.md|CLAUDE\\.local\\.md|AGENTS\\.md|\\.ssh|\\.aws|\\.azure|\\.gnupg|\\.kube|\\.docker|\\.npmrc|\\.netrc|\\.git-credentials|gcloud|gh|Keychains)(/|$)"}}
+          ]
+        }
+      ]
+    },
+    "runenvname": {
+      "type": "string",
+      "allOf": [
+        {"pattern": "^[A-Z_][A-Z0-9_]*$"},
+        {"not": {"pattern": "(TOKEN|SECRET|KEY|PASSWORD|PASSWD|CREDENTIAL)"}},
+        {"not": {"pattern": "^(PATH|HOME|TMPDIR|SHELL|USER|LOGNAME|BASH_MAX_TIMEOUT_MS|BASH_ENV|ENV|IFS|PS4|PROMPT_COMMAND)$"}},
+        {"not": {"pattern": "^(GIT_|SSH_|CLAUDE|LD_|DYLD_|GH_|GITHUB_|ANTHROPIC_|AWS_|GOOGLE_|GCLOUD_|CLOUDSDK_|AZURE_)"}}
+      ]
+    }
+  }
+}

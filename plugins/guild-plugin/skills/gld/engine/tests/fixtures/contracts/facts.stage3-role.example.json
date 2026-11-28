@@ -1,0 +1,116 @@
+{
+  "format": 1,
+  "issue": 42,
+  "step": "fix",
+  "attempt": 1,
+  "kind": "role",
+  "started_at": "2026-11-23T01:02:03Z",
+  "ended_at": "2026-11-23T01:02:03Z",
+  "duration_s": 12.5,
+  "base_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "merge_base": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "start_head": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "end_head": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "start_tree": {
+    "clean": true,
+    "dirty_files": []
+  },
+  "end_tree": {
+    "clean": true,
+    "dirty_files": []
+  },
+  "exit_code": 0,
+  "changed_files": [
+    {
+      "path": "src/a.py",
+      "change": "modified",
+      "from": null,
+      "where": "committed"
+    },
+    {
+      "path": "src/b.py",
+      "change": "renamed",
+      "from": "src/old_b.py",
+      "where": "committed"
+    }
+  ],
+  "commits": [],
+  "outputs": [],
+  "control_files": {
+    "ok": true,
+    "changed": []
+  },
+  "ownership": {
+    "ok": true,
+    "foreign": []
+  },
+  "judge_writes_outside": null,
+  "reentry": null,
+  "session": {
+    "session_id": "s",
+    "cli_version": "2.1.323",
+    "init": {
+      "ok": true,
+      "mismatches": []
+    },
+    "end": "completed",
+    "structured_output": true,
+    "stream_file": "stream.jsonl",
+    "model": "opus",
+    "effort": "xhigh",
+    "escalation": {
+      "base": {
+        "model": "sonnet",
+        "effort": "high",
+        "layer": "plugin-default"
+      },
+      "returns": 3,
+      "raised": {
+        "effort": [
+          "high",
+          "xhigh"
+        ],
+        "model": [
+          "sonnet",
+          "opus"
+        ]
+      },
+      "capped": false
+    },
+    "cost_usd": 1.2,
+    "cache_read_input_tokens": 1,
+    "cache_creation_input_tokens": 1,
+    "num_turns": 3,
+    "permission_denials": []
+  },
+  "run": null,
+  "outcome": {
+    "status": "done",
+    "code": null,
+    "detail": null,
+    "stop": null
+  },
+  "warnings": [],
+  "attempt_files": [
+    {
+      "path": "src/a.py",
+      "old_blob": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "new_blob": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    },
+    {
+      "path": "test/goldens/a.png",
+      "old_blob": "cccccccccccccccccccccccccccccccccccccccc",
+      "new_blob": "dddddddddddddddddddddddddddddddddddddddd"
+    }
+  ],
+  "golden": [
+    {
+      "row": "M",
+      "path": "test/goldens/a.png",
+      "from": null,
+      "old_blob": "cccccccccccccccccccccccccccccccccccccccc",
+      "new_blob": "dddddddddddddddddddddddddddddddddddddddd",
+      "reason": "bug-fix"
+    }
+  ]
+}

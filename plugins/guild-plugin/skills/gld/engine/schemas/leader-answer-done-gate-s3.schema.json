@@ -1,0 +1,211 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "gld/leader-answer-done-gate-s3",
+  "title": "Leader answer — done-gate (stage 3, scope §2.5, E18, E19)",
+  "description": "The stage-2 done-gate answer with `included_fixes` and the wider `discoveries`. approve needs no unmet AC, no include discovery, no out-of-scope fix, and at most FOLLOWUPS_MAX followups. A `manual` verdict carries `why_not_automated` (E5). ENUM TEMPLATE: values like \"{answers}\" are placeholders that schema.fill_enums replaces for each call (codes.LEADER_SCHEMA_TOKENS); an enum that comes out empty drops the nearest array or nullable property (read as [] / null). Keeps to type/properties/required/additionalProperties/items/enum (the CLI's structured-output subset). Rules a schema cannot say are checked by gxengine/leader.py (codes.LeaderFormatReason).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "answer",
+    "reason",
+    "step",
+    "note",
+    "recommendation",
+    "ac_verdicts",
+    "discoveries",
+    "included_fixes",
+    "summary"
+  ],
+  "properties": {
+    "answer": {
+      "enum": [
+        "{answers}"
+      ],
+      "description": "One of the answers the engine allows for this call (rendered per call). The engine acts on this field only."
+    },
+    "reason": {
+      "enum": [
+        "fits-template",
+        "analysis-gap",
+        "assumption-corrected",
+        "comment-no-effect",
+        "real-defect",
+        "upstream-gap",
+        "transient",
+        "env-problem",
+        "needs-human-decision",
+        "already-decided",
+        "acceptance-met",
+        "high-complexity",
+        "repeated-failure",
+        "other"
+      ],
+      "description": "Leader-decision reason code (§4.2, scope D20). Pick `other` only when no code fits."
+    },
+    "step": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "enum": [
+        "{rerun_steps}",
+        null
+      ],
+      "description": "The step to run again — set exactly when answer is rerun, otherwise null."
+    },
+    "note": {
+      "type": "string",
+      "description": "Free text for the next role (leader-decision.md), the human and evolve. The engine never branches on it."
+    },
+    "recommendation": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": false,
+      "required": [
+        "answer",
+        "step",
+        "note"
+      ],
+      "description": "Set exactly when answer is escalate: what you recommend the human answers (scope D15). Otherwise null.",
+      "properties": {
+        "answer": {
+          "enum": [
+            "{human_answers}"
+          ]
+        },
+        "step": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "enum": [
+            "{human_rerun_steps}",
+            null
+          ],
+          "description": "Set exactly when the recommended answer is rerun."
+        },
+        "note": {
+          "type": "string"
+        }
+      }
+    },
+    "ac_verdicts": {
+      "type": "array",
+      "description": "One entry per AC id, each exactly once.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "ac",
+          "status",
+          "evidence",
+          "why_not_automated"
+        ],
+        "properties": {
+          "ac": {
+            "type": "integer",
+            "enum": [
+              "{ac_ids}"
+            ]
+          },
+          "status": {
+            "enum": [
+              "met",
+              "unmet",
+              "manual"
+            ]
+          },
+          "evidence": {
+            "type": "string",
+            "description": "Where the evidence is (test, file, run). Shown in the PR body."
+          },
+          "why_not_automated": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Set (not blank) exactly when status is manual, otherwise null (E5): why no automated check proves this criterion; when the design documents proposed one (a test, a guard), why that proposal was not taken. Shown in the PR body."
+          }
+        }
+      }
+    },
+    "discoveries": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "disposition",
+          "title",
+          "duplicate_of"
+        ],
+        "properties": {
+          "id": {
+            "enum": [
+              "{discovery_ids}"
+            ]
+          },
+          "disposition": {
+            "enum": [
+              "{dispositions}"
+            ]
+          },
+          "title": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Title of the follow-up Issue — set exactly when disposition is followup."
+          },
+          "duplicate_of": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "enum": [
+              "{candidate_issues}",
+              null
+            ],
+            "description": "The candidate Issue this duplicates — set exactly when disposition is duplicate."
+          }
+        }
+      },
+      "description": "One entry per collected out-of-scope discovery D1..Dn, each exactly once (E19)."
+    },
+    "included_fixes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "verdict"
+        ],
+        "properties": {
+          "id": {
+            "enum": [
+              "{fix_ids}"
+            ]
+          },
+          "verdict": {
+            "enum": [
+              "keep",
+              "out-of-scope"
+            ]
+          }
+        }
+      },
+      "description": "One entry per out-of-scope fix F1..Fn the engine included because it blocked an AC (E18), each exactly once. approve needs every one keep."
+    },
+    "summary": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "What this change does to the code, from the diff: one to three lines, one sentence each, no verdict. The first thing a reviewer reads at the top of the pull request body (stage 4). approve needs one to three; any answer at most three, none blank."
+    }
+  }
+}

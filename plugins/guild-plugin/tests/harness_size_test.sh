@@ -27,7 +27,8 @@ has() { case "$2" in *"$3"*) ok "$1" ;; *) bad "$1" "[$3] not in [$2]" ;; esac; 
 lacks() { case "$2" in *"$3"*) bad "$1" "[$3] unexpectedly in [$2]" ;; *) ok "$1" ;; esac; }
 
 S() { "$PY" "$SIZE" --root "$R" "$@"; }
-R="$WORK/repo"; mkdir -p "$R/.git" "$R/.claude/agents" "$R/.claude/guild/knowledge/facts/ui"
+R="$WORK/repo"; K="$R/.claude/guild/knowledge"   # rename-exception: K2 shared knowledge (both channels, promote: literal)
+mkdir -p "$R/.git" "$R/.claude/agents" "$K/facts/ui"
 # agent <role> <bullet-length…> — a persona with a central region and one habit per length.
 agent() {
   "$PY" - "$R/.claude/agents/$1.md" "${@:2}" <<'PYA'
@@ -103,16 +104,16 @@ eq "no marker → not measured" "$(S)" "harness: within bars"
 rm "$R/.claude/agents/old.md"
 
 echo "== knowledge bars"
-chars "$R/.claude/guild/knowledge/index.md" 4000
+chars "$K/index.md" 4000
 eq "an index of 4000 characters is within the bar" "$(S)" "harness: within bars"
-chars "$R/.claude/guild/knowledge/index.md" 4001
+chars "$K/index.md" 4001
 has "an index of 4001 characters is reported" "$(S)" "index: chars=4001 (bar 4000)"
-chars "$R/.claude/guild/knowledge/facts/a11y.md" 12000
+chars "$K/facts/a11y.md" 12000
 lacks "a fact of 12000 characters is within the bar" "$(S)" "fact a11y.md"
-chars "$R/.claude/guild/knowledge/facts/ui/deep.md" 12001
+chars "$K/facts/ui/deep.md" 12001
 has "a nested fact over the bar is reported with its path" "$(S)" "fact facts/ui/deep.md: chars=12001 (bar 12000)"
-printf 'Hello\n' > "$R/.claude/guild/knowledge/facts/en.md"
-"$PY" -c 'open("'"$R"'/.claude/guild/knowledge/facts/bytes.md","w",encoding="utf-8").write("한"*5000)'
+printf 'Hello\n' > "$K/facts/en.md"
+"$PY" -c 'open("'"$K"'/facts/bytes.md","w",encoding="utf-8").write("한"*5000)'
 lacks "characters, not bytes (5000 Hangul = 15000 bytes)" "$(S)" "bytes.md"
 
 echo "== furthest over first"

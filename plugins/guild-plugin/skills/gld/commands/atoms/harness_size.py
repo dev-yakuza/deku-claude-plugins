@@ -18,8 +18,9 @@ The bars (design/guild/10-ledger-hygiene.md D11):
     read on every spawn of that role: more than HABITS_MAX bullets, more than HABITS_CHARS
     characters, or one bullet longer than HABIT_LONG (twice the 400-character bar evolve applies
     to a new or rewritten habit).
-  • index — `.claude/guild/knowledge/index.md`, loaded by every stage: more than INDEX_CHARS.
-  • fact — any `.claude/guild/knowledge/facts/**/*.md`: more than FACT_CHARS.
+  • index — `<KNOWLEDGE>/index.md`, loaded by every stage: more than INDEX_CHARS.
+  • fact — any `<KNOWLEDGE>/facts/**/*.md`: more than FACT_CHARS.
+  KNOWLEDGE is the ⑥ folder both channels share (readiness T2, R4-13 K2 — the same path in both channels).
 
 Exit: 0 (also when nothing exists yet) · 64 usage.
 """
@@ -33,6 +34,7 @@ HABITS_MARKER = "<!-- guild:persona:habits -->"
 HABITS_MAX = 5
 HABITS_CHARS = 2000
 HABIT_LONG = 800
+KNOWLEDGE = ".claude/guild/knowledge"   # promote: literal  rename-exception: K2 shared knowledge
 INDEX_CHARS = 4000
 FACT_CHARS = 12000
 
@@ -106,7 +108,7 @@ def check(root):
             lines.append((over, "habits %s: count=%d chars=%d longest=%d (bars %d / %d / %d)" % (
                 os.path.splitext(os.path.basename(path))[0], n, chars, longest,
                 HABITS_MAX, HABITS_CHARS, HABIT_LONG)))
-    kdir = os.path.join(root, ".claude", "guild", "knowledge")
+    kdir = os.path.join(root, *KNOWLEDGE.split("/"))
     index = text(os.path.join(kdir, "index.md")) if os.path.exists(os.path.join(kdir, "index.md")) else None
     if index is not None and len(index) > INDEX_CHARS:
         lines.append((len(index) / INDEX_CHARS, "index: chars=%d (bar %d)" % (len(index), INDEX_CHARS)))
